@@ -14,8 +14,8 @@ import { atBoundary, reconcile, restartRemaining, recordOf } from '../engine/met
 import { writeProject, readProject, projectName, ProjectError, blobSource, newerWords } from '../engine/methodos/project.js';
 import { fmtBytes } from '../engine/words.js';
 import { outputStore } from './outputs.js';
-import { stepAt, currentInput, startFiles, keptBy, keptWords, distinct, projectWords } from './seams.js';
-import { regionsSettled, notReviewed, relateProblem, unexported, writesItself } from '../engine/methodos/containment.js';
+import { stepAt, currentInput, startFiles, keptBy, keptWords, distinct, projectWords, notKept } from './seams.js';
+import { regionsSettled, notReviewed, relateProblem, unexported, reviewDiffers, writesItself } from '../engine/methodos/containment.js';
 import { stepMark, whereWords, lower } from './layout.js';
 import { whyWords, shareLink, ENROL, WorkbenchError, capWords } from '../engine/workbench.js';
 import { stateOf, fromSnapshot } from './whg.js';
@@ -397,7 +397,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
         const refs = await refsOf(given, 'files');
         const was = w.files[key];
         if (was && !sameRefs(was, refs)) {
-          say(`This run is not counted as the step “${s.title}”: ${names(refs)} is not ${names(was)}, ${words} this workflow recorded (the size or SHA-256 differs). Match with ${names(was)} as it was${runner.forgettable(w, key) ? `, or forget it (“Forget ${names(was)}”, below the steps) to match with another` : ''}.`, true); render(false); return;
+          say(`This run is not counted as the step “${s.title}”: ${names(refs)} is not ${names(was)}, ${words} this workflow recorded (the size or SHA-256 differs). ${s.op === 'match' ? `Match with ${names(was)} as it was` : `Choose ${names(was)} in step 1, as it was, and run it again`}${runner.forgettable(w, key) ? `, or forget it (“Forget ${names(was)}”, below the steps) to match with another` : ''}.`, true); render(false); return;
         }
         w = runner.supply(w, recipeOf(w), key, refs);
         late.push(...refs.map((r, i) => [r, given[i]]));
@@ -429,7 +429,12 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       w = w.status === 'waiting' && w.current === s.id ? runner.resume(w, s.id) : runner.next(w);
       if (w.current !== s.id) return;
       wf = w; active = { id: s.id, op: run.op };
-      for (const [r, f] of late) { outs.hold(r, f); await outs.keepOwn(r, f); }
+      // Each kept, or said not to be, by name, beside the table's note (keepOwn).
+      for (const [r, f] of late) {
+        outs.hold(r, f);
+        const how = await outs.keepOwn(r, f);
+        ownMissed = notKept(ownMissed, [r], how === 'short' || how === 'failed' ? [{ name: r.name, sha256: r.sha256, why: how }] : []);
+      }
       say(null); render(false);
     });
   }
@@ -526,9 +531,9 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       const i = chosenRefs.findIndex((x) => x.sha256 === r.sha256);
       if (i < 0) continue;
       const how = await outs.keepOwn(r, files[i]);
-      if (how === 'short' || how === 'failed') missed.push({ name: r.name, why: how });
+      if (how === 'short' || how === 'failed') missed.push({ name: r.name, sha256: r.sha256, why: how });
     }
-    ownMissed = missed;
+    ownMissed = notKept(ownMissed, start, missed);   // a note for each file, the others' kept
     showKept();
   }
   let ownMissed = [];   // the user's own files that could not be kept in this browser, and why
@@ -539,7 +544,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
    * before the workflow's copy is let go: one copy at a time, never two.
    */
   async function handOver(state) {
-    const held = startFiles(state).map((r) => outs.held(r));
+    // The file(s) the workflow began with, step 1's: not those chosen at a step (a match's other dataset), which would be taken for one choice with them.
+    const held = (state?.files?.[fileKey(recipeOf(state) || { files: {} })] || []).map((r) => outs.held(r));
     if (held.length && held.every(Boolean)) { try { await page.letGo?.(held); } catch { /* not kept: the user chooses it again */ } }
   }
 
@@ -563,6 +569,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     if (s.op === 'review') {
       const r = page.review();
       if (!r) throw new Error('There is no review open: look the places up, and decide on the candidates, first.');
+      const why = notTheMatch(s, r);
+      if (why) throw new Error(`${why} ${reviewInput(s) ? `Open the review the match made (“Open the review (${reviewInput(s).name})”), and decide there.` : 'Do the match again with the files it took.'}`);
       return { work: await refsHeld([new File([r.text], r.name, { type: 'application/json' })], 'work.krisis') };
     }
     if (s.op === 'place') {
@@ -711,6 +719,21 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     const files = main?.map(heldFor);
     if (files?.length && files.every(Boolean)) page.choose(files);
   });
+  /**
+   * Words for a review open (page.review()) that is not of the files the match before step `s` took (its
+   * dataset and the other dataset recorded: containment.js reviewDiffers), or null. Only after a match: a
+   * lookup's review has no other dataset to be mistaken for.
+   */
+  function notTheMatch(s, r) {
+    let made;
+    try { const [id] = String(s.from.work || '').split('.'); made = wf.steps.find((x) => x.id === id); } catch { made = null; }
+    if (!made || made.op !== 'match' || made.state !== 'done') return null;
+    let work;
+    try { work = JSON.parse(r.text); } catch { return 'The review open cannot be read.'; }
+    let inputs;
+    try { inputs = runner.inputsOf(wf, made.id); } catch { return null; }
+    return reviewDiffers(work, { subjects: inputs.subjects, others: inputs.others });
+  }
   /** The work file the review step at hand takes, kept in this browser, or null. */
   function reviewInput(s = wf && !changed ? atStep() : null) {
     if (!s || s.op !== 'review' || !['pending', 'waiting'].includes(s.state)) return null;
@@ -763,7 +786,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       // Turned on: the user's own file, held for the tab, is kept from now as the steps' files are.
       if (on && wf) {
         const missed = [];
-        for (const r of startFiles(wf)) { const f = outs.held(r); if (f) { const how = await outs.keepOwn(r, f); if (how === 'short' || how === 'failed') missed.push({ name: r.name, why: how }); } }
+        for (const r of startFiles(wf)) { const f = outs.held(r); if (f) { const how = await outs.keepOwn(r, f); if (how === 'short' || how === 'failed') missed.push({ name: r.name, sha256: r.sha256, why: how }); } }
         ownMissed = missed;
       }
       if (!on) {
@@ -862,7 +885,9 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     useB.hidden = !usable || needStart; if (usable) useB.textContent = `Use ${names(usable)}${fromWhere(wf, s, usable)}`;
     const partial = (s?.state === 'failed' || s?.state === 'cancelled') && s.partial ? Object.values(s.partial).flat()[0] : null;
     reopenB.hidden = !partial;
-    const toReview = !partial && reviewInput(s) && !page.reviewShown?.() ? reviewInput(s) : null;
+    // Offered when the review is put away, or the one open is not of the match the workflow recorded.
+    const openNow = page.review?.();
+    const toReview = !partial && reviewInput(s) && (!page.reviewShown?.() || (openNow && notTheMatch(s, openNow))) ? reviewInput(s) : null;
     reviewB.hidden = !toReview;
     if (toReview) reviewB.textContent = `Open the review (${toReview.name})`;
     if (partial) reopenB.textContent = heldFor(partial) ? `Reopen ${partial.name}` : `Choose ${partial.name} again`;
@@ -914,7 +939,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     });
   }
   /** What a step done with a report found (runner.complete's findings). */
-  const findingsWords = (f) => `Done, with a report: ${f.words}${f.errors ? ` (${f.errors} ${f.errors === 1 ? 'problem' : 'problems'})` : ''} This does not stop the workflow.`;
+  const findingsWords = (f) => `Done, with a report: ${f.words.trim().replace(/[.]+$/, '')}${f.errors ? ` (${f.errors} ${f.errors === 1 ? 'problem' : 'problems'})` : ''}. This does not stop the workflow.`;
   const pendingNotes = (state) => (state ? (!RECIPES[state.recipe.key] ? [] : state.steps.filter((s) => s.unavailable).map((s) => plan(state.recipe.key, state.answers).notes[plan(state.recipe.key, state.answers).unavailable.indexOf(s.id)]).filter(Boolean))
     : plan(pending.key, pending.answers).notes);
 

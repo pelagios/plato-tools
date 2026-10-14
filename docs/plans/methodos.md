@@ -425,7 +425,7 @@ written now; the rest wait on a branch.
 |---|---|---|
 | **Publish a dataset** | Elenchos → Agora report → Agora mint → Agora site → Agora w3id | Nothing: Agora's card already lists it "in order" |
 | **Release a new version** | Elenchos → Mneme against the previous release → Agora mint with `--previous` → site | Nothing |
-| **Match two datasets** | Hermes columns → Elenchos → Metaphrasis (your table) → Krisis match (the other dataset chosen there) → Elenchos on the other → review → apply → Elenchos → Mneme (when added to your dataset) → write out → Publish (if publishing) | Built (14 October 2026): section 6.2 |
+| **Match two datasets** | Hermes columns → Elenchos → Metaphrasis (your table), or Elenchos (your PLATO dataset) → Krisis match (the other dataset chosen there) → Elenchos on the other → review → apply → Elenchos → Mneme (when added to your dataset) → write out → Publish (if publishing) | Built (14 October 2026): section 6.2 |
 | **Census figures as a Data Cube** | Hermes columns → Arithmos (convert, cube) → `datacube` check → Publish | Nothing |
 | **Places from an edition (TEI)** | Elenchos → Hermes TEI → Krisis lookup → review → apply → Chora (if drawing) → Elenchos → Mneme → write out → Publish (if publishing) | Built (phase 5, 12 October 2026): section 6.1 |
 | **Places from Recogito** | Elenchos → Hermes annotations (+ georeferenced regions) → Krisis lookup → review → apply → Chora (if drawing) → Elenchos → Mneme → write out → Publish (if publishing) | Built (phase 5, 12 October 2026): section 6.1 |
@@ -483,18 +483,21 @@ images placed on a map"), so a georeference for another map is not silent.
 *14 October 2026 (plan #34, item 4).* `src/engine/methodos/recipes/match-two-datasets.js`. Stephen's decisions
 of 14 October 2026, as built:
 
-1. *The inputs.* Your table, the dataset the answers are about, is read as Map your data reads it: its
-   columns matched, checked, made PLATO JSON under the base address (asked, optional, through the shared
-   field). The other dataset goes straight to the match, in any format the tools read; its places must have
+1. *The inputs.* Your dataset, the one the answers are about, is a table read as Map your data reads it (its
+   columns matched, checked, made PLATO JSON under the base address, asked, optional, through the shared
+   field), or a dataset already in a PLATO format, checked and taken as it is (converted first only as
+   needed). The other dataset goes straight to the match, in any format the tools read; its places must have
    web addresses of their own, which the recipe's `cannot` says. The interview routes "A list of place names"
-   with "A match of two datasets" to it. (A TEI edition or Recogito export as your dataset: later.)
+   and "A dataset already in a PLATO format" with "A match of two datasets" to it. (A TEI edition or
+   Recogito export as your dataset: later.)
 2. *The other dataset is chosen at the match,* through Krisis's "Match with another dataset…": a file chosen
    late (`late: true`), which the workflow begins without, the match refused in words until it is chosen,
    recorded by name, size and SHA-256, and checked by them from then on: a match on another file is not the
    step's. The tracker says "The other dataset: not yet chosen" from the start.
 3. *One question:* "Add the decisions to your dataset, or keep them in a file of their own about it?",
-   into the dataset by default. Into it, Mneme then shows the result only added to; a file of its own is the
-   attestation-centric document, not compared.
+   into the dataset by default. Into it, Mneme then compares the result with your dataset and reports what
+   was added, changed or lost (Krisis's Finish has already refused a result that is not only added to); a
+   file of its own is the attestation-centric document, not compared.
 4. *In the review,* a place of the other dataset already accepted for another of yours says "Already
    accepted for …", and never blocks.
 5. *Kind of place,* in the review only: a candidate of a conflicting kind is ranked after the others and

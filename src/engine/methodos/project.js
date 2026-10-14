@@ -46,7 +46,7 @@ import { Zip, ZipDeflate, Inflate } from 'fflate';
 import { Sha256 } from '../krisis/digest.js';
 import { readWork } from '../krisis/work.js';
 import { isRef } from './handoffs.js';
-import { exportRecord, importRecord } from './record.js';
+import { exportRecord, importRecord, filesWords } from './record.js';
 
 export const FORMAT = 'plato-tools-project';
 /** The major version of the format these tools write and read, and the minor they write. */
@@ -482,6 +482,11 @@ function checkParts(manifest, small) {
 /** What is said of a project of a later minor: opened, and what newer tools added is not read. */
 export const newerWords = (m) => `It was saved by newer PLATO tools (PLATO tools ${m.tools.version}, project format ${m.version}.${m.minor}); what they added is not read${m.skipped?.length ? ` (${m.skipped.map((p) => p.path).join(', ')})` : ''}, and is not kept if the project is saved again here.`;
 
+/** What one of the user's own files is to the workflow: the file it began with, or one chosen at a step (record.js filesWords). */
+function ownWords(record, sha256) {
+  const key = Object.entries(record?.files || {}).find(([, refs]) => refs.some((r) => r.sha256 === sha256))?.[0];
+  return key && record.late?.[key] ? filesWords(record, key) : 'the file the workflow began with';
+}
 /** The lines `plato-tools project info` prints of a project read: what it is, what it holds, and what it left out. */
 export function describe(read) {
   const { manifest: m, record } = read;
@@ -493,7 +498,7 @@ export function describe(read) {
     `Workflow: "${m.workflow.name}", following ${m.workflow.recipe.key} (version ${m.workflow.recipe.version}); ${done} of ${followed} steps done${at ? `, at "${at.title}"` : ', every step done'}.`,
     `Scope: ${record.scope ? 'kept with the workflow' : 'none'}.`,
     'Parts (each size and SHA-256 checked):',
-    ...m.parts.map((p) => `  ${p.path.padEnd(72)} ${String(p.size).padStart(12)} bytes  ${p.role}${p.role === 'file' ? `: ${p.name}${p.own ? ' (the file the workflow began with)' : ''}` : p.role === 'review' ? `: ${p.name}` : ''}`),
+    ...m.parts.map((p) => `  ${p.path.padEnd(72)} ${String(p.size).padStart(12)} bytes  ${p.role}${p.role === 'file' ? `: ${p.name}${p.own ? ` (${ownWords(record, p.sha256)})` : ''}` : p.role === 'review' ? `: ${p.name}` : ''}`),
   ];
   if (m.skipped?.length) lines.push('Optional parts these tools do not read:', ...m.skipped.map((p) => `  ${p.path} (${p.role})`));
   if (m.left?.length) lines.push('Named by the workflow but not in the project:', ...m.left.map((x) => `  ${x.name} (${x.size} bytes): ${x.why === 'left-out' ? 'left out when it was saved' : x.why === 'not-kept' ? 'not kept in the browser it was saved from' : x.why === 'too-large' ? 'left out to fit WHG\'s Workbench' : x.why}`));

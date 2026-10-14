@@ -47,9 +47,12 @@ const ROUTES = [
     { have, want: 'map', recipe, set: { target: 'plato-json' }, ask: ['will-draw', 'will-publish'], base: { when: 'will-publish', needed: false } },
     { have, want: 'publish', recipe, set: { target: 'plato-json', 'will-publish': true }, ask: ['will-draw'], base: { when: 'will-publish', needed: false } },
   ]),
-  // Two datasets: the user's table, read as Map your data reads it, matched with another (chosen at the match).
-  // The base address always, optional: the table's places have their addresses under it, which the decisions name.
-  { have: 'table', want: 'match', recipe: 'match-two-datasets', set: { target: 'plato-json' }, ask: ['into-dataset', 'will-publish'], base: { needed: false } },
+  // Two datasets: the user's table, read as Map your data reads it, or a dataset already in a PLATO format, taken as
+  // it is, matched with another (chosen at the match). `from-table` is the route's, never asked. The base address:
+  // for a table always, optional (its places have their addresses under it, which the decisions name); for a PLATO
+  // dataset, whose places have theirs, when publishing, as Publish a dataset asks it.
+  { have: 'table', want: 'match', recipe: 'match-two-datasets', set: { target: 'plato-json', 'from-table': true }, ask: ['into-dataset', 'will-publish'], base: { needed: false } },
+  { have: 'plato', want: 'match', recipe: 'match-two-datasets', set: { target: 'plato-json', 'from-table': false }, ask: ['into-dataset', 'will-publish'], base: { when: 'will-publish', needed: false } },
 ];
 
 // Answers that name no recipe yet: what to use meanwhile, by what is wanted, as the page's tool keys
@@ -59,7 +62,7 @@ const MEANWHILE = {
   publish: { why: 'Publish a dataset starts from a dataset in a PLATO format: bring yours into PLATO first.', tools: ['read', 'publish'] },
   version: { why: 'Release a new version is not a workflow yet.', tools: ['versions', 'publish'] },
   convert: { why: 'A conversion is one step, not a workflow.', tools: ['read', 'convert'] },
-  match: { why: 'Match two datasets starts from a table of places (a spreadsheet or CSV): Krisis matches any two datasets, one step at a time.', tools: ['match'] },
+  match: { why: 'Match two datasets starts from a table of places, or a dataset in a PLATO format: bring yours into PLATO first, or match it with Krisis, which matches any two datasets, one step at a time.', tools: ['read', 'match'] },
   cube: { why: 'Figures as a Data Cube is one tool, not a workflow.', tools: ['figures'] },
 };
 const TEXT = 'Places from a text is not available yet: finding the places named in a text is deferred.';

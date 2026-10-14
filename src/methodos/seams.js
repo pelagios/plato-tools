@@ -32,6 +32,12 @@ export function currentInput(state, s = stepAt(state)) {
 
 /** The files the workflow began with (step 1's, the user's own), as references. */
 export const startFiles = (state) => (state?.files ? Object.values(state.files).flat() : []);
+/**
+ * The notes of the user's own files that could not be kept in this browser (each { name, sha256, why }), once
+ * `refs` have been tried again with the results `missed`: theirs replaced, every other file's note kept, so
+ * that keeping the other dataset at the match does not clear what was said of the table.
+ */
+export const notKept = (notes, refs, missed) => [...(notes || []).filter((m) => !refs.some((r) => r.sha256 === m.sha256)), ...missed];
 /** Every file the workflow's steps made, as references. */
 export const madeBy = (state) => (state?.steps ? state.steps.flatMap((x) => [...Object.values(x.outputs || {}), ...Object.values(x.partial || {})].flat()) : []);
 /** Everything a workflow keeps in this browser: the user's own files it began with, and what its steps made. Let go together. */

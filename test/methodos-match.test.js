@@ -28,7 +28,7 @@ const TABLE = () => new File([fixture('match-mine.csv')], 'match-mine.csv');
 // The other dataset as the fixture has it: Kingsbury there already says it is the table's Kingsbury (under BASE).
 const otherDoc = () => JSON.parse(fixture('match-other.json').replaceAll('https://example.org/mine/', BASE));
 const OTHERS = (d = otherDoc(), name = 'match-other.json') => new File([JSON.stringify(d)], name);
-const ANSWERS = { 'into-dataset': true, 'will-publish': false, target: 'plato-json', base: BASE };
+const ANSWERS = { 'from-table': true, 'into-dataset': true, 'will-publish': false, target: 'plato-json', base: BASE };
 
 // ---- no network: fetch throws, here and in every test below ------------------------------------------------
 const realFetch = globalThis.fetch;
@@ -101,16 +101,19 @@ function decisions(doc) {
 // ---- the plan, the steps, the interview --------------------------------------------------------------------
 test('the recipe is well formed: the table read as Map your data reads it, the other dataset chosen late and matched as it is, checked after the match, its problems not stopping the workflow', () => {
   assert.equal(checkRecipe(M), M);
-  assert.deepEqual(M.steps.map((s) => s.id), ['columns', 'check', 'dataset', 'match', 'check-other', 'review', 'apply', 'again', 'compare', 'out', 'mint', 'report', 'site', 'w3id']);
-  // The table's three steps are Map your data's own, by operation, inputs and options.
+  assert.deepEqual(M.steps.map((s) => s.id), ['columns', 'check', 'dataset', 'check-a', 'match', 'check-other', 'review', 'apply', 'again', 'compare', 'out', 'mint', 'report', 'site', 'w3id']);
+  // The table's three steps are Map your data's own, by operation, inputs and options, run only from a table;
+  // a dataset already in a PLATO format is checked instead, and taken as it is.
   for (const id of ['columns', 'check', 'dataset']) {
     const [mine, map] = [M, MAP].map((r) => r.steps.find((s) => s.id === id));
-    assert.deepEqual([mine.op, mine.from, mine.options], [map.op, map.from, map.options], id);
+    assert.deepEqual([mine.op, mine.from, mine.options, mine.when], [map.op, map.from, map.options, 'from-table'], id);
   }
+  assert.deepEqual(M.steps.find((s) => s.id === 'check-a'), { id: 'check-a', op: 'check', title: 'Check your dataset', from: { files: '$files' }, when: '!from-table' });
+  for (const [id, slot] of [['match', 'subjects'], ['apply', 'subjects'], ['compare', 'earlier']]) assert.equal(M.steps.find((s) => s.id === id).from[slot], 'dataset.dataset ?? $files', id);
   // The other dataset: chosen late, straight to the match (no columns, no conversion), and checked with its problems reported.
   assert.equal(M.files.others.late, true);
   assert.equal(M.files.files.late, undefined, 'the table is chosen at the start (the presence: one file is)');
-  assert.deepEqual(M.steps.find((s) => s.id === 'match').from, { subjects: 'dataset.dataset', others: '$others' });
+  assert.deepEqual(M.steps.find((s) => s.id === 'match').from, { subjects: 'dataset.dataset ?? $files', others: '$others' });
   assert.deepEqual(M.steps.find((s) => s.id === 'check-other').options, { problems: 'report' });
   assert.equal(M.steps.find((s) => s.id === 'check').options, undefined, "the table's check stops for its problems, as Map your data's does");
   // The decisions: where, from the one question; the candidates exported only when publishing; compared only when added to the dataset.
@@ -151,16 +154,23 @@ test('the interview: a table of places, and a match of two datasets, leads to th
   const own = plan(c.recipe, answersFor(c, { 'will-publish': false, 'into-dataset': false }));
   assert.deepEqual(into.steps.map((s) => s.id), ['columns', 'check', 'dataset', 'match', 'check-other', 'review', 'apply', 'again', 'compare', 'out']);
   assert.deepEqual(own.steps.map((s) => s.id), ['columns', 'check', 'dataset', 'match', 'check-other', 'review', 'apply', 'again', 'out']);
-  assert.deepEqual(own.left.map((s) => s.id), ['compare', 'mint', 'report', 'site', 'w3id']);
+  assert.deepEqual(own.left.map((s) => s.id), ['check-a', 'compare', 'mint', 'report', 'site', 'w3id']);
+  // A dataset in a PLATO format: the same questions; checked, not read from a table; the base address only when publishing.
+  const p = choose('plato', 'match');
+  assert.deepEqual([p.kind, p.recipe, p.ask, p.set['from-table'], c.set['from-table']], ['recipe', 'match-two-datasets', ['into-dataset', 'will-publish'], false, true]);
+  assert.deepEqual(plan(p.recipe, answersFor(p, { 'will-publish': false })).steps.map((s) => s.id), ['check-a', 'match', 'check-other', 'review', 'apply', 'again', 'compare', 'out']);
+  assert.equal(baseAsked(p, { 'will-publish': false }), null);
+  assert.equal(baseAsked(p, { 'will-publish': true }).needed, false);
+  assert.ok(!questionsFor(p).some((q) => q.key === 'from-table') && !questionsFor(c).some((q) => q.key === 'from-table'), 'set by the route, never asked');
   assert.deepEqual(into.late, [{ key: 'others', words: 'The other dataset' }]);
   assert.deepEqual(plan('map-your-data', answersFor(choose('table', 'map'), { 'has-regions': false, 'will-draw': false, 'will-publish': false })).late, [], 'Map your data chooses nothing late');
   assert.deepEqual([into.unavailable, into.notes], [[], []]);
-  // A match from anything but a table still names no workflow, and says where to go meanwhile (Krisis).
-  for (const h of HAVE) if (h.key !== 'table') {
+  // A match from anything but a table or a PLATO dataset still names no workflow, and says where to go meanwhile (Hermes, Krisis).
+  for (const h of HAVE) if (!['table', 'plato'].includes(h.key)) {
     const n = choose(h.key, 'match');
     assert.equal(n.kind, 'none', h.key);
-    assert.match(n.why, /starts from a table of places/);
-    assert.deepEqual(n.tools, ['match']);
+    assert.match(n.why, /starts from a table of places, or a dataset in a PLATO format/);
+    assert.deepEqual(n.tools, ['read', 'match']);
   }
   assert.ok(WANT.some((w) => w.key === 'match'));
 });
@@ -214,7 +224,9 @@ test('the other dataset is chosen at the match: the workflow begins without it, 
   assert.deepEqual(rec.files.others, others);
   assert.deepEqual(rec.late, { others: 'The other dataset' });
   assert.equal(await checkChosen(rec, { files: [TABLE()], others: [OTHERS()] }), true);
-  await assert.rejects(() => checkChosen(rec, { files: [TABLE()], others: [OTHERS({ ...otherDoc(), spatialEntities: otherDoc().spatialEntities.slice(1) })] }), /These are not the files this workflow was begun with \("others"\): match-other\.json, match-other\.json differ\. Choose match-other\.json as they were\./);
+  await assert.rejects(() => checkChosen(rec, { files: [TABLE()], others: [OTHERS({ ...otherDoc(), spatialEntities: otherDoc().spatialEntities.slice(1) })] }), /^RecordError: These are not the other dataset, chosen at the step “Find the places of yours that may be the same as places of the other dataset”: match-other\.json, match-other\.json differ\. Choose match-other\.json as they were\.$/);
+  // The table is still said to be what the workflow was begun with (the presence beside it).
+  await assert.rejects(() => checkChosen(rec, { files: [new File(['id,name\n'], 'match-mine.csv')], others: [OTHERS()] }), /These are not the files this workflow was begun with \("files"\): match-mine\.csv/);
 });
 
 // ---- walked end to end in Node ---------------------------------------------------------------------------------
@@ -222,7 +234,7 @@ test('Match two datasets, end to end in Node, the decisions added to the dataset
   const a = await begun();
   assert.match(a.early?.message || '', /cannot be done yet: the other dataset is not chosen/, 'driven before it was chosen, the match was refused in words');
   assert.equal(a.state.current, 'review', said(a.state));
-  assert.deepEqual(a.state.steps.slice(0, 5).map((s) => s.state), ['done', 'done', 'done', 'done', 'done']);
+  assert.deepEqual(a.state.steps.slice(0, 6).map((s) => s.state), ['done', 'done', 'done', 'skipped', 'done', 'done']);
   assert.equal(a.state.steps.find((s) => s.id === 'check-other').findings, undefined, 'the other dataset is clean: nothing found');
   // The table's places, under the base address, matched with the other's: Kingsbury, which the other dataset already says is the
   // table's own, is not suggested (counted as linked); the other Newton is too far; Zanzibar has no namesake.
@@ -240,7 +252,7 @@ test('Match two datasets, end to end in Node, the decisions added to the dataset
 
   const c = await drive(await reviewed(a.host, a.state), a.host);
   assert.equal(c.state.status, 'completed', said(c.state));
-  assert.deepEqual(c.state.steps.map((s) => s.state), ['done', 'done', 'done', 'done', 'done', 'done', 'done', 'done', 'done', 'done', 'skipped', 'skipped', 'skipped', 'skipped']);
+  assert.deepEqual(c.state.steps.map((s) => s.state), ['done', 'done', 'done', 'skipped', 'done', 'done', 'done', 'done', 'done', 'done', 'done', 'skipped', 'skipped', 'skipped', 'skipped']);
   assert.equal(c.reports.again.errors, 0);
   // Mneme: only added to. Every place of the dataset made from the table is there, unchanged; two answers are added (with the dataset's own three).
   assert.deepEqual(['unchanged', 'changed', 'lost', 'added'].map((k) => c.reports.compare.counts[k]), [5, 0, 0, 2]);
@@ -314,6 +326,11 @@ test('the other dataset checked: its problems are recorded with the step and sho
   const cut = new File([fixture('match-other.json').slice(0, 700)], 'cut.json'), whole = OTHERS(bad);
   const cutRun = await drive(runner.start(only, {}, { files: await refsOf([cut], 'files') }), memoryHost([cut]));
   assert.deepEqual([cutRun.state.status, cutRun.state.steps[0].state, cutRun.state.steps[0].findings], ['stopped', 'stopped', undefined]);
+  // Stopped by the run that did not finish (its report's one error, counted: the guard on `incomplete`), not by the
+  // file being refused before it ran (a DataError, which counts none and says it was not recognised).
+  assert.equal(cutRun.state.steps[0].problem.errors, 1);
+  assert.doesNotMatch(cutRun.state.steps[0].problem.words, /not recognised/);
+  assert.equal(cutRun.reports.c.errors, 1);
   const wholeRun = await drive(runner.start(only, {}, { files: await refsOf([whole], 'files') }), memoryHost([whole]));
   assert.deepEqual([wholeRun.state.status, wholeRun.state.steps[0].state, wholeRun.state.steps[0].findings.errors], ['completed', 'done', 1]);
   // A file the tools cannot read stops the match, in words; nothing is suggested.
@@ -410,6 +427,11 @@ test('saved as a project and opened again, the workflow keeps both of your files
   const r = await readProject(blobSource(bytes), { sink, name: 'match.platoproj' });
   assert.deepEqual(r.record.files, record.files);
   assert.deepEqual(r.record.late, { others: 'The other dataset' });
+  // Its information names each of your files for what it is to the workflow (the presence and the other beside it).
+  const { describe } = await import('../src/engine/methodos/project.js');
+  const info = describe(r).join('\n');
+  assert.match(info, /match-mine\.csv \(the file the workflow began with\)/);
+  assert.match(info, /match-other\.json \(the other dataset, chosen at the step “Find the places of yours that may be the same as places of the other dataset”\)/);
   const back = r.files.find((f) => f.part.name === 'match-other.json');
   assert.equal(await back.result.text(), await a.host.store.get('match-other.json').text());
   // The other dataset forgotten (the match done again), it is no longer the workflow's, and is refused for its project (the presence: kept above).
@@ -417,4 +439,61 @@ test('saved as a project and opened again, the workflow keeps both of your files
   assert.deepEqual(startFiles(bare).map((x) => x.name), ['match-mine.csv']);
   await assert.rejects(() => writeProject({ record: bare, files: files.filter((f) => f.ref.name === 'match-other.json'), tools: { version: 'test', commit: null } }, async () => {}),
     /match-other\.json is not one the workflow names/);
+});
+
+// ---- your dataset already in a PLATO format ------------------------------------------------------------------
+test('Match two datasets from a dataset already in a PLATO format, end to end in Node: checked, not read from a table, matched, reviewed, recorded, compared with it (only added to) and written out', async () => {
+  // The dataset the table route made is the PLATO dataset here: the same places, under the same addresses.
+  const t = await begun();
+  const mine = t.host.store.get(t.state.steps.find((x) => x.id === 'dataset').outputs.dataset[0].name);
+  const plato = new File([await mine.text()], 'mine.json'), others = OTHERS();
+  const host = memoryHost([plato, others]);
+  let s = runner.start(M, { ...ANSWERS, 'from-table': false }, { files: await refsOf([plato], 'files') });
+  assert.deepEqual(['columns', 'check', 'dataset', 'check-a'].map((id) => s.steps.find((x) => x.id === id).state), ['skipped', 'skipped', 'skipped', 'pending']);
+  // The match takes your dataset as it was chosen (the presence beside the table's steps skipped).
+  s = runner.supply(s, M, 'others', await refsOf([others], 'files'));
+  assert.deepEqual(runner.inputsOf(s, 'match').subjects, s.files.files);
+  const a = await drive(s, host);
+  assert.equal(a.state.current, 'review', said(a.state));
+  assert.equal(a.reports['check-a'].errors, 0);
+  const work = readWork(await host.store.get(a.state.steps.find((x) => x.id === 'match').outputs.work[0].name).text());
+  assert.deepEqual(work.candidates.map((c) => [c.candidate_source.slice(MINE.length), c.candidate_candidate.slice(OTHER.length)]),
+    [['newton', 'newton'], ['neuton', 'newton'], ['windermere', 'windermere-lake'], ['windermere', 'windermere']]);
+  const c = await drive(await reviewed(host, a.state), host);
+  assert.equal(c.state.status, 'completed', said(c.state));
+  assert.deepEqual(runner.inputsOf(c.state, 'compare').earlier, c.state.files.files, 'compared with your dataset as it was chosen');
+  assert.deepEqual(['unchanged', 'changed', 'lost', 'added'].map((k) => c.reports.compare.counts[k]), [5, 0, 0, 2]);
+  assert.deepEqual(decisions(await fileOf(host, c.state, 'apply')).pairs, [[`${MINE}newton`, `${OTHER}newton`], [`${MINE}windermere`, `${OTHER}windermere`]]);
+});
+
+// ---- a review counts only if it is of the match the workflow recorded ------------------------------------------
+test('a review made of other files than the match the workflow recorded is told apart: another other dataset, or another dataset of yours; the review the match made is not', async () => {
+  const { reviewDiffers } = await import('../src/engine/methodos/index.js');
+  const a = await begun();
+  const work = await workOf(a.host, a.state);
+  const inputs = runner.inputsOf(a.state, 'match');
+  // The presence: the match's own review is the step's.
+  assert.equal(reviewDiffers(work, { subjects: inputs.subjects, others: inputs.others }), null);
+  // Krisis run again with another file as the other dataset: its review is refused, naming both.
+  const b2 = await begun({ others: OTHERS({ ...otherDoc(), spatialEntities: otherDoc().spatialEntities.slice(1) }, 'match-other-2.json') });
+  const other = await workOf(b2.host, b2.state);
+  assert.equal(reviewDiffers(other, { subjects: inputs.subjects, others: inputs.others }),
+    'The review open was made with match-other-2.json as the other dataset, not match-other.json, the one this workflow recorded, so it is not this step\'s.');
+  // And one of another dataset of yours.
+  const mine = { ...work, subjects: { ...work.subjects, files: [{ name: 'elsewhere.json', size: 1, sha256: 'c'.repeat(64) }] } };
+  assert.match(reviewDiffers(mine, { subjects: inputs.subjects, others: inputs.others }), /^The review open was made of elsewhere\.json, not of match-mine\.json, the dataset this workflow's step took/);
+  // A lookup's review has no other dataset: only its own is compared.
+  assert.equal(reviewDiffers({ ...work, others: null }, { subjects: inputs.subjects }), null);
+});
+
+test('what could not be kept of your own files is noted for each file: keeping the other dataset leaves the note on the table, and trying a file again replaces its own', async () => {
+  const { notKept, keptWords } = await import('../src/methodos/seams.js');
+  const table = { name: 'match-mine.csv', sha256: 'a'.repeat(64) }, other = { name: 'match-other.json', sha256: 'b'.repeat(64) };
+  let notes = notKept([], [table], [{ ...table, why: 'short' }]);
+  notes = notKept(notes, [other], []);   // the other dataset kept at the match
+  assert.deepEqual(notes.map((m) => m.name), ['match-mine.csv']);
+  assert.match(keptWords({ files: [], own: [table, other], missed: notes }), /^match-mine\.csv could not be kept in this browser \(it has not room enough\)/);
+  notes = notKept(notes, [other], [{ ...other, why: 'failed' }]);
+  assert.deepEqual(notes.map((m) => m.name), ['match-mine.csv', 'match-other.json']);
+  assert.deepEqual(notKept(notes, [table], []).map((m) => m.name), ['match-other.json'], 'kept on a second try, the table\'s note goes');
 });

@@ -2973,8 +2973,11 @@ name, in a Studio export, is only the gazetteer's title, which is not carried) g
 the lookup counts the last as `withoutName`.
 
 **Match two datasets** (plan #34, item 4; Stephen's decisions of 14 October 2026). `recipes/match-two-datasets.js`:
-the user's table, the dataset the decisions are about, is read as Map your data reads it (its columns
-matched, checked, made PLATO JSON under the base address, by Map your data's own three steps); the other
+the user's own dataset, the one the decisions are about, is either a table, read as Map your data reads it
+(its columns matched, checked, made PLATO JSON under the base address, by Map your data's own three steps),
+or a dataset already in a PLATO format, checked (`check-a`) and taken as it is: which, the interview's route
+says through an answer it sets and never asks (`from-table`), and the match, the decisions and the comparison
+take `dataset.dataset ?? $files`. The other
 dataset goes to Krisis's local match as it is, in any format the tools read. It is a file chosen late
 (`files.others`, `late: true`): the workflow begins without it, and it is chosen at the match, in Krisis's
 "Match with another dataset…" (`src/app.js` tells Methodos the run's `others`; `began()` in
@@ -2984,18 +2987,26 @@ no step has been done with it). The tracker names it from the start ("The other 
 `#methodos-late`). After the match it is checked (Elenchos, `check-other`, `problems: 'report'`): what the
 check finds is kept with the step and shown in its row, and does not stop the workflow; a file that cannot be
 read stops the match itself. As that run puts the review away, the review step offers "Open the review
-(<work file>)", which opens the match's work file again on the dataset it was made of. One question, "Add the
+(<work file>)", which opens the match's work file again on the dataset it was made of. The review counts as
+the step's only if it is of the match the workflow recorded, your dataset and the other dataset both
+(`reviewDiffers()` in `containment.js`): a review Krisis made again with another file is refused, in words, and
+"Open the review" is offered. One question, "Add the
 decisions to your dataset, or keep them in a file of their own about it?" (Yes by default): Yes writes the
-dataset with the new attestations (`apply`'s 'dataset'), compared with the dataset made from the table
-(Mneme, only additions); No writes the attestation-centric document of the answers alone, with no
+dataset with the new attestations (`apply`'s 'dataset'), then compared with your dataset by Mneme, whose report
+says what was added, changed or lost (Krisis's Finish already refuses a result that is not only added to, so
+the comparison shows it; it does not itself stop the workflow on what it finds); No writes the attestation-centric document of the answers alone, with no
 comparison (it is not a version of the dataset). The apply adapter takes the output from the answer
 (`intoDataset`), and the page counts a Finish only when it makes that output. When the result is
 published (`exportCandidates`, from "Will you publish the result?"), the review's suggestions are exported
 as a candidate set before the decisions are recorded, as `relate.containment` does, for the dataset's own
 address or the base address, so that every answer names the candidate it answers (`promotedFrom`); on the
 page the Finish counts only once they are exported (`unexported()` in `containment.js`). Publishing follows
-as in the other recipes. In the interview, "A list of place names" with "A match of two datasets" leads to
-it; a match from anything else still names Krisis, one step at a time.
+as in the other recipes. In the interview, "A list of place names" or "A dataset already in a PLATO format"
+with "A match of two datasets" leads to it (the base address asked for a table always, for a PLATO dataset
+when publishing); a match from anything else names Hermes and Krisis. A Leave hands the main page only the
+file the workflow began with, never the other dataset with it. The project information names each of the
+user's own files for what it is ("the other dataset, chosen at the step …": `filesWords()` in `record.js`),
+as resuming does.
 
 In the review, a candidate of the other dataset whose kind of place conflicts with the place's own (kinds.js
 `kindFit`, from the types both give: a lake for a village) comes after the others and says why

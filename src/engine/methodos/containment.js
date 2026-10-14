@@ -39,6 +39,21 @@ export function unexported(work) {
   const unnamed = work.candidates.filter((c) => c.decision && c.decision.kind !== 'not-this' && !c.iri).length;
   return unnamed ? `${unnamed} ${unnamed === 1 ? 'decision does' : 'decisions do'} not name the candidate ${unnamed === 1 ? 'it answers' : 'they answer'} yet: export the suggestions first ("Export the suggestions as a candidate set", under the review), so that each identity records it (promotedFrom).` : null;
 }
+/**
+ * Words for a review that is not of the files the step that made it took, or null: the review's own dataset
+ * (`work.subjects.files`) against `subjects`, and, given (a match), the other dataset it was made with
+ * (`work.others.files`) against `others`, each by size and SHA-256. The page asks this before a review counts
+ * as the step's: a review Krisis made again with another file is not the workflow's.
+ */
+export function reviewDiffers(work, { subjects = null, others = null } = {}) {
+  const same = (made, refs) => Array.isArray(made) && made.length === refs.length && refs.every((r) => made.some((m) => m.sha256 === r.sha256 && m.size === r.size));
+  const names = (rs) => (rs || []).map((r) => r.name).join(', ');
+  if (subjects && !same(work?.subjects?.files, subjects))
+    return `The review open was made of ${names(work?.subjects?.files) || 'other files'}, not of ${names(subjects)}, the dataset this workflow's step took, so it is not this step's.`;
+  if (others && !same(work?.others?.files, others))
+    return `The review open was made with ${names(work?.others?.files) || 'no other dataset'} as the other dataset, not ${names(others)}, the one this workflow recorded, so it is not this step's.`;
+  return null;
+}
 /** A base address as a dataset's own address: with its trailing slash, or null if it is not a web address. */
 export function datasetAddress(base) {
   if (typeof base !== 'string' || !/^https?:\/\/\S+$/.test(base.trim())) return null;

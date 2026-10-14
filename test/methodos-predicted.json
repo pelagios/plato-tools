@@ -186,5 +186,24 @@
    "site",
    "w3id"
   ]
+ },
+ {
+  "have": "plato",
+  "want": "match",
+  "yes": {
+   "into-dataset": true,
+   "will-publish": false
+  },
+  "recipe": "match-two-datasets",
+  "steps": [
+   "check-a",
+   "match",
+   "check-other",
+   "review",
+   "apply",
+   "again",
+   "compare",
+   "out"
+  ]
  }
 ]

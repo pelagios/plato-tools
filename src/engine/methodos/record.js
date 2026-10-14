@@ -13,7 +13,7 @@
 //                                     step, says the workflow has changed since, and offers to start
 //                                     the remaining steps under the new recipe or to leave it as it is.
 // The same rule as Hermes's text work file, which never mixes results of two prompts.
-import { canonical, digest } from './recipe.js';
+import { alternatives, canonical, digest } from './recipe.js';
 import { refsDiffer } from './handoffs.js';
 import { deserialise, fail, serialise, start } from './runner.js';
 
@@ -129,8 +129,18 @@ export async function checkFiles(refs, files, what = 'the files this workflow wa
   return true;
 }
 
-/** Check every file chosen at the start: `files` maps each of the recipe's file keys to the files chosen again. */
+/**
+ * The files `key` of a record, in words: those it was begun with, or, chosen at a step (the record's `late`),
+ * by their words and the step: "the other dataset, chosen at the step “Find …”".
+ */
+export function filesWords(record, key) {
+  const late = record?.late?.[key];
+  if (typeof late !== 'string' || !late) return `the files this workflow was begun with ("${key}")`;
+  const at = (record.steps || []).find((s) => Object.values(s.from || {}).some((ref) => alternatives(ref).includes(`$${key}`)));
+  return `${late.charAt(0).toLowerCase()}${late.slice(1)}, chosen at the step “${at?.title ?? key}”`;
+}
+/** Check every file the record names as chosen (at the start, or at a step): `files` maps each of the recipe's file keys to the files chosen again. */
 export async function checkChosen(record, files) {
-  for (const [k, refs] of Object.entries(record.files || {})) await checkFiles(refs, files?.[k], `the files this workflow was begun with ("${k}")`);
+  for (const [k, refs] of Object.entries(record.files || {})) await checkFiles(refs, files?.[k], filesWords(record, k));
   return true;
 }

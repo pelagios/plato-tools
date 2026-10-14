@@ -572,6 +572,8 @@ code.code-chip { font-family: var(--font-mono); font-size: .85em; padding: 0 .3e
 .candidate .licence.warn { color: var(--warn); }
 .candidate .kind .kind-unknown { color: var(--muted); font-style: italic; }
 .candidate .kind-why.warn { font-weight: 700; color: var(--warn); }
+/* A place of the other dataset already accepted for another of yours (work.js acceptedFor): said, never refused. */
+.candidate .accepted-for { font-weight: 700; color: var(--warn); }
 .candidate:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (max-width: 34rem) { .lookup { padding: .5rem .6rem; } .lookup-queries { padding-left: 1.4rem; } }
 /* Methodos (src/methodos/page.js): the interview, and the tracker in the workflow rail. Colours are the
@@ -668,6 +670,12 @@ code.code-chip { font-family: var(--font-mono); font-size: .85em; padding: 0 .3e
 .track-message.warn { color: var(--warn); }
 .track-run { display: block; font-size: .95rem; }
 .track-run.warn { color: var(--warn); }
+/* A step done with a report (the check of a match's other dataset), and the files a workflow chooses at a step. */
+.track-findings { display: block; font-size: .95rem; }
+.track-findings.warn { color: var(--warn); }
+#methodos-late { margin: .5rem 0 0; }
+.track-late { color: var(--muted); font-size: .95rem; margin: .25rem 0 0; }
+.track-late button.link { font-size: inherit; }
 .feedback-line { margin: .5rem 0 0; }
 
 /* Methodos: the base address asked in the interview (src/methodos/page.js baseField). */
