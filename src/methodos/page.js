@@ -28,6 +28,8 @@ const MAIN = { check: 'files', convert: 'files', compare: 'later', 'publish.repo
 // the region each place is in is Krisis's Finish (its 'apply' run), on a review whose candidates are exported.
 const RUN_OF = { 'relate.containment': 'apply' };
 const runOf = (op) => RUN_OF[op] || op;
+// The steps done in Chora, on the map (#chora): drawing on a dataset that went to it, or tracing a map into a new one.
+const CHORA_STEPS = new Set(['place', 'trace']);
 /** What to put right, from a run's report with errors or a run that did not finish (as adapters.js's problemOf, without the engine). */
 function problemOf(r) {
   const errors = r?.report?.errors || 0;
@@ -172,7 +174,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       const input = el('input', { type: 'url', id: 'methodos-base', name: 'methodos-base', autocomplete: 'url', spellcheck: false, value: page.base?.() || '' });
       input.setAttribute('aria-describedby', 'methodos-base-help');
       fs = el('div', { id: 'methodos-base-q', className: 'methodos-text' }, el('label', { htmlFor: 'methodos-base', textContent: asked.question }), input,
-        el('p', { id: 'methodos-base-help', className: 'muted', textContent: `${asked.needed ? 'Needed: the regions are given addresses under it.' : 'Optional: minting takes it, where the dataset has none of its own.'} It is the base address in Options, which this changes too.` }));
+        el('p', { id: 'methodos-base-help', className: 'muted', textContent: `${asked.needed ? asked.why : 'Optional: minting takes it, where the dataset has none of its own.'} It is the base address in Options, which this changes too.` }));
       more.append(fs);
     } else if (q(fs, '#methodos-base') !== document.activeElement) q(fs, '#methodos-base').value = page.base?.() || q(fs, '#methodos-base').value;
     const field = q(fs, '#methodos-base');
@@ -230,6 +232,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     if (p.left.length) planEl.append(el('p', { className: 'track-left', textContent: `Left out by your answers: ${p.left.map((s) => lower(s.title)).join('; ')}.` }));
     // What the workflow cannot carry from the files it begins with (the recipe's `cannot`), said before it is followed.
     if (p.cannot.length) planEl.append(el('p', { className: 'track-left', textContent: 'What it cannot carry from your files:' }), el('ul', { className: 'track-note track-cannot' }, ...cannotItems(p.cannot)));
+    // What is to be known before it is followed (the recipe's `before`, under these answers): a gazetteer's daily cap.
+    for (const w of p.before) planEl.append(el('p', { className: 'track-note track-before', textContent: w }));
     startB.textContent = `Follow “${p.title}”`; startB.hidden = false;
     planEl.hidden = false;
   }
@@ -271,6 +275,15 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     if (wf || changed) { await handOver(wf || changed.record); await outs.drop(keptBy(wf || changed.record)); await store.remove((wf || changed.record).id); }
     pending = { key: recipe.key, answers: answersFor(choice, yesNo, texts), id: `${recipe.key}-${Date.now().toString(36)}`, steps: p.steps.length };
     wf = null; wfScope = null; changed = null; note = null; active = null;
+    // A workflow that begins from no file of the user's (Trace a historical map, whose dataset is made at its first
+    // step) starts at once (Stephen, 14 October 2026): there is no file to wait for.
+    if (!fileKey(recipe)) {
+      wf = { ...runner.start(recipe, pending.answers, {}), id: pending.id };
+      pending = null;
+      say('Begun: its first step makes the dataset, so no file is chosen first.');
+      await keep(); close(false); render(true);
+      return;
+    }
     // Kept at once, before any file (Stephen, 4 October 2026): shown as not started, and discarded in one click.
     await store.savePending(pending);
     close(false);
@@ -354,7 +367,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   const chain = (fn) => (queue = queue.then(fn).catch((e) => { say(e.message || String(e), true); render(false); }));
   const say = (words, warn = false) => { note = words ? { words, warn } : null; };
   const recipeOf = (r) => RECIPES[r.recipe?.key];
-  const fileKey = (recipe) => Object.keys(recipe.files || {})[0];
+  // The key of the files a workflow begins with, step 1's; undefined for a recipe that begins from none (Trace a historical map).
+  const fileKey = (recipe) => Object.keys(recipe?.files || {}).find((k) => !recipe.files[k].late);
 
   /** The step the workflow is at: the one running or waiting, else the one that stopped, failed or was cancelled, else the next to do. */
   const atStep = (state = wf) => stepAt(state);
@@ -494,7 +508,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       if (!files.length) return;
       if (handleFile && files[0] !== handleFile) { handle = null; handleFile = null; }
       chosenRefs = await refsOf(files, 'files');
-      if (pending && !wf) {
+      if (pending && !wf && fileKey(RECIPES[pending.key])) {
         const recipe = RECIPES[pending.key];
         // Its Scope, if one was given before the file (src/engine/krisis/scope.js), goes into the record.
         wf = { ...runner.start(recipe, pending.answers, { [fileKey(recipe)]: chosenRefs }), id: pending.id };
@@ -586,6 +600,13 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       }
       return { dataset: await refsHeld(files, 'dataset', { own: true }) };
     }
+    if (s.op === 'trace') {
+      // By hand: the dataset traced and saved in Chora, chosen in step 1 (as its save chooses it). Nothing went to
+      // this step: its dataset is made there, from the map.
+      const files = page.files();
+      if (!files.length) throw new Error('Trace the places in Chora and save the dataset there first: its save chooses it in “Choose your data”, and does this step.');
+      return { dataset: await refsHeld(files, 'dataset', { own: true }) };
+    }
     throw new Error(`The step “${s.title}” is done by the tools, when its run finishes.`);
   }
   async function finishInteractive(s, outputs) {
@@ -605,7 +626,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   function placed(files, base) {
     return new Promise((resolve) => chain(async () => {
       const s = wf && !changed ? atStep() : null;
-      if (!s || s.op !== 'place') { resolve(null); return; }
+      // Chora's two steps: drawing on a dataset that went to it ("place"), or tracing a map into a new one ("trace").
+      if (!s || !CHORA_STEPS.has(s.op)) { resolve(null); return; }
       const went = currentInput(wf, s);
       if (went && base && !sameRefs(went, await refsOf([...base], 'dataset'))) {
         const why = `It was saved from ${[...base].map((f) => f.name).join(', ')}, not from ${names(went)}, the dataset that went to the step “${s.title}”, so the step is not done with it.`;
@@ -694,7 +716,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   restartB.addEventListener('click', () => chain(async () => {
     if (!changed || changed.action !== 'changed') return;
     wf = restartRemaining(changed.record, recipeOf(changed.record)); wfScope = wf.scope ?? null; changed = null;
-    say(`Carried on under the recipe as it is now. Choose ${names(wf.files[fileKey(recipeOf(wf))] || [])} again in step 1.`);
+    const again = wf.files[fileKey(recipeOf(wf))] || [];
+    say(`Carried on under the recipe as it is now.${again.length ? ` Choose ${names(again)} again in step 1.` : ''}`);
     await keep(); render(false);
   }));
   // Choosing the workflow's file from the tracker keeps its handle where the browser gives one, so that
@@ -859,7 +882,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     const op = s && OPERATIONS[s.op];
     let next = '';
     if (viewing) next = '';
-    else if (!shown) next = `Not started. Choose ${lower(RECIPES[pending.key].files[fileKey(RECIPES[pending.key])].words)} in step 1 to begin: Methodos starts when it is chosen. Or discard it.`;
+    else if (!shown) next = fileKey(RECIPES[pending.key]) ? `Not started. Choose ${lower(RECIPES[pending.key].files[fileKey(RECIPES[pending.key])].words)} in step 1 to begin: Methodos starts when it is chosen. Or discard it.` : 'Not started.';
     else if (s && op.kind === 'interactive') next = `This step is yours: it waits for ${op.waitsFor}. Say when it is done.`;
     else if (ready) next = `Ready to download: ${names(main)} is already in the format this workflow writes, so it is not converted into itself. Download it, and the step is done.`;
     else if (s && !run) next = `Run ${OPERATIONS[s.op].tool ? `${OPERATIONS[s.op].tool}'s` : 'its'} ${lower(OPERATIONS[s.op].title)}; the step is done when the run finishes.`;
@@ -872,7 +895,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     restartB.hidden = changed?.action !== 'changed';
     leaveB.textContent = !shown ? 'Discard this workflow' : 'Leave the workflow';
     downloadB.hidden = !ready;
-    choraB.hidden = !(s && s.op === 'place' && wf && !changed);
+    choraB.hidden = !(s && CHORA_STEPS.has(s.op) && wf && !changed);
     if (ready) {
       downloadB.textContent = `Download ${names(main)}`;
       tList.querySelector('li.is-current .track-body')?.append(el('span', { className: 'track-run', textContent: 'Ready to download' }));
@@ -894,7 +917,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     if (s && !changed && !viewing) {
       const p = wf ? { title: recipeOf(wf)?.title } : plan(pending.key, pending.answers);
       onStep({ id: s.id, n: i, title, tool: PAGE_TOOL[s.op] ?? null, text: `Methodos, ${p.title}.${op.kind === 'interactive' && op.waitsFor ? ` This step is yours: it waits for ${op.waitsFor}.` : ''}`,
-        link: s.op === 'place' ? { href: '#chora', words: 'Open Chora' } : null });
+        link: CHORA_STEPS.has(s.op) ? { href: '#chora', words: 'Open Chora' } : null });
     } else onStep(null);
     // The result of an earlier step's run, put away by the host as the workflow went on (src/app.js), is
     // summed up in that step's row, with a way to show it again.
@@ -995,6 +1018,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     const chosenAgain = ready ? ` ${names(main)} is chosen again in “Choose your data”.` : '';
     const first = [opened, v.words].filter(Boolean).join(' ');
     if (s?.op === 'place') say([first, `At Chora's step:${chosenAgain} Open Chora to draw: its save does this step with the dataset it writes. Or choose a dataset you saved in Chora before, and say the step is done.`].filter(Boolean).join(' '));
+    else if (s?.op === 'trace') say([first, 'At Chora\'s step: open Chora to trace the map. What you have traced and not yet saved is kept there; its save does this step with the dataset it writes.'].filter(Boolean).join(' '));
     else if (ready) say([first, `Taken up where it was left, with ${names(main)}${fromWhere(wf, s, main)}, kept in this browser: it is chosen in step 1 for you.`].filter(Boolean).join(' '));
     else say([first, main ? `Taken up where it was left. Choose ${names(main)} again in step 1 to carry on: the file is checked to be the one the workflow recorded.` : 'Taken up where it was left.'].filter(Boolean).join(' '));
     if (!ready) return false;
@@ -1505,6 +1529,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   });
   q(sharedEl, '#methodos-shared-close').addEventListener('click', () => { viewing = null; say(null); render(false); if (tracker.hidden) backTo(); else show(q(tracker, 'h2')); });
 
-  return { open, chosen, placed, began, ended, dropped, keepChanged, detected, baseChanged, id: () => wf?.id || null, following: () => !!(wf || pending || changed), takenUp: () => takenUp,
+  // step(): the step at hand, { id, op, answers }, or null: Chora reads it (its step "trace" is done there, from the map).
+  const stepNow = () => { const s = wf && !changed && !viewing ? atStep() : null; return s ? { id: s.id, op: s.op, answers: { ...wf.answers } } : null; };
+  return { open, chosen, placed, began, ended, dropped, keepChanged, detected, baseChanged, id: () => wf?.id || null, step: stepNow, following: () => !!(wf || pending || changed), takenUp: () => takenUp,
     scope: scopeNow, setScope, scoped: () => !!(wf || pending || changed), viewShared, openFromWhg, shareTokens: () => [...shareTokens], tokenGiven };
 }

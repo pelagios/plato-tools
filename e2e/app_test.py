@@ -2924,6 +2924,8 @@ def main():
             quality_checks(pw, url, tmp)
             chora_seams_checks(pw, url, tmp)
             iiif_checks(pw, url, tmp)
+            trace_map_checks(pw, url, tmp)
+            trace_workflow_checks(pw, url, tmp)
     finally:
         stop(srv)
         stop_fixtures()
@@ -8983,10 +8985,11 @@ def methodos_page_checks(browser, url):
         if wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready').get('phase') != 'ready': raise RuntimeError('the main page did not start')
         return ctx, page
     st = lambda page: page.evaluate(METHODOS_PAGE_STATE)
-    def answer(page, have, want, yes):
+    def answer(page, have, want, yes, base=None):
         page.click('#methodos-ask'); until(page, "!document.getElementById('methodos').hidden", 5)
         page.check(f'input[name="methodos-have"][value="{have}"]'); page.check(f'input[name="methodos-want"][value="{want}"]')
         for k, v in yes.items(): page.check(f'input[name="methodos-ask-{k}"][value="{"yes" if v else "no"}"]')
+        if base: page.fill('#methodos-base', base)   # a workflow that needs the base address (Trace a historical map) is given one
 
     def untouched():
         # A visitor who does not use Methodos: the interview and the tracker are not shown, #for-tool is
@@ -9003,7 +9006,7 @@ def methodos_page_checks(browser, url):
         for i, p in enumerate(METHODOS_PREDICTED):
             ctx, page = fresh()
             try:
-                answer(page, p['have'], p['want'], p['yes'])
+                answer(page, p['have'], p['want'], p['yes'], p.get('base'))
                 s = st(page)
                 plan = [x['id'] for x in s['plan']]
                 ok = (s['recipe'] == p['recipe'] and plan == p['steps'] and all(x['state'] == 'todo' and x['words'] == 'To come' for x in s['plan'])
@@ -9926,6 +9929,466 @@ def iiif_checks(pw, url, tmp):
                                  'shown': shown, 'ready': ready, 'fx': fx})
     attempt('Chora maps: across these checks, origin B was never asked for anything, and no page error', lambda: (len(census()) > 5 and at_origin(census(), B) == [] and not errors, {'census': len(census()), 'B': at_origin(census(), B), 'errors': errors[:5]}))
     ctx.close()
+    stop_fixtures()
+
+# ---- Tracing a historical map into a new dataset (src/chora/traced.js; Stephen's decisions of 14 October 2026) --
+# On the IIIF fixture server, as the maps' checks above: the grid map pasted, its server allowed beforehand (the
+# maps' checks prove the asking), its manifest given a navDate by a route (the fixture keeps Rumsey's keys, which
+# have none). Each feature is drawn as a user draws it, with no place chosen, named in the form over the map and
+# Enter; the save is read back from the file downloaded. Every absence is asserted beside a presence.
+TRACE_BASE = 'https://example.org/traced/'
+TRACE_STATE = '''() => { const c = window.__chora; if (!c) return null; const v = (e) => !!e && !e.closest('[hidden]') && !!(e.offsetWidth || e.offsetHeight);
+  const items = [...document.querySelectorAll('#chora-traced-list li[data-draft]')].map((li) => ({ id: li.dataset.draft, text: li.textContent.replace(/\\s+/g, ' ').trim(),
+    role: li.querySelector('select[data-field="role"]')?.value, precision: li.querySelector('select[data-field="precision"]')?.value, defaulted: !!li.querySelector('[data-defaulted]'), unnamed: li.hasAttribute('data-unnamed') }));
+  return { trace: c.trace ? JSON.parse(JSON.stringify(c.trace)) : null, naming: c.naming || null, lastNamed: c.lastNamed || null, pending: c.pendingCount, phase: c.phase, places: c.places,
+    form: v(document.getElementById('chora-name-form')), formWhat: document.getElementById('chora-name-what')?.textContent || null, formError: v(document.getElementById('chora-name-error')) ? document.getElementById('chora-name-error').textContent : null,
+    addTo: document.getElementById('chora-name-to')?.textContent || null, focus: document.activeElement?.id || null, items,
+    drawn: window.__chora_draw ? window.__chora_draw.getSnapshot().filter((f) => !f.properties?.currentlyDrawing).length : null,
+    picker: [...(document.getElementById('picker')?.files || [])].map((f) => f.name), base: document.getElementById('base')?.value ?? null,
+    settings: v(document.getElementById('chora-trace-form')), settingsError: v(document.getElementById('chora-tset-error')) ? document.getElementById('chora-tset-error').textContent : null,
+    date: document.getElementById('chora-tset-date')?.value ?? null, rights: document.getElementById('chora-trace-rights')?.textContent || null,
+    status: document.getElementById('chora-trace-status')?.textContent || null, traceError: c.traceError || null }; }'''
+
+def trace_map_checks(pw, url, tmp):
+    fx = start_fixtures(tmp); A = fx['A']
+    base = url.rstrip('/') + '/'
+    ctx = pw.chromium.launch_persistent_context(str(tmp / 'trace-profile'), headless=True, accept_downloads=True, args=GL,
+                                                viewport={'width': 1400, 'height': 900}, reduced_motion='reduce')
+    ctx.add_init_script('window.__plato_forceDownload = true;')
+    ctx.set_default_timeout(T(30) * 1000)
+    if urlparse(base).hostname not in ('127.0.0.1', 'localhost'):
+        ctx.grant_permissions(['local-network-access'], origin=f'{urlparse(base).scheme}://{urlparse(base).netloc}')
+    errors = []
+    page = ctx.pages[0] if ctx.pages else ctx.new_page()
+    page.on('pageerror', lambda e: errors.append(str(e)[:200]))
+    grid_id = 'https://annotations.allmaps.org/maps/0000000000000001'
+    def dated(route):
+        d = json.loads((FIX / 'manifest-rumsey-shaped.json').read_text().replace('https://iiif.example.org', A))
+        d['navDate'] = '1746-01-01T00:00:00Z'
+        route.fulfill(status=200, content_type='application/json', headers={'Access-Control-Allow-Origin': '*'}, body=json.dumps(d))
+    ctx.route(A + '/manifests/grid/manifest', dated)
+    ts = lambda: page.evaluate(TRACE_STATE) or {}
+    def to_screen(id_, pts):
+        return page.evaluate(INK_TO_SCREEN, [id_, [list(p) for p in pts]])
+    def boot():
+        page.goto(NOTOOLS if PROVE else base)
+        page.evaluate(f"""() => {{ localStorage.setItem('plato-tools.permissions', JSON.stringify({{ version: 1, grants: {{ 'iiif:{A}': {{ state: 'allowed', at: '2026-10-14T10:00:00Z' }} }} }}));
+          localStorage.setItem('chora-contributor', JSON.stringify({{ name: 'Ada Tracer' }})); }}""")
+        chora_boot(page, base)
+        until(page, '() => window.__chora.canary === "enforced"', 30)
+    def show(name='annotation.json'):
+        a = json.loads((FIX / name).read_text().replace('https://iiif.example.org', A).replace('https://elsewhere.example.org', fx['B']))
+        page.fill('#chora-map-input', json.dumps(a)); page.click('#chora-map-form button[type=submit]')
+        until(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.firstTile)', 40, a['id'])
+        key = next(o['key'] for o in cstate(page)['overlays'] if o['annotationId'] == a['id'])
+        page.click(f'#chora-overlay-list li[data-overlay="{key}"] button[data-fit]'); page.evaluate(SETTLE)
+        return key, a
+    def name_it(toponym, kind=None, enter=True):
+        until(page, '() => !!window.__chora.naming', 10)
+        page.fill('#chora-name-toponym', toponym)
+        if kind is not None: page.fill('#chora-name-kind', kind)
+        if enter: page.press('#chora-name-toponym', 'Enter')
+    st = {}
+
+    def settings_needed():
+        boot()
+        key, _ = show(); st['key'] = key
+        before = ts()
+        page.click(f'#chora-overlay-list li[data-overlay="{key}"] button[data-trace-new]')
+        until(page, '() => !!document.getElementById("chora-trace-form")', 10)
+        offered = ts()
+        page.click('#chora-trace-form button[type=submit]')          # no base address yet
+        until(page, '() => !document.getElementById("chora-tset-error").hidden', 10)
+        refused = ts()
+        page.fill('#chora-tset-base', TRACE_BASE); page.fill('#chora-tset-lang', 'en')
+        page.click('#chora-trace-form button[type=submit]')
+        until(page, 'k => window.__chora.trace?.key === k && window.__chora.phase === "loaded"', 30, key)
+        s = ts()
+        return (before.get('trace', {}).get('key') is None and before.get('pending') == 0 and offered['settings'] and offered['date'] == '1746'
+                and 'names no licence' in (offered['rights'] or '') and refused['settingsError'] and 'base address' in refused['settingsError'] and refused['trace']['key'] is None
+                and s['trace']['seed'] and s['places'] == 0 and s['picker'] == ['traced-a-synthetic-grid-over-cambridge-test-fix.json'] and s['base'] == TRACE_BASE
+                and s['trace']['settings']['date'] == '1746' and s['trace']['settings']['language'] == 'en' and 'Tracing “A synthetic grid over Cambridge (test fixture)”' in (s['status'] or '')), {
+            'before': before.get('trace'), 'offered': {k: offered.get(k) for k in ('settings', 'date', 'rights')},
+            'refused': refused.get('settingsError'), 'after': {k: s.get(k) for k in ('trace', 'places', 'picker', 'base', 'status')}}
+    attempt('Chora trace: a map shown offers "Trace into a new dataset"; its settings need the base address (refused without), take the date from the manifest\'s navDate and say the map\'s rights; a dataset of its own is made from the map, opened, and chosen in step 1', settings_needed)
+
+    def draw_name_enter():
+        key = st['key']
+        [xy] = to_screen(grid_id, [(256, 256)])
+        draw(page, 'point', [tuple(xy)])
+        until(page, '() => !!window.__chora.naming?.draftId', 10)
+        opened = ts()                                                   # before anything else is clicked: the focus is the form's
+        page.click('#chora-draw-tools button[data-mode="static"]')
+        name_it('Bridge Street', 'bridge')
+        until(page, '() => window.__chora.trace.named === 1 && !window.__chora.naming', 15)
+        s = ts()
+        item = next((i for i in s['items'] if 'Bridge Street' in i['text']), {})
+        return (opened['form'] and opened['focus'] == 'chora-name-toponym' and 'A point drawn' in (opened['formWhat'] or '') and opened['trace']['unnamed'] == 1
+                and s['lastNamed']['placeId'] == TRACE_BASE + 'place/bridge-street' and not s['form'] and item.get('role') == 'RepresentativePoint'
+                and item.get('precision') == 'approximate' and item.get('defaulted') and 'bridge' in item.get('text', '') and s['pending'] == 1), {
+            'opened': {k: opened.get(k) for k in ('form', 'focus', 'formWhat')}, 'named': s.get('lastNamed'), 'item': item, 'pending': s.get('pending')}
+    attempt('Chora trace: a point drawn with no place chosen opens the name form, the focus in it; the name and Enter make a place, its address minted under the base, given the map\'s defaults for a point, marked as such', draw_name_enter)
+
+    def cancel_lets_go():
+        before = ts()
+        [xy] = to_screen(grid_id, [(320, 200)])
+        draw(page, 'point', [tuple(xy)]); page.click('#chora-draw-tools button[data-mode="static"]')
+        until(page, '() => !!window.__chora.naming?.draftId', 10)
+        during = ts()
+        page.click('#chora-name-cancel')
+        until(page, '() => !window.__chora.naming', 10)
+        page.wait_for_timeout(300)
+        after = ts()
+        # And Esc in the form does the same.
+        [xy] = to_screen(grid_id, [(330, 220)])
+        draw(page, 'point', [tuple(xy)]); page.click('#chora-draw-tools button[data-mode="static"]')
+        until(page, '() => !!window.__chora.naming?.draftId', 10)
+        page.press('#chora-name-toponym', 'Escape')
+        until(page, '() => !window.__chora.naming', 10)
+        page.wait_for_timeout(300)
+        esc = ts()
+        return (during['pending'] == before['pending'] + 1 and during['drawn'] == before['drawn'] + 1 and after['pending'] == before['pending'] and after['drawn'] == before['drawn']
+                and esc['pending'] == before['pending'] and esc['drawn'] == before['drawn'] and after['trace']['named'] == 1), {
+            'pending': [before['pending'], during['pending'], after['pending'], esc['pending']], 'drawn': [before['drawn'], during['drawn'], after['drawn'], esc['drawn']]}
+    attempt('Chora trace: Cancel (or Esc) in the name form lets the drawing go, from the map and the drafts; the place named before stays', cancel_lets_go)
+
+    def line_and_label():
+        pts = to_screen(grid_id, [(100, 400), (250, 380), (420, 400)])
+        draw(page, 'linestring', [tuple(pts[0]), tuple(pts[1]), tuple(pts[2]), tuple(pts[2])]); page.click('#chora-draw-tools button[data-mode="static"]')
+        until(page, '() => !!window.__chora.naming?.draftId', 10)
+        line_form = ts()
+        name_it('Mill Lane', 'road')
+        until(page, '() => window.__chora.trace.named === 2 && !window.__chora.naming', 15)
+        [xy] = to_screen(grid_id, [(260, 360)])
+        draw(page, 'point', [tuple(xy)]); page.click('#chora-draw-tools button[data-mode="static"]')
+        until(page, '() => !!window.__chora.naming?.draftId', 10)
+        offered = ts()
+        page.click('#chora-name-to')
+        until(page, '() => !window.__chora.naming', 10)
+        s = ts()
+        part = next((i for i in s['items'] if 'Part of “Mill Lane”' in i['text']), {})
+        lane = next((i for i in s['items'] if i['text'].startswith('Mill Lane')), {})
+        return ('A line drawn' in (line_form['formWhat'] or '') and offered['addTo'] == 'Add to “Mill Lane” instead' and part.get('role') == 'LabelAnchor' and part.get('precision') == ''
+                and lane.get('role') == 'Extent' and lane.get('precision') == 'approximate' and s['trace']['named'] == 2 and s['trace']['unnamed'] == 0), {
+            'line form': line_form.get('formWhat'), 'offered': offered.get('addTo'), 'part': part, 'lane': lane, 'trace': s.get('trace')}
+    attempt('Chora trace: a line is named as a line, the map\'s defaults for a line (Extent, approximate); a point added to the place last named instead is where the map writes its name, with no precision', line_and_label)
+
+    def new_place_first():
+        page.click('#chora-trace-new')
+        until(page, '() => !!window.__chora.naming && !window.__chora.naming.draftId', 10)
+        opened = ts()
+        page.fill('#chora-name-toponym', 'Coe Fen'); page.fill('#chora-name-kind', 'wood')
+        page.press('#chora-name-toponym', 'Enter')
+        until(page, '() => !document.getElementById("chora-name-error").hidden', 10)
+        refused = ts()
+        pts = to_screen(grid_id, [(80, 80), (200, 80), (200, 180), (80, 180)])
+        draw(page, 'polygon', [tuple(p) for p in pts] + [tuple(pts[0])]); page.click('#chora-draw-tools button[data-mode="static"]')
+        until(page, '() => !!window.__chora.naming?.draftId', 10)
+        kept = page.input_value('#chora-name-toponym'), page.input_value('#chora-name-kind')
+        page.press('#chora-name-toponym', 'Enter')
+        until(page, '() => window.__chora.trace.named === 3 && !window.__chora.naming', 15)
+        s = ts()
+        return (opened['form'] and 'draw it on the map' in (opened['formWhat'] or '') and 'Draw the place on the map first' in (refused['formError'] or '') and refused['trace']['named'] == 2
+                and kept == ('Coe Fen', 'wood') and s['lastNamed']['placeId'] == TRACE_BASE + 'place/coe-fen' and s['drawn'] == s['pending'] == 4), {
+            'opened': opened.get('formWhat'), 'refused': refused.get('formError'), 'kept': kept, 'after': {k: s.get(k) for k in ('lastNamed', 'drawn', 'pending')}}
+    attempt('Chora trace: "New place" opens the form with nothing drawn; Enter then says to draw it; the area drawn next is the form\'s, what was typed kept; every feature traced is shown at once', new_place_first)
+
+    def role_changed():
+        s = ts()
+        item = next(i for i in s['items'] if i['text'].startswith('Coe Fen'))
+        page.select_option(f'#chora-traced-list li[data-draft="{item["id"]}"] select[data-field="precision"]', 'historical_approximate')
+        until(page, 'id => !document.querySelector(`#chora-traced-list li[data-draft="${id}"] [data-defaulted]`)', 10, item['id'])
+        after = next(i for i in ts()['items'] if i['id'] == item['id'])
+        others = [i for i in ts()['items'] if i['id'] != item['id'] and not i['text'].startswith('Part of')]
+        return (item['defaulted'] and not after['defaulted'] and after['precision'] == 'historical_approximate' and others and all(i['defaulted'] for i in others)), {'before': item, 'after': after, 'others': others}
+    attempt('Chora trace: a feature\'s precision chosen in the list is no longer the map\'s default; the others still are', role_changed)
+
+    def saved():
+        page.click('#chora-save')
+        until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+        ls = cstate(page)['lastSave'] or {}
+        said = page.inner_text('#chora-save-result')
+        if not ls.get('passed'): return False, {'save': ls, 'said': said[:600]}
+        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#chora-save-result button.primary')
+        out = tmp / 'traced-grid.json'; d.value.save_as(out)
+        doc = json.loads(out.read_text()); st['saved'] = doc
+        by = {p['label']: p for p in doc['spatialEntities']}
+        lane = by.get('Mill Lane', {}).get('attestations', [{}])[0]; street = by.get('Bridge Street', {}).get('attestations', [{}])[0]
+        fen = by.get('Coe Fen', {}).get('attestations', [{}])[0]
+        cit = (street.get('citations') or [{}])[0]
+        return (ls.get('added') == 3 and (ls.get('mneme') or {}).get('passed') and '3 new places' in said and sorted(by) == ['Bridge Street', 'Coe Fen', 'Mill Lane']
+                and [p['@id'] for p in doc['spatialEntities']] == [TRACE_BASE + 'place/bridge-street', TRACE_BASE + 'place/mill-lane', TRACE_BASE + 'place/coe-fen']
+                and all(len(p['attestations']) == 1 for p in doc['spatialEntities'])
+                and [g.get('role') for g in lane.get('geometries', [])] == ['https://w3id.org/plato#Extent', 'https://w3id.org/plato#LabelAnchor']
+                and street.get('names') == [{'toponym': 'Bridge Street', 'language': 'en'}] and street.get('types') == [{'label': 'bridge', 'identifier': 'http://vocab.getty.edu/aat/300007836'}]
+                and street.get('timespans') == [{'startEarliest': '1746', 'endLatest': '1746', 'sourceLabel': '1746'}]
+                and cit.get('source', {}).get('citation') == 'A Synthetic Historical Map Collection' and cit.get('source', {}).get('timespan') == {'startEarliest': '1746', 'endLatest': '1746', 'sourceLabel': '1746'}
+                and cit.get('citationFunction') == 'http://purl.org/spar/cito/citesAsEvidence' and re.match(re.escape(A + '/manifests/grid/canvas/c1') + r'#xywh=\d+,\d+,\d+,\d+$', cit.get('locator', ''))
+                and 'misses its own control points by' in street.get('notes', '') and fen.get('geometries', [{}])[0].get('spatialPrecision') == ['historical_approximate']
+                and doc['gazetteer'].get('uriSpace') == TRACE_BASE and doc['gazetteer'].get('title') == 'Places traced from A synthetic grid over Cambridge (test fixture)'), {
+            'save': {k: ls.get(k) for k in ('passed', 'added')}, 'said': said[:300], 'places': [(p['@id'], p['label']) for p in doc['spatialEntities']],
+            'street': {k: street.get(k) for k in ('names', 'types', 'timespans')}, 'citation': cit, 'lane roles': [g.get('role') for g in lane.get('geometries', [])]}
+    attempt('Chora trace: saved, the dataset made from the map has the three places named, each one attestation (its name, kind, the map\'s date, its geometries, a label\'s position among them), the map cited with its credit and date, the misfit said; Mneme passes', saved)
+
+    def goes_on():
+        page.click('#chora-save-result [data-clear]')
+        until(page, '() => !!window.__chora.rebased && window.__chora.phase !== "opening"', 60)
+        until(page, '() => window.__chora.places === 3', 30)
+        s = ts()
+        [xy] = to_screen(grid_id, [(400, 120)])
+        draw(page, 'point', [tuple(xy)]); page.click('#chora-draw-tools button[data-mode="static"]')
+        until(page, '() => !!window.__chora.naming?.draftId', 10)
+        name_it('Bridge Street')        # a name taken already: the address minted is another
+        until(page, '() => window.__chora.trace.named === 1 && !window.__chora.naming', 15)
+        after = ts()
+        return (s['trace']['key'] == st['key'] and not s['trace']['seed'] and s['pending'] == 0 and after['lastNamed']['placeId'] == TRACE_BASE + 'place/bridge-street-2'), {
+            'after the save': s.get('trace'), 'named': after.get('lastNamed')}
+    attempt('Chora trace: once the save is let go, the file saved is open and traced into still; a name taken already is given an address of its own', goes_on)
+
+    def stop_control():
+        page.click('#chora-trace-stop')
+        until(page, '() => !window.__chora.trace.key', 10)
+        before = ts()
+        [xy] = to_screen(grid_id, [(150, 300)])
+        draw(page, 'point', [tuple(xy)]); page.click('#chora-draw-tools button[data-mode="static"]')
+        page.wait_for_timeout(500)
+        after = ts()
+        return (before['pending'] == 1 and after['pending'] == 1 and after['naming'] is None and after['drawn'] == before['drawn']), {'before': {k: before.get(k) for k in ('pending', 'drawn')}, 'after': {k: after.get(k) for k in ('pending', 'naming', 'drawn')}}
+    attempt('Chora trace: tracing stopped, a drawing with no place chosen is let go again, and opens no form; what was traced stays', stop_control)
+
+    def ink_new_place():
+        key, a = show('annotation-ink.json')
+        page.click(f'#chora-overlay-list li[data-overlay="{key}"] button[data-trace-new]')
+        until(page, '() => !!document.getElementById("chora-trace-form")', 10)
+        page.fill('#chora-tset-base', TRACE_BASE); page.click('#chora-trace-form button[type=submit]')
+        until(page, 'k => window.__chora.trace?.key === k && window.__chora.phase === "loaded"', 30, key)
+        page.click('#chora-draw-tools button[data-trace="area"]')
+        [xy] = to_screen(a['id'], [(520, 210)])
+        page.mouse.move(xy[0] - 2, xy[1] - 2); page.mouse.move(*xy); page.mouse.down(); page.mouse.up()
+        until(page, '() => ["proposed", "error"].includes(window.__chora.ink?.phase)', 60)
+        page.keyboard.press('Enter')
+        until(page, '() => !!window.__chora.naming?.draftId', 15)
+        opened = ts()
+        name_it('The Wash', 'lake')
+        until(page, '() => window.__chora.lastNamed?.label === "The Wash" && !window.__chora.naming', 15)
+        s = ts()
+        return (opened['form'] and 'An area drawn' in (opened['formWhat'] or '') and s['lastNamed']['placeId'] == TRACE_BASE + 'place/the-wash'
+                and any('The Wash' in i['text'] for i in s['items'])), {'opened': opened.get('formWhat'), 'named': s.get('lastNamed')}
+    attempt('Chora trace: a shape proposed from the map\'s ink and accepted (Enter) with no place chosen is a new place: the name form opens for it', ink_new_place)
+
+    def hidden_and_back():
+        # Chora left with its maps shown: they are not drawn into the hidden map (drawn at no size, the renderer threw
+        # "coordinates must be finite numbers"); back on the map, they are drawn again.
+        before = len(errors)
+        vis = "() => window.__chora_map.getLayer('chora-historical-maps') ? window.__chora_map.getLayoutProperty('chora-historical-maps', 'visibility') ?? 'visible' : null"
+        shown_before = page.evaluate(vis)
+        page.click('#chora-leave'); page.wait_for_timeout(1500)
+        hidden = page.evaluate(vis)
+        page.evaluate("() => { location.hash = '#chora'; }")
+        until(page, "() => !document.getElementById('chora').hidden", 15); page.evaluate(SETTLE)
+        back = page.evaluate(vis)
+        return (shown_before == 'visible' and hidden == 'none' and back == 'visible' and len(errors) == before and len(cstate(page)['overlays']) >= 1), {
+            'visibility': [shown_before, hidden, back], 'page errors': errors[before:][:3]}
+    attempt('Chora: left with its historical maps shown, they are not drawn while it is hidden, and no error is thrown; back on the map, they are drawn again', hidden_and_back)
+    attempt('Chora trace: across these checks, no page error', lambda: (len(st) >= 2 and not errors, {'errors': errors[:5], 'checks reached': list(st)}))
+    ctx.close()
+    stop_fixtures()
+
+# ---- Methodos: Trace a historical map (plan #34, item 6), walked through on the page ----------------------------
+# From the interview (a map image, places on a map, the places identified in WHG, not published) to the dataset
+# written out: the workflow begins at once (it takes no file), Chora makes the dataset from the grid map on the IIIF
+# fixture server, three places are traced and named, the save does the step "trace", the map's outline is the
+# lookup's Scope (shown in the tracker's Scope line), the dataset is checked, looked up in a stub of WHG (never the
+# real one), whose requests are kept and read: what it is sent is the places' names and the outline, and nothing of
+# the map or the dataset besides; the decisions recorded, checked again, compared, and downloaded as it is.
+TRACE_WF_NAMES = ['Mill Farm', 'Church Barn', 'Hall Green']
+# Each name one record of the stub, near where it is traced on the grid (over Cambridge), so that WHG's guards let the bulk accept take it.
+TRACE_WF_ANSWERS = {n: [mydata_answer(f'place:gn:91000{i}', n, [0.11 + i * 0.01, 52.21])] for i, n in enumerate(TRACE_WF_NAMES)}
+def trace_workflow_checks(pw, url, tmp):
+    import re
+    fx = start_fixtures(tmp); A = fx['A']
+    base = url.rstrip('/') + '/'
+    origin = re.match(r'^https?://[^/]+', base).group(0)
+    out = tmp / 'trace-wf'; out.mkdir(exist_ok=True)
+    browser = pw.chromium.launch(headless=True, args=GL)
+    ctx = browser.new_context(accept_downloads=True, viewport={'width': 1400, 'height': 900}, reduced_motion='reduce')
+    ctx.add_init_script('window.__plato_forceDownload = true;')
+    ctx.set_default_timeout(T(30) * 1000)
+    if urlparse(base).hostname not in ('127.0.0.1', 'localhost'):
+        ctx.grant_permissions(['local-network-access'], origin=f'{urlparse(base).scheme}://{urlparse(base).netloc}')
+    cors = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+            'Access-Control-Allow-Headers': 'authorization, content-type, accept, user-agent'}
+    posts, asked, consoled, errors = [], [], [], []
+    def stub(route):
+        req = route.request
+        if req.method == 'OPTIONS': return route.fulfill(status=204, headers=cors)
+        reply = lambda body, status=200: route.fulfill(status=status, headers={**cors, 'Content-Type': 'application/json'}, body=json.dumps(body))
+        if req.method == 'GET': return reply({'detail': 'Not found'}, 404)
+        body = json.loads(req.post_data or '{}'); posts.append(body)
+        res = {'attribution': LOOKUP_ATTRIBUTION}
+        for k, q in (body.get('queries') or {}).items(): res[k] = {'result': TRACE_WF_ANSWERS.get(q.get('query'), [])}
+        reply(res)
+    ctx.route(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'), stub)
+    ctx.on('request', lambda r: asked.append(r.url))
+    page = ctx.new_page()
+    page.on('console', lambda m: consoled.append(m.text))
+    page.on('pageerror', lambda e: errors.append(str(e)[:200]))
+    r = {}
+    track = lambda: page.evaluate(JOIN_STATE)
+    ts = lambda: page.evaluate(TRACE_STATE) or {}
+    def step_is(step, state, timeout=60):
+        until(page, f"() => document.querySelector('#methodos-track li[data-step=\"{step}\"]')?.dataset.state === '{state}'", timeout)
+    def choose(fs):
+        page.set_input_files('#picker', [])
+        page.set_input_files('#picker', [str(f) for f in fs])
+        s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection')
+        if s.get('phase') != 'detected': raise RuntimeError(f'not detected: {s.get("phase")}')
+        return s
+    def run(button, timeout=180):
+        page.click(button)
+        return wait_state(page, lambda s: s.get('phase') in ('done', 'error'), T(timeout), 'run')
+    def saved(s, ending):
+        n = next((o['name'] for o in (s.get('outputs') or []) if o['name'].endswith(ending)), None)
+        if not n: raise RuntimeError(f'no output ending {ending}: {[o["name"] for o in s.get("outputs") or []]}')
+        return download(page, n, out / n)
+    def need(*keys):
+        missing = [k for k in keys if not r.get(k)]
+        if missing: raise RuntimeError(f'an earlier step did not finish ({", ".join(missing)})')
+    grid_id = 'https://annotations.allmaps.org/maps/0000000000000001'
+
+    def begin():
+        page.goto(NOTOOLS if PROVE else base)
+        page.evaluate(f"""() => {{ localStorage.setItem('plato-tools.permissions', JSON.stringify({{ version: 1, grants: {{ 'gazetteer:whg': {{ state: 'allowed', at: '2026-10-14T10:00:00Z' }}, 'iiif:{A}': {{ state: 'allowed', at: '2026-10-14T10:00:00Z' }} }} }}));
+          localStorage.setItem('plato-tools.reviewer', JSON.stringify({{ name: 'Trace Reviewer' }})); localStorage.setItem('chora-contributor', JSON.stringify({{ name: 'Trace Reviewer' }})); }}""")
+        page.goto(NOTOOLS if PROVE else base)
+        s = wait_state(page, lambda s: s.get('phase') == 'ready' and s.get('canary') in ('enforced', 'not-enforced'), T(30), 'ready')
+        page.evaluate("() => { const v = document.getElementById('reviewer'); v.value = 'Trace Reviewer'; v.dispatchEvent(new Event('change')); }")
+        page.click('#methodos-ask'); until(page, "!document.getElementById('methodos').hidden", 5)
+        page.check('input[name="methodos-have"][value="map"]'); page.check('input[name="methodos-want"][value="map"]')
+        asked_now = page.eval_on_selector_all('#mq-more fieldset[data-ask]', 'fs => fs.map((f) => f.dataset.ask)')
+        for k, v in (('will-identify', 'yes'), ('will-publish', 'no')): page.check(f'input[name="methodos-ask-{k}"][value="{v}"]')
+        # The base address is needed: no plan until it is given (the field, empty, Options having none).
+        unplanned = {'verdict': page.inner_text('#methodos-verdict'), 'follow': page.is_visible('#methodos-start'), 'help': page.inner_text('#methodos-base-help')}
+        page.fill('#methodos-base', TRACE_BASE)
+        until(page, "() => !document.getElementById('methodos-start').hidden", 10)
+        planned = page.eval_on_selector_all('#methodos-plan li.track-step', 'ls => ls.map((l) => l.dataset.step)')
+        before = page.eval_on_selector_all('#methodos-plan .track-before', 'ps => ps.map((p) => p.textContent)')
+        page.click('#methodos-start')
+        until(page, "() => document.getElementById('methodos-tracker').dataset.status === 'idle' || document.getElementById('methodos-tracker').dataset.status === 'waiting'", 10)
+        t = track(); r['begun'] = t
+        return (s.get('canary') == 'enforced' and asked_now == ['will-identify', 'will-publish'] and not unplanned['follow'] and 'base address' in unplanned['verdict']
+                and unplanned['help'].startswith('Needed: every place you trace is given its address under it')
+                and planned == ['trace', 'check', 'lookup', 'review', 'apply', 'again', 'compare', 'out'] and len(before) == 1 and 'daily cap is 5,000 requests per token' in before[0]
+                and list(t['steps']) == planned and t['steps']['trace'] == 'current' and t['status'] != 'pending' and 'Not started' not in t['message']
+                and page.input_value('#base') == TRACE_BASE and t['done']), {
+            'asked': asked_now, 'unplanned': unplanned, 'planned': planned, 'before': before, 'tracker': t, 'Options base': page.input_value('#base')}
+    attempt('Trace a historical map: the interview (a map image, places on a map, identified, not published) needs the base address before it shows the plan, says WHG\'s daily cap of 5,000 requests per token, and, followed, begins at once at Chora\'s step, no file chosen', begin)
+
+    def trace():
+        need('begun')
+        page.click('#for-tool a[href="#chora"]')
+        until(page, 'window.__chora && window.__chora.mapReadyCount >= 1 && window.__chora.canary === "enforced"', 90)
+        step_note = soon(page, '() => !!document.getElementById("chora-trace-step")', 10)
+        a = json.loads((FIX / 'annotation.json').read_text().replace('https://iiif.example.org', A).replace('https://elsewhere.example.org', fx['B']))
+        page.fill('#chora-map-input', json.dumps(a)); page.click('#chora-map-form button[type=submit]')
+        until(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.firstTile)', 40, grid_id)
+        key = cstate(page)['overlays'][0]['key']
+        page.click(f'#chora-overlay-list li[data-overlay="{key}"] button[data-fit]'); page.evaluate(SETTLE)
+        page.click(f'#chora-overlay-list li[data-overlay="{key}"] button[data-trace-new]')
+        until(page, '() => !!document.getElementById("chora-trace-form")', 10)
+        form = {'base': page.input_value('#chora-tset-base'), 'outline': page.is_checked('#chora-tset-outline')}
+        page.fill('#chora-tset-lang', 'en')
+        page.click('#chora-trace-form button[type=submit]')
+        until(page, 'k => window.__chora.trace?.key === k && window.__chora.phase === "loaded"', 30, key)
+        until(page, '() => !!window.__chora.traceScope', 30)
+        scope = page.evaluate('() => window.__plato.scope?.scope ?? null')
+        said = page.inner_text('#chora-trace-scope') if page.query_selector('#chora-trace-scope') else ''
+        line = page.inner_text('#scope') if page.query_selector('#scope') else ''
+        for i, (name, px) in enumerate(zip(TRACE_WF_NAMES, [(150, 150), (300, 200), (220, 380)])):
+            [xy] = page.evaluate(INK_TO_SCREEN, [grid_id, [list(px)]])
+            draw(page, 'point', [tuple(xy)]); page.click('#chora-draw-tools button[data-mode="static"]')
+            until(page, '() => !!window.__chora.naming?.draftId', 10)
+            page.fill('#chora-name-toponym', name); page.press('#chora-name-toponym', 'Enter')
+            until(page, 'n => window.__chora.trace.named === n && !window.__chora.naming', 15, i + 1)
+        t = track()
+        r['scope corners'] = (cstate(page).get('traceScope') or {}).get('corners')
+        return (step_note and form == {'base': TRACE_BASE, 'outline': True} and t['steps']['trace'] == 'current' and ts()['trace']['named'] == 3
+                and r['scope corners'] and 4 <= r['scope corners'] <= 1000 and 'outline' in said and 'Scope' in said and line.strip()), {
+            'step note': step_note, 'form': form, 'scope said': said[:200], 'scope line': line[:200], 'scope': (scope or {}).get('where') if isinstance(scope, dict) else scope, 'corners': r['scope corners'], 'steps': t['steps']}
+    attempt('Trace a historical map: in Chora, opened from the step, the map\'s settings take the workflow\'s base address and offer its outline as the lookup\'s Scope (set, said, and shown in the tracker); three places traced and named', trace)
+
+    def save_does_step():
+        need('scope corners')
+        page.click('#chora-save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+        ls = cstate(page)['lastSave'] or {}
+        name = (ls.get('outputs') or [{}])[0].get('name')
+        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#chora-save-result button.primary')
+        r['traced'] = out / name; d.value.save_as(r['traced'])
+        until(page, '() => !!window.__chora.handedOver && window.__plato.phase === "detected"', 60)
+        step_is('trace', 'done', 15)
+        said = page.inner_text('#chora-save-result')
+        page.click('#chora-leave')
+        doc = json.loads(r['traced'].read_text())
+        return (ls.get('passed') is True and ls.get('added') == 3 and len(doc['spatialEntities']) == 3 and 'The workflow\'s step “Trace the places from the map, into a new dataset” is done with it' in said
+                and track()['steps'].get('check') == 'current'), {'save': {k: ls.get(k) for k in ('passed', 'added')}, 'said': said[-300:], 'steps': track()['steps']}
+    attempt('Trace a historical map: Chora\'s save (the version check passed) does the step "trace" with the file it wrote, chosen in step 1; the workflow goes on to the check', save_does_step)
+
+    def check_and_lookup():
+        need('traced')
+        r['check'] = run('#check').get('phase'); step_is('check', 'done')
+        if not page.evaluate("() => document.getElementById('lookup').open"): page.click('#lookup > summary')
+        page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
+        until(page, "() => /^Send \\d+ quer/.test(document.getElementById('lookup-send').textContent) && !document.getElementById('lookup-send').disabled", 60)
+        page.click('#lookup-send')
+        step_is('lookup', 'done', 90)
+        qs = [q for b in posts for q in (b.get('queries') or {}).values()]
+        area = ((page.evaluate('() => window.__plato.scope?.scope ?? null') or {}).get('where') or {}).get('area')
+        sent_names = sorted(q.get('query') for q in qs)
+        keys = sorted({k for q in qs for k in q})
+        # Nothing of the map or the dataset besides the names and the outline: no title, no address, no contributor.
+        text = json.dumps(posts)
+        leaked = [w for w in ('A synthetic grid', 'Trace Reviewer', TRACE_BASE, A, 'annotations.allmaps.org', 'iiif') if w in text]
+        r['looked up'] = True
+        return (r['check'] == 'done' and sent_names == sorted(TRACE_WF_NAMES) and qs and all(q.get('bounds') == area for q in qs) and area and area['type'] == 'Polygon'
+                and not leaked and not any(k in keys for k in ('lat', 'lng', 'radius', 'countries', 'contained_in'))), {
+            'sent': sent_names, 'keys': keys, 'bounds sent': [bool(q.get('bounds')) for q in qs], 'area': bool(area), 'leaked': leaked}
+    attempt('Trace a historical map: checked, then looked up in the stub of WHG: it was sent the three names, each with the map\'s outline as its bounds, and nothing else of the map or the dataset', check_and_lookup)
+
+    def review_record_end():
+        need('looked up')
+        until(page, "() => !document.getElementById('bulk-accept').disabled", 30)
+        page.click('#bulk-accept')
+        wait_state(page, lambda s: sum(1 for c in (s.get('work') or {}).get('candidates', []) if (c.get('decision') or {}).get('kind') == 'match') == 3, T(15), 'accepted')
+        page.click('#methodos-done'); step_is('review', 'done', 15)
+        page.check('input[name="review-output"][value="dataset"]')
+        s = run('#finish'); step_is('apply', 'done', 30)
+        r['applied'] = saved(s, '.krisis-dataset.json')
+        choose([r['applied']])
+        r['again'] = run('#check').get('phase'); step_is('again', 'done')
+        page.set_input_files('#earlier', [str(r['traced'])])
+        s = wait_state(page, lambda s: s.get('action') == 'compare' and s.get('phase') in ('done', 'error'), T(120), 'compare')
+        compared = (s.get('report') or {}).get('errors')
+        step_is('compare', 'done')
+        until(page, "() => !document.getElementById('methodos-download').hidden", 30)
+        with page.expect_download(timeout=T(30) * 1000) as d: page.click('#methodos-download')
+        r['final'] = out / ('final-' + d.value.suggested_filename); d.value.save_as(r['final'])
+        step_is('out', 'done', 15)
+        doc = json.loads(r['final'].read_text())
+        ids = [i for e in doc['spatialEntities'] for a in e['attestations'] for i in a.get('identities') or []]
+        names = sorted(n['toponym'] for e in doc['spatialEntities'] for a in e['attestations'] for n in a.get('names') or [])
+        return (r['again'] == 'done' and compared == 0 and len(ids) == 3 and all(i['object'].startswith(MYDATA_W3) for i in ids) and names == sorted(TRACE_WF_NAMES)
+                and all(v.startswith('done') for v in track()['steps'].values())), {'again': r['again'], 'compare errors': compared, 'identities': len(ids), 'names': names, 'steps': track()['steps']}
+    attempt('Trace a historical map: the candidates accepted, the decisions recorded in the dataset, checked again, compared with the dataset traced (nothing taken away), and downloaded as it is: every step done, each place identified with its WHG record', review_record_end)
+
+    def only_allowed():
+        need('final')
+        other = sorted({re.match(r'^[a-z]+:(//[^/]*)?', u).group(0) for u in asked
+                        if not (u.startswith(origin + '/') or u.startswith(A + '/') or u.startswith('data:') or u.startswith('blob:') or re.match(r'^https://([^/]*\.)?whgazetteer\.org/', u))})
+        refused = [m for m in consoled if 'Refused to connect' in m]
+        return (not other and not refused and posts and not errors), {'other sites': other, 'refused': refused[:3], 'lookups': len(posts), 'errors': errors[:3]}
+    attempt('Trace a historical map: every request went to this site, the map\'s server or WHG (the stub), each allowed, none to another site or stopped by the policy, and no page error', only_allowed)
+    try: browser.close()
+    except Exception: pass
     stop_fixtures()
 
 # ---- Assisted ink tracing, on the same fixture server ---------------------------------------------

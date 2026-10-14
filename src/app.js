@@ -39,6 +39,7 @@ import { levelNames, levelLabel, navigator as levelNavigator, firstOpen, chainOf
 import { mountMethodos } from './methodos/page.js';
 import { version as TOOLS_VERSION } from '../package.json';
 import { mountScope, aatLabels, BUNDLED_AAT_LABELS } from './scope-page.js';
+import { normaliseScope } from './engine/krisis/scope.js';
 import { kindFit, candidateTypes } from './engine/krisis/kinds.js';
 import { workflowStore } from './methodos/store.js';
 import { whgProjects } from './methodos/whg.js';
@@ -1026,6 +1027,8 @@ chooseTool(toolFromHash());
 // chosen there (choraSaved). While it is shown, the rest of the centre is hidden but for the workflow's
 // title and step 1, folded to its line once a file is chosen.
 let choraLoading = null;
+/** The base address in Options set, as if typed there: its own listeners (the preview made under it is let go) hear 'input' and 'change'. */
+function setOptionsBase(v) { if ($('base').value === v) return; $('base').value = v; for (const t of ['input', 'change']) $('base').dispatchEvent(new Event(t, { bubbles: true })); }
 const choraShown = () => !$('chora').hidden;
 const choraInHash = () => { try { return new URLSearchParams(location.hash.replace(/^#/, '')).has('chora'); } catch { return false; } };
 async function openChora() {
@@ -1048,6 +1051,14 @@ async function openChora() {
       // WHG's lookup, the page's one (one queue, whoever asks); and what it does when a request is refused.
       lookup: () => whgLookup(), onRefused: (f) => refusedToo.add(f),
       settled: () => methodos.takenUp(),
+      // Tracing a map into a new dataset: the workflow's step at hand (its step "trace" is done in Chora), the base
+      // address in Options (its one store), the dataset made from the map kept as the user's own choice is, and the
+      // map's outline made the workflow's lookup Scope (said in the tracker's Scope line).
+      step: () => methodos.step(),
+      base: () => $('base').value,
+      setBase: (v) => setOptionsBase(v),
+      keep: (list) => keepChoice(list),
+      setScopeArea: (area) => methodos.setScope({ ...normaliseScope(methodos.scope()), where: { mode: 'area', area } }),
     })));
     await choraLoading;
   } catch (e) {
@@ -1169,7 +1180,7 @@ const methodos = mountMethodos({
     ownTarget: () => (input && readable(input) ? INPUT_TO_TARGET[input.format] ?? null : null),
     base: () => $('base').value,
     // As if typed in Options: its own listeners (the preview made under it is let go) hear 'input' and 'change'.
-    setBase: (v) => { if ($('base').value === v) return; $('base').value = v; for (const t of ['input', 'change']) $('base').dispatchEvent(new Event(t, { bubbles: true })); },
+    setBase: (v) => setOptionsBase(v),
     parked: () => parked,
     // The project file (src/engine/methodos/project.js): where it is saved, asked at the click; what it must never hold; a review read from it.
     saveTarget: projectTarget,
