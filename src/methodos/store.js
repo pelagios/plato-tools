@@ -22,6 +22,34 @@ import { exportRecord, recordOf } from '../engine/methodos/record.js';
 export const DB = 'plato-tools-methodos', STORE = 'workflows', TAB = 'plato-tools.methodos.';
 export const HANDLES = 'plato-tools-methodos-handles';
 const PENDING = 'pending:';
+// The link of a workflow to its project in WHG's Workbench (plan #34, item A1; src/methodos/whg.js):
+// { projectId, version, sha256, shared, savedAt, base, title, state } as last saved to WHG or opened from it
+// (`state`: the digest of the workflow and its review then, to say whether it has changed since), or,
+// for a copy made from a share link, only { origin: { projectId, version } }. Kept beside the record, in a
+// database of its own keyed by the record's id, and let go with it; with working data not kept, for the tab
+// (sessionStorage, 'plato-tools.methodos-link.<id>'). Never in a project file, and never a token: a share
+// link's token is not kept at all, only that the project is shared.
+export const LINKS = 'plato-tools-methodos-links';
+const LINK_TAB = 'plato-tools.methodos-link.';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** A link as kept, cleaned: only its known keys, each of its kind; null if it is none. */
+export function cleanLink(v) {
+  if (!v || typeof v !== 'object') return null;
+  const out = {};
+  if (UUID.test(v.projectId || '')) {
+    out.projectId = v.projectId;
+    if (Number.isSafeInteger(v.version) && v.version > 0) out.version = v.version;
+    if (/^[0-9a-f]{64}$/.test(v.sha256 || '')) out.sha256 = v.sha256;
+    out.shared = v.shared === true;
+    if (typeof v.savedAt === 'string' && !Number.isNaN(Date.parse(v.savedAt))) out.savedAt = v.savedAt;
+    if (typeof v.base === 'string' && /^https:\/\/[^\s?#]+\/$/.test(v.base)) out.base = v.base;
+    if (typeof v.title === 'string') out.title = v.title.slice(0, 300);
+    if (/^[0-9a-f]{64}$/.test(v.state || '')) out.state = v.state;
+  }
+  const o = v.origin;
+  if (o && typeof o === 'object' && UUID.test(o.projectId || '') && Number.isSafeInteger(o.version)) out.origin = { projectId: o.projectId, version: o.version };
+  return Object.keys(out).length ? out : null;
+}
 
 /**
  * A store of workflow records. Everything it is given can be replaced, for the tests: `indexedDB`,
@@ -69,7 +97,12 @@ export function workflowStore({ indexedDB, session, keep = keepWorkingData } = {
       req.onsuccess = req.onerror = req.onblocked = () => resolve();
     } catch { resolve(); }
   });
-  const forgetKept = async () => { await forget(DB); await forget(HANDLES); };
+  const forgetKept = async () => { await forget(DB); await forget(HANDLES); await forget(LINKS); };
+  const linkTab = {
+    get: (id) => { try { return JSON.parse(ss?.getItem(LINK_TAB + id) ?? 'null'); } catch { return null; } },
+    put: (id, v) => { try { ss?.setItem(LINK_TAB + id, JSON.stringify(v)); return !!ss; } catch { return false; } },
+    drop: (id) => { try { ss?.removeItem(LINK_TAB + id); } catch { /* refused */ } },
+  };
   const read = (text) => { try { return text ? deserialise(text) : null; } catch { return null; } };
 
   return {
@@ -103,10 +136,28 @@ export function workflowStore({ indexedDB, session, keep = keepWorkingData } = {
     },
     /** Let the record go, wherever it was kept, and the file handle kept with it. */
     async remove(id) {
-      tab.drop(id);
+      tab.drop(id); linkTab.drop(id);
       if (!keeping()) { await forgetKept(); return; }
       try { await tx('readwrite', (s) => s.delete(id)); } catch { /* none kept */ }
       try { await tx('readwrite', (s) => s.delete(id), HANDLES); } catch { /* none kept */ }
+      try { await tx('readwrite', (s) => s.delete(id), LINKS); } catch { /* none kept */ }
+    },
+    /**
+     * Keep the link of the record `id` to WHG (cleanLink), or let it go (null): in IndexedDB where working
+     * data is kept, else for the tab. Returns where it was kept: 'browser', 'tab', or null (let go).
+     */
+    async setLink(id, link) {
+      const v = cleanLink(link);
+      linkTab.drop(id);
+      if (!v) { if (keeping()) { try { await tx('readwrite', (s) => s.delete(id), LINKS); } catch { /* none kept */ } } return null; }
+      if (keeping()) { try { await tx('readwrite', (s) => s.put(v, id), LINKS); return 'browser'; } catch { /* the tab's, then */ } } else await forgetKept();
+      return linkTab.put(id, v) ? 'tab' : null;
+    },
+    /** The link of the record `id` to WHG, or null. */
+    async linkFor(id) {
+      const here = cleanLink(linkTab.get(id));
+      if (here || !keeping()) return here;
+      try { return cleanLink(await tx('readonly', (s) => s.get(id), LINKS)); } catch { return null; }
     },
     /**
      * Keep `handle` (a FileSystemFileHandle) for the record `id`, where working data is kept and the
