@@ -240,6 +240,21 @@ test('WHG\'s cap is said in one phrase everywhere: the 2 MiB request and the pro
   assert.ok(page.includes('(${capWords()})') && !/at most 2 MB/.test(page), 'the page says the same');
 });
 
+test('the fake\'s held minute: with holdMinute, a wall-clock minute turning gives no fresh budget (the browser check\'s second pause depends on it); without, it does', async () => {
+  let t = Date.UTC(2026, 9, 15, 10, 0, 59);
+  const fake = workbenchFake({ clock: () => t }); fake.addUser({ token: TOKEN, name: 'alice' });
+  const wb = client(fake);
+  fake.cfg.rate = 1;
+  // Control: the minute turns, and the budget is fresh (presence of the reset this guards against).
+  fake.newMinute(); await wb.list(); await rejects(wb.list(), 'rate');
+  t += 2000; assert.ok(Array.isArray(await wb.list()), 'a new wall-clock minute gives a fresh budget');
+  // Held: spent, the minute turns, still refused.
+  fake.cfg.holdMinute = true; fake.newMinute(); t = Date.UTC(2026, 9, 15, 10, 1, 59);
+  await wb.list(); t += 2000; await rejects(wb.list(), 'rate');
+  // Let go, and the next minute is fresh again.
+  fake.cfg.holdMinute = false; t += 60000; assert.ok(Array.isArray(await wb.list()));
+});
+
 test('a pause asked for (429) is waited once, as long as WHG asks, then the request is made again; asked again, it stops in words', async () => {
   const fake = setup(), wb = client(fake);
   fake.cfg.rate = 1; fake.newMinute();

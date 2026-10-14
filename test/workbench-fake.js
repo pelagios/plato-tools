@@ -48,9 +48,10 @@ export function jsonb(v) {
  */
 export function workbenchFake({ origins = ['https://pelagios.org'], self = 'https://whgazetteer.org', rate = 120, bodyMax = 2 * 1024 * 1024, clock = () => Date.now() } = {}) {
   const users = new Map(), tokens = new Map(), teams = new Map(), projects = new Map(), budget = new Map();
+  let held = null;   // the minute held while cfg.holdMinute
   let nextUser = 1, nextTeam = 1;
   const log = [];
-  const cfg = { origins: [...origins], rate, bodyMax, retryAfter: null, fail: 0 };   // fail: the next n requests (not preflights) answered 503, as a server down for a moment   // retryAfter: a fixed wait for a 429, for the browser checks (WHG's is the rest of its minute)
+  const cfg = { origins: [...origins], rate, bodyMax, retryAfter: null, fail: 0, holdMinute: false };   // holdMinute: the minute does not turn while true, so a check that spends the budget is not undone by the wall clock   // fail: the next n requests (not preflights) answered 503, as a server down for a moment   // retryAfter: a fixed wait for a 429, for the browser checks (WHG's is the rest of its minute)
 
   function addUser({ token, name = `user${nextUser}`, beta = true, active = true } = {}) {
     const u = { id: nextUser++, name, beta, active };
@@ -215,7 +216,9 @@ export function workbenchFake({ origins = ['https://pelagios.org'], self = 'http
       if (!u || !u.active) return unauth('invalid API token');
       if (origin && !cfg.origins.includes(origin) && origin !== self) return err(403, 'this origin may not use the Workbench API', 'origin_not_allowed');
       if (cfg.rate) {
-        const now = clock() / 1000, window = Math.floor(now / 60), k = `${u.id}:${window}`;
+        const now = clock() / 1000;
+        held = cfg.holdMinute ? held ?? Math.floor(now / 60) : null;
+        const window = held ?? Math.floor(now / 60), k = `${u.id}:${window}`;
         const used = (budget.get(k) || 0) + 1;
         budget.set(k, used);
         if (used > cfg.rate) {
@@ -254,7 +257,7 @@ export function workbenchFake({ origins = ['https://pelagios.org'], self = 'http
     /** Another browser's save: the project's snapshot replaced, its version up by one. */
     pushAs(pid, snapshot, u = null) { const p = projects.get(pid); p.version += 1; store(p, snapshot, u); return p.version; },
     /** Reset the per-minute budgets (a new minute). */
-    newMinute() { budget.clear(); },
+    newMinute() { budget.clear(); held = null; },
   };
 }
 
@@ -266,7 +269,7 @@ export function workbenchFake({ origins = ['https://pelagios.org'], self = 'http
 export function serve(fake, port, host = '127.0.0.1') {
   const control = {
     user: (b) => ({ id: fake.addUser(b).id }),
-    config: (b) => { for (const k of ['origins', 'rate', 'bodyMax', 'retryAfter', 'fail']) if (b[k] !== undefined) fake.cfg[k] = b[k]; return { ...fake.cfg }; },
+    config: (b) => { for (const k of ['origins', 'rate', 'bodyMax', 'retryAfter', 'fail', 'holdMinute']) if (b[k] !== undefined) fake.cfg[k] = b[k]; return { ...fake.cfg }; },
     log: (b) => { const out = fake.log.map((x) => ({ ...x, body: x.body.length > 4096 ? `${x.body.slice(0, 4096)}…` : x.body, size: x.body.length })); if (b.clear) fake.log.length = 0; return out; },
     projects: () => [...fake.projects.values()].map((p) => ({ id: p.id, title: p.title, version: p.version, doc_type: p.doc_type, shared: !!p.public_token, token: p.public_token, snapshot: p.snapshot, team: p.team })),
     push: (b) => ({ version: fake.pushAs(b.id, b.snapshot) }),

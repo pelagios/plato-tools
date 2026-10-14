@@ -5365,7 +5365,7 @@ def whg_checks(pw, url, tmp):
         out_['401'] = view(e)
         e.context.close()
         # 429 twice: waited once, counted down, then stopped in words.
-        fake('config', {'rate': 1, 'retryAfter': 2}); fake('newMinute')
+        fake('config', {'rate': 1, 'retryAfter': 2, 'holdMinute': True}); fake('newMinute')   # the minute held: a wall-clock minute turning during the countdown would give the retry a fresh budget
         fake('create', {'token': WHG_E2E_TOKEN, 'title': 'spends the minute', 'snapshot': {'plato': 1}})   # the minute's one request spent elsewhere
         log(clear=True)
         panel(a); a.click('#whg-save')
@@ -5373,7 +5373,7 @@ def whg_checks(pw, url, tmp):
         out_['countdown'] = view(a)['said']
         until(a, "() => /still asking for a pause/.test(document.getElementById('whg-said').textContent)", 20)
         out_['429'] = view(a)['said']
-        fake('config', {'rate': 120, 'retryAfter': None}); fake('newMinute')
+        fake('config', {'rate': 120, 'retryAfter': None, 'holdMinute': False}); fake('newMinute')
         # 413 from WHG (a lower cap than these tools fit to): said, nothing lost.
         fake('config', {'bodyMax': 1000})
         a.click('#whg-save')
@@ -5403,7 +5403,7 @@ def whg_checks(pw, url, tmp):
         return ok, {k: (v if not isinstance(v, dict) else {'said': v['said'][:120], 'token': v['token'], 'focus': v['focus']}) for k, v in out_.items()}
     def refusals_restored():
         try: return refusals()
-        finally: fake('config', {'origins': [origin], 'rate': 120, 'retryAfter': None, 'bodyMax': 2 * 1024 * 1024}); fake('newMinute')
+        finally: fake('config', {'origins': [origin], 'rate': 120, 'retryAfter': None, 'bodyMax': 2 * 1024 * 1024, 'holdMinute': False}); fake('newMinute')
     attempt('WHG: each refusal said in words, nothing lost: not enrolled (WHG\'s page linked), a token refused (the field opened and focused), a pause asked twice (counted down, then stopped), too large for WHG (413), deleted there (404, unlinked), and an origin WHG does not allow (403)', refusals_restored)
 
     def too_large():
