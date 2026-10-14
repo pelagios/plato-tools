@@ -47,6 +47,9 @@ const ROUTES = [
     { have, want: 'map', recipe, set: { target: 'plato-json' }, ask: ['will-draw', 'will-publish'], base: { when: 'will-publish', needed: false } },
     { have, want: 'publish', recipe, set: { target: 'plato-json', 'will-publish': true }, ask: ['will-draw'], base: { when: 'will-publish', needed: false } },
   ]),
+  // Two datasets: the user's table, read as Map your data reads it, matched with another (chosen at the match).
+  // The base address always, optional: the table's places have their addresses under it, which the decisions name.
+  { have: 'table', want: 'match', recipe: 'match-two-datasets', set: { target: 'plato-json' }, ask: ['into-dataset', 'will-publish'], base: { needed: false } },
 ];
 
 // Answers that name no recipe yet: what to use meanwhile, by what is wanted, as the page's tool keys
@@ -56,7 +59,7 @@ const MEANWHILE = {
   publish: { why: 'Publish a dataset starts from a dataset in a PLATO format: bring yours into PLATO first.', tools: ['read', 'publish'] },
   version: { why: 'Release a new version is not a workflow yet.', tools: ['versions', 'publish'] },
   convert: { why: 'A conversion is one step, not a workflow.', tools: ['read', 'convert'] },
-  match: { why: 'Matching two datasets is one tool, not a workflow.', tools: ['match'] },
+  match: { why: 'Match two datasets starts from a table of places (a spreadsheet or CSV): Krisis matches any two datasets, one step at a time.', tools: ['match'] },
   cube: { why: 'Figures as a Data Cube is one tool, not a workflow.', tools: ['figures'] },
 };
 const TEXT = 'Places from a text is not available yet: finding the places named in a text is deferred.';
@@ -75,8 +78,16 @@ export function choose(have, want) {
   return { kind: 'none', why: have === 'text' && (want === 'map' || want === 'publish') ? TEXT : m.why, tools: [...m.tools] };
 }
 
-/** The questions still to ask, with their words, from the recipe: [{ key, question }]. */
-export const questionsFor = (choice) => (choice?.kind === 'recipe' ? choice.ask.map((key) => ({ key, question: RECIPES[choice.recipe].asks[key].question })) : []);
+/**
+ * The questions still to ask, with their words, from the recipe: [{ key, question, answers?, default? }],
+ * `answers` the words of Yes and of No where the recipe names them, `default` the answer given until another is.
+ */
+export const questionsFor = (choice) => (choice?.kind === 'recipe' ? choice.ask.map((key) => {
+  const q = RECIPES[choice.recipe].asks[key];
+  return { key, question: q.question, ...(q.answers ? { answers: [...q.answers] } : {}), ...(typeof q.default === 'boolean' ? { default: q.default } : {}) };
+}) : []);
+/** A yes-or-no answer given, else the question's default, else undefined. */
+const given = (choice, yesNo, k) => (typeof yesNo[k] === 'boolean' ? yesNo[k] : RECIPES[choice.recipe].asks[k].default);
 
 /**
  * Whether the base address is asked under these answers: { needed } (needed: a workflow that mints
@@ -85,7 +96,7 @@ export const questionsFor = (choice) => (choice?.kind === 'recipe' ? choice.ask.
 export function baseAsked(choice, yesNo = {}) {
   const b = choice?.kind === 'recipe' ? choice.base : null;
   // An answer it depends on, given or settled by the first two questions ("A citable, published dataset" settles publishing).
-  const yes = (k) => (yesNo[k] ?? choice.set[k]) === true;
+  const yes = (k) => (yesNo[k] ?? choice.set[k] ?? RECIPES[choice.recipe].asks[k]?.default) === true;
   const when = [].concat(b?.when ?? []);
   if (!b || (when.length && !when.some(yes))) return null;
   return { needed: b.needed === true || (typeof b.needed === 'string' && yes(b.needed)), question: RECIPES[choice.recipe].asks.base.question };
@@ -96,13 +107,13 @@ export const baseAnswer = (v) => (typeof v === 'string' && /^https?:\/\/\S+$/.te
 /** The recipe's answers: those the first two questions settled, the yes-or-no answers given (true or false), and the base address where it is asked and given. */
 export function answersFor(choice, yesNo = {}, { base } = {}) {
   const a = { ...choice.set };
-  for (const k of choice.ask) if (typeof yesNo[k] === 'boolean') a[k] = yesNo[k];
+  for (const k of choice.ask) if (typeof given(choice, yesNo, k) === 'boolean') a[k] = given(choice, yesNo, k);
   if (baseAsked(choice, yesNo) && baseAnswer(base)) a.base = baseAnswer(base);
   return a;
 }
 
 /** Whether every question still to ask has been answered, the base address among them where it is needed. */
-export const answered = (choice, yesNo = {}, { base } = {}) => choice?.kind === 'recipe' && choice.ask.every((k) => typeof yesNo[k] === 'boolean')
+export const answered = (choice, yesNo = {}, { base } = {}) => choice?.kind === 'recipe' && choice.ask.every((k) => typeof given(choice, yesNo, k) === 'boolean')
   && !(baseAsked(choice, yesNo)?.needed && !baseAnswer(base));
 
 // What the end of a workflow says of a step that was skipped because it is not available yet, by the
@@ -128,6 +139,8 @@ export function plan(recipeKey, answers, { recipes = RECIPES } = {}) {
   const skipped = steps.filter((s) => s.available !== true);
   return { key: recipe.key, title: recipe.title, version: recipe.version, digest: recipe.digest, steps, left,
     cannot: [...(recipe.cannot || [])],
+    // The files chosen at a step, not at the start (the other dataset of a match), as the tracker names them until they are.
+    late: Object.entries(recipe.files || {}).filter(([, f]) => f.late).map(([key, f]) => ({ key, words: f.words })),
     unavailable: skipped.map((s) => s.id),
     notes: skipped.map((s) => SKIPPED[s.op] || `“${s.title}” was not done: it is not yet available.`) };
 }

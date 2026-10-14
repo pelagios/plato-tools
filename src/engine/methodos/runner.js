@@ -51,7 +51,8 @@ export function start(recipe, answers = {}, files = {}, { unavailable = 'skip' }
   }
   const chosen = {};
   for (const [k, f] of Object.entries(recipe.files || {})) {
-    if (files[k] === undefined) { if (!f.optional) no(`"${recipe.title}" needs ${f.words.toLowerCase()}.`); continue; }
+    // Files chosen late (the other dataset of a match) are chosen at the step that takes them (supply()).
+    if (files[k] === undefined) { if (!f.optional && !f.late) no(`"${recipe.title}" needs ${f.words.toLowerCase()}.`); continue; }
     chosen[k] = checkHandoff(files[k], f.types, `"${recipe.title}" (${f.words.toLowerCase()})`).map((r) => ({ ...r }));
   }
   for (const k of Object.keys(files)) if (!Object.hasOwn(recipe.files || {}, k)) no(`"${recipe.title}" does not take files called "${k}".`);
@@ -67,8 +68,37 @@ export function start(recipe, answers = {}, files = {}, { unavailable = 'skip' }
     }
     return { id: s.id, op: s.op, title: s.title || op.title, from: { ...(s.from || {}) }, options, state: runs && !missing ? 'pending' : 'skipped', ...(missing ? { unavailable: op.available } : {}) };
   });
-  return { methodos: FORMAT, recipe: { key: recipe.key, version: recipe.version, digest: digest(recipe) }, answers: clone(answers), files: chosen, status: 'idle', current: null, steps };
+  // The files chosen late, by key, in the recipe's words: what inputsOf() says until they are chosen (supply()).
+  const late = Object.fromEntries(Object.entries(recipe.files || {}).filter(([, f]) => f.late).map(([k, f]) => [k, f.words]));
+  return { methodos: FORMAT, recipe: { key: recipe.key, version: recipe.version, digest: digest(recipe) }, answers: clone(answers), files: chosen,
+    ...(Object.keys(late).length ? { late } : {}), status: 'idle', current: null, steps };
 }
+
+/** The steps that take the files `key` (a step's input from '$key'). */
+const takers = (state, key) => state.steps.filter((s) => Object.values(s.from).some((ref) => alternatives(ref).includes(`$${key}`)));
+
+/**
+ * Files chosen late, at the step that takes them (the recipe's files with `late`: the other dataset of a
+ * match, chosen in Krisis at the match): recorded as references, as the files chosen at the start are,
+ * and checked by them from then on. The same files again change nothing. Others are refused, in words,
+ * once a step that takes them has been done, is running or waits: that step is done again first
+ * (invalidate()), so that no step's result is of other files than the record names.
+ */
+export function supply(state, recipe, key, refs) {
+  const f = recipe?.files?.[key];
+  if (!f || !f.late) no(`"${recipe?.title ?? state.recipe.key}" does not take files called "${key}" at a step: ${f ? 'they are chosen at the start' : 'it has none of that name'}.`);
+  if (recipe.key !== state.recipe.key) no(`This workflow follows "${state.recipe.key}", not "${recipe.title}".`);
+  const checked = checkHandoff(refs, f.types, `"${recipe.title}" (${f.words.toLowerCase()})`).map((r) => ({ ...r }));
+  const out = clone(state);
+  const was = out.files[key];
+  if (was && was.length === checked.length && was.every((r) => checked.some((x) => x.sha256 === r.sha256 && x.size === r.size))) return out;
+  const used = takers(out, key).find((s) => ['done', 'running', 'waiting'].includes(s.state));
+  if (was && used) no(`${upperFirst(f.words)} ${was.length === 1 ? 'is' : 'are'} already chosen (${was.map((r) => r.name).join(', ')}), and the step ${titleOf(used)} ${used.state === 'done' ? 'was done with' : 'is under way on'} ${was.length === 1 ? 'it' : 'them'}: do that step again to choose another.`);
+  out.files[key] = checked;
+  return out;
+}
+const upperFirst = (w) => w.charAt(0).toUpperCase() + w.slice(1);
+const lowerFirst = (w) => w.charAt(0).toLowerCase() + w.slice(1);
 
 /** The references each input of a step resolves to, from the files chosen and the steps done; an input from a skipped step is left out. */
 export function inputsOf(state, stepId) {
@@ -78,7 +108,12 @@ export function inputsOf(state, stepId) {
   for (const [slot, ref] of Object.entries(s.from)) {
     let got;
     for (const a of alternatives(ref)) {
-      if (a.startsWith('$')) { got = state.files[a.slice(1)]; if (got) break; continue; }
+      if (a.startsWith('$')) {
+        got = state.files[a.slice(1)]; if (got) break;
+        // Files chosen late, not chosen yet: the step waits for them, said in the recipe's words.
+        if (Object.hasOwn(state.late || {}, a.slice(1))) no(`The step ${titleOf(s)} cannot be done yet: ${lowerFirst(state.late[a.slice(1)])} is not chosen. Choose it at this step.`);
+        continue;
+      }
       const [id, out] = a.split('.');
       const p = stepOf(state, id);
       if (p.state === 'done') { got = p.outputs[out]; break; }
@@ -114,7 +149,7 @@ function current(out, stepId, states, doing) {
   if (out.current !== stepId || !states.includes(s.state)) no(`The step ${titleOf(s)} cannot be ${doing}: it is ${s.state}${out.current && out.current !== stepId ? `, and the workflow is at ${titleOf(stepOf(out, out.current))}` : ''}.`);
   return s;
 }
-const clean = (s) => { for (const k of ['why', 'problem', 'error', 'partial', 'discarded', 'progress']) delete s[k]; };
+const clean = (s) => { for (const k of ['why', 'problem', 'error', 'partial', 'discarded', 'progress', 'findings']) delete s[k]; };
 
 /** The outputs given exactly as the operation declares them: each one, of its type. */
 function checkOutputs(s, outputs) {
@@ -126,13 +161,21 @@ function checkOutputs(s, outputs) {
   return kept;
 }
 
-/** The step is done, with its outputs (references, of the types its operation gives). */
-export function complete(state, stepId, outputs) {
+/**
+ * The step is done, with its outputs (references, of the types its operation gives). `findings`, given
+ * only for a step whose problems do not stop the workflow (its options say `problems: 'report'`: the check
+ * of the other dataset of a match), is what its report found, as stop() takes it ({ words, errors? }):
+ * kept with the step, "done, with a report", and shown with it.
+ */
+export function complete(state, stepId, outputs, { findings } = {}) {
   const out = clone(state);
   const s = current(out, stepId, ['running', 'waiting'], 'done');
   if (s.state === 'waiting' && OPERATIONS[s.op].kind !== 'interactive') no(`The step ${titleOf(s)} is waiting to run, not done: it is resumed, and it is done when it has run.`);
+  if (findings && s.options?.problems !== 'report') no(`The step ${titleOf(s)} stops for the problems it finds: it is not done with them.`);
+  if (findings && (typeof findings.words !== 'string' || !findings.words.trim())) no(`The step ${titleOf(s)} cannot be done with a report that does not say what it found.`);
   s.outputs = checkOutputs(s, outputs);
   clean(s);
+  if (findings) s.findings = { words: findings.words, ...(Number.isSafeInteger(findings.errors) ? { errors: findings.errors } : {}) };
   s.state = 'done';
   out.current = null; out.status = 'idle';
   return out;
@@ -234,6 +277,10 @@ export function invalidate(state, stepId) {
   const cur = out.current ? stepOf(out, out.current) : null;
   if (cur && (cur.state === 'running' || cur.id !== stepId)) no(`The step ${titleOf(s)} cannot be done again while ${titleOf(cur)} is ${cur.state}.`);
   const reset = new Set([stepId]);
+  // Done again, a step that takes files chosen late takes the other steps that take them with it, so that
+  // other files may be chosen for it (supply()), and no step stays done with the files it replaces.
+  const late = Object.keys(out.late || {}).filter((k) => takers(out, k).some((x) => x.id === stepId));
+  for (const k of late) for (const x of takers(out, k)) reset.add(x.id);
   for (const x of out.steps) {
     if (['stopped', 'failed', 'cancelled'].includes(x.state)) reset.add(x.id);
     if (Object.values(x.from).some((ref) => alternatives(ref).some((a) => reset.has(a.split('.')[0])))) reset.add(x.id);

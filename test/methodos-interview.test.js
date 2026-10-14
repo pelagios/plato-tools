@@ -41,7 +41,7 @@ test('"not sure" gives the plain grid, whatever is had; nothing is chosen until 
 });
 
 test('every other pair names no recipe, says why, and names tools that exist', () => {
-  const named = new Set(['table|map', 'table|publish', 'plato|publish', 'tei|map', 'tei|publish', 'recogito|map', 'recogito|publish']);
+  const named = new Set(['table|map', 'table|publish', 'table|match', 'plato|publish', 'tei|map', 'tei|publish', 'recogito|map', 'recogito|publish']);
   const keys = new Set(['read', 'check', 'convert', 'figures', 'versions', 'publish', 'match', 'chora']);
   let none = 0;
   for (const h of HAVE) for (const w of WANT) {

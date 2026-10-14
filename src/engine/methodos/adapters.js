@@ -66,7 +66,7 @@ async function engine(host, type, call) {
   // As the page and the command line do: a run that did not finish leaves nothing; one that finished
   // with errors in its report keeps what it wrote, but the step stops, and its outputs are not handed on.
   finish(!!r?.incomplete);
-  if (problem) return { report: r.report, problem };
+  if (problem) return { report: r.report, problem, ...(r?.incomplete ? { incomplete: true } : {}) };
   const outputs = type ? await refsOf(await Promise.all(r.outputs.map((o) => host.file(o))), type) : [];
   return { report: r.report, outputs, result: r };
 }
@@ -197,11 +197,38 @@ export const ADAPTERS = {
     const r = await engine(host, 'work.krisis', (env) => match({ subjects, others, options: { ...options, signal } }, env));
     return r.problem ? r : { report: r.report, outputs: { work: r.outputs } };
   },
+  // The decisions recorded: in the dataset (its places, with the new attestations), or, the step's
+  // `intoDataset` false (Match two datasets, "keep them in a file of their own"), in a document of the new
+  // attestations alone, about the dataset's places (apply.js 'attestations'). With `exportCandidates` (a
+  // workflow whose result is published), the review's suggestions are first exported as a candidate set,
+  // written beside the result, so that each answer points at the candidate it answers (promotedFrom), as
+  // the step that records regions does; for the dataset's own address, else the base address given.
   async apply({ inputs, options, host, signal }) {
     const subjects = await inputOf(inputs.subjects, host, 'dataset');
-    const [work] = await filesFor(inputs.work, host);
-    const r = await engine(host, 'dataset', async (env) => apply({ subjects, work: await work.text(), options: { ...options, output: 'dataset', signal } }, env));
-    return r.problem ? r : { report: r.report, outputs: { dataset: r.outputs } };
+    const [wf] = await filesFor(inputs.work, host);
+    const output = options.intoDataset === false ? 'attestations' : 'dataset';
+    const rest = without(options, 'intoDataset', 'exportCandidates', 'issued');
+    let text = await wf.text(), x = null;
+    if (options.exportCandidates === true) {
+      let work = readWork(text);
+      if (!work.subjects.uri) {
+        const uri = datasetAddress(options.base);
+        if (!uri) throw new DataError('The dataset has no address of its own, and no base address was given, so the suggestions cannot be exported for it before the decisions are recorded: give the base address its places have their addresses under.');
+        Object.assign(work.subjects, { uri, uriFrom: 'base' });
+      }
+      x = exportCandidates(work, { ...(options.issued ? { issued: options.issued } : {}) });
+      text = serialiseWork(x.work);
+    }
+    const stem = subjects.files[0].name.replace(/\.[^.]+$/, '');
+    const r = await engine(host, 'dataset', async (env) => {
+      const a = await apply({ subjects, work: text, options: { ...rest, output, signal } }, env);
+      if (a.incomplete || a.report?.errors) return a;
+      if (x?.set) { const o = await env.output(`${stem}.candidates.json`); o.write(serialiseCandidateSet(x.set)); await o.close(); }
+      return a;
+    });
+    if (r.problem) return r;
+    // The candidate set is written beside the result, not handed on (apply()'s outputs are the result alone).
+    return { report: { ...r.report, ...(x ? { counts: { ...(r.report?.counts || {}), candidateSet: x.setIri } } : {}) }, outputs: { dataset: r.outputs } };
   },
   // The lookup is made on the page thread, through the permissions module (host.lookup); the places
   // are gathered by the engine, as the worker's 'places' command gathers them. Its work file is written
@@ -303,7 +330,12 @@ export async function runStep(state, host, { signal, adapters = ADAPTERS } = {})
     return { state: runner.fail(state, id, e, e?.partial), report: null };
   }
   if (signal?.aborted) return { state: runner.cancel(state, id, r.outputs), report: r.report };
-  if (r.problem) return { state: runner.stop(state, id, r.problem), report: r.report };
+  if (r.problem) {
+    // A step whose problems do not stop the workflow (the check of a match's other dataset): done, with a
+    // report of what it found. One that could not read its file to the end stops all the same.
+    if (step.options?.problems === 'report' && !r.incomplete) return { state: runner.complete(state, id, r.outputs || {}, { findings: r.problem }), report: r.report };
+    return { state: runner.stop(state, id, r.problem), report: r.report };
+  }
   return { state: runner.complete(state, id, r.outputs), report: r.report };
 }
 

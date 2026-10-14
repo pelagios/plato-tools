@@ -141,5 +141,50 @@
    "site",
    "w3id"
   ]
+ },
+ {
+  "have": "table",
+  "want": "match",
+  "yes": {
+   "into-dataset": true,
+   "will-publish": false
+  },
+  "recipe": "match-two-datasets",
+  "steps": [
+   "columns",
+   "check",
+   "dataset",
+   "match",
+   "check-other",
+   "review",
+   "apply",
+   "again",
+   "compare",
+   "out"
+  ]
+ },
+ {
+  "have": "table",
+  "want": "match",
+  "yes": {
+   "into-dataset": false,
+   "will-publish": true
+  },
+  "recipe": "match-two-datasets",
+  "steps": [
+   "columns",
+   "check",
+   "dataset",
+   "match",
+   "check-other",
+   "review",
+   "apply",
+   "again",
+   "out",
+   "mint",
+   "report",
+   "site",
+   "w3id"
+  ]
  }
 ]

@@ -2,11 +2,16 @@
 //
 // A recipe is a plain object (recipes/<key>.js):
 //   key, title, version   a key, a plain-English title, and a whole number raised when its steps change;
-//   files                 the files the user chooses at the start, each { words, types, optional? };
+//   files                 the files the user chooses, each { words, types, optional?, late? }: at the start,
+//                         or, `late`, at the first step that takes them (the other dataset of a match,
+//                         chosen at the match): the workflow begins without them, and that step cannot
+//                         be done until they are chosen (runner.supply);
 //   cannot                optionally, what the workflow cannot carry from those files, each in a sentence,
 //                         said before it is followed and while it is (a reader's limits, in words);
 //   asks                  the questions it asks, each { question, kind: 'yes-no' | 'text' | 'list' | 'choice',
-//                         choices? (for 'choice'), optional? };
+//                         choices? (for 'choice'), optional?, and, for a yes-or-no question whose two
+//                         answers are two ways of doing a thing, answers? (the words of Yes and of No, in
+//                         that order) and default? (the answer given until another is chosen) };
 //   steps                 in order, each { id, op, title?, from, options?, when? }:
 //     from      each input of the operation, from a file chosen at the start ('$files') or an earlier
 //               step's output ('mint.dataset'); 'a.x ?? b.y' takes the first of those that was made
@@ -53,11 +58,15 @@ export function check(recipe) {
   for (const [k, f] of Object.entries(files)) {
     if (!f.words) say(`the files "${k}" are not described.`);
     for (const t of [].concat(f.types || [])) if (!Object.hasOwn(TYPES, t)) say(`the files "${k}" have an unknown type "${t}".`);
+    if (f.late !== undefined && typeof f.late !== 'boolean') say(`whether the files "${k}" are chosen late must be true or false.`);
   }
   for (const [k, q] of Object.entries(asks)) {
     if (!q.question) say(`the question "${k}" has no words.`);
     if (!KINDS.includes(q.kind)) say(`the question "${k}" is of no known kind (${KINDS.join(', ')}).`);
     if (q.kind === 'choice' && !(Array.isArray(q.choices) && q.choices.length)) say(`the question "${k}" has no choices.`);
+    if (q.answers !== undefined && !(q.kind === 'yes-no' && Array.isArray(q.answers) && q.answers.length === 2 && q.answers.every((w) => typeof w === 'string' && w.trim())))
+      say(`the question "${k}" names its answers, which only a yes-or-no question does, as two pieces of words (Yes's, then No's).`);
+    if (q.default !== undefined && !(q.kind === 'yes-no' && typeof q.default === 'boolean')) say(`the question "${k}" has a default that is not yes or no.`);
   }
   if (r.cannot !== undefined && !(Array.isArray(r.cannot) && r.cannot.every((c) => typeof c === 'string' && c.trim())))
     say('what it cannot carry ("cannot") must be a list of sentences.');

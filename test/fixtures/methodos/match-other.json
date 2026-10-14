@@ -1,0 +1,27 @@
+{
+  "profile": "place-centric",
+  "gazetteer": { "@id": "https://example.org/other/", "title": "The other dataset (constructed)" },
+  "spatialEntities": [
+    {
+      "@id": "https://example.org/other/place/newton", "label": "Newton",
+      "attestations": [{ "names": [{ "toponym": "Newton" }], "geometries": [{ "geojson": { "type": "Point", "coordinates": [-1.01, 52.01] } }], "types": [{ "label": "village" }], "sources": [{ "@id": "https://example.org/other/source/survey", "title": "A constructed survey" }] }]
+    },
+    {
+      "@id": "https://example.org/other/place/newton-far", "label": "Newton",
+      "attestations": [{ "names": [{ "toponym": "Newton" }], "geometries": [{ "geojson": { "type": "Point", "coordinates": [-3.0, 55.0] } }], "types": [{ "label": "village" }], "sources": [{ "@id": "https://example.org/other/source/survey", "title": "A constructed survey" }] }]
+    },
+    {
+      "@id": "https://example.org/other/place/kingsbury", "label": "Kingsbury",
+      "identityRelations": [{ "object": "https://example.org/mine/place/kingsbury", "identityType": "exactMatch" }],
+      "attestations": [{ "names": [{ "toponym": "Kingsbury" }], "geometries": [{ "geojson": { "type": "Point", "coordinates": [-0.281, 51.581] } }], "types": [{ "label": "village" }], "sources": [{ "@id": "https://example.org/other/source/survey", "title": "A constructed survey" }] }]
+    },
+    {
+      "@id": "https://example.org/other/place/windermere-lake", "label": "Windermere",
+      "attestations": [{ "names": [{ "toponym": "Windermere" }], "geometries": [{ "geojson": { "type": "Point", "coordinates": [-2.911, 54.381] } }], "types": [{ "label": "lake" }], "sources": [{ "@id": "https://example.org/other/source/survey", "title": "A constructed survey" }] }]
+    },
+    {
+      "@id": "https://example.org/other/place/windermere", "label": "Windermere",
+      "attestations": [{ "names": [{ "toponym": "Windermere" }], "geometries": [{ "geojson": { "type": "Point", "coordinates": [-2.9, 54.372] } }], "types": [{ "label": "town" }], "sources": [{ "@id": "https://example.org/other/source/survey", "title": "A constructed survey" }] }]
+    }
+  ]
+}
