@@ -623,11 +623,17 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
    * the step is not done, and both here and under the save it is said why. Resolves with what to say of it
    * under Chora's save, in words, or null when the workflow is not at that step.
    */
-  function placed(files, base) {
+  function placed(files, base, { traced = false } = {}) {
     return new Promise((resolve) => chain(async () => {
       const s = wf && !changed ? atStep() : null;
       // Chora's two steps: drawing on a dataset that went to it ("place"), or tracing a map into a new one ("trace").
       if (!s || !CHORA_STEPS.has(s.op)) { resolve(null); return; }
+      // The step "trace" takes no dataset to guard by: it is done only by a save of places traced from a map.
+      if (s.op === 'trace' && !traced) {
+        const why = `It was not saved from a map traced into a new dataset (it adds no place traced from a map), so the step “${s.title}” is not done with it.`;
+        say(`${why} Trace the map into a new dataset in Chora (“Trace into a new dataset”), and save there; or choose a dataset you traced and saved there, and say the step is done.`, true); render(false);
+        resolve(why); return;
+      }
       const went = currentInput(wf, s);
       if (went && base && !sameRefs(went, await refsOf([...base], 'dataset'))) {
         const why = `It was saved from ${[...base].map((f) => f.name).join(', ')}, not from ${names(went)}, the dataset that went to the step “${s.title}”, so the step is not done with it.`;

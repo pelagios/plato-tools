@@ -646,7 +646,10 @@ function renderTrace() {
   if (step?.op === 'trace') lines.push(`<p class="note" id="chora-trace-step">${esc(CHORA_TRACE.workflowStep)}</p>`);
   if (traceEditing) {
     const s = settingsOf(traceEditing) || traced.defaultSettings(defaultsFor(traceEditing));
-    body.innerHTML = lines.join('') + traced.settingsForm(s, { started: traceKey === traceEditing && drafts.some((d) => d.kind === 'feature' && d.placeId) || (traceKey === traceEditing && !isSeedOpen() && !!dataset),
+    // Fixed once the dataset traced into exists (the one made from the map, or one opened): its address space and
+    // title are its file's, written when it was made; changed here they would not be the file's.
+    const started = traceKey === traceEditing && !!dataset;
+    body.innerHTML = lines.join('') + traced.settingsForm(s, { started, fileTitle: started ? dataset.header?.title || null : null,
       identify: step?.op === 'trace' && step.answers?.['will-identify'] === true });
     publishTrace();
     return;
@@ -1059,7 +1062,8 @@ async function saveDataset() {
     offered = box;
   }
   state.lastSave = { passed, added, outputs: r.outputs || [], mneme: r.mneme || null, report: r.report || null, converted };
-  if (passed && out) await handOver(out);
+  // The save tells the page whether it was a tracing's (places traced, from a map): only such a save does a workflow's step "trace".
+  if (passed && out) await handOver(out, { traced: !!traceKey && newPlaces.length > 0 });
   state.phase = 'saved';
 }
 /**
@@ -1067,7 +1071,7 @@ async function saveDataset() {
  * from the file on the origin private file system, and what the page did with it said under the save.
  * While it does (a large file is read through, to know it by its SHA-256), the page says so.
  */
-async function handOver(out) {
+async function handOver(out, how = {}) {
   if (!host.saved) return;
   let file;
   try { file = await keepSaved(out.name); } catch { return; }
@@ -1077,7 +1081,7 @@ async function handOver(out) {
   $('save-result').append(busy);
   state.handingOver = { said: busy.textContent };
   let said = null;
-  try { said = await host.saved(file, files); } catch (e) { said = CHORA_HANDOVER.failed(e.message); } finally { busy.remove(); }
+  try { said = await host.saved(file, files, how); } catch (e) { said = CHORA_HANDOVER.failed(e.message); } finally { busy.remove(); }
   forgetOtherSaved();
   if (said) $('save-result').append(Object.assign(document.createElement('p'), { className: 'note', id: 'chora-handed', textContent: said }));
   state.handedOver = { name: file.name, size: file.size, said };
@@ -1645,7 +1649,8 @@ function chosen(list) {
  *   files()       the files chosen in the page's step 1, which Chora opens (and chosen(), below, when they change);
  *   choose(files) choose these in step 1 (Chora's own, after a reload for a permission);
  *   saved(file, base) take the dataset a save wrote from `base` (the files Chora had open): chosen in step 1,
- *                 and in a workflow the result of its step, if `base` went to it; a promise of what to say, in words;
+ *                 and in a workflow the result of its step, if `base` went to it (a third argument, { traced }: the save
+ *                 added places traced from a map, which the step "trace" needs); a promise of what to say, in words;
  *   scope()       the workflow's Scope (Methodos's, as kept), for the adoption's search, or null;
  *   lookup()      the page's WHG lookup, and onRefused(fn) what to tell when a request of it is refused
  *                 for want of permission: the adoption asks WHG through the page's one lookup.

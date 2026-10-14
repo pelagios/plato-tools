@@ -10012,6 +10012,18 @@ def trace_map_checks(pw, url, tmp):
             'refused': refused.get('settingsError'), 'after': {k: s.get(k) for k in ('trace', 'places', 'picker', 'base', 'status')}}
     attempt('Chora trace: a map shown offers "Trace into a new dataset"; its settings need the base address (refused without), take the date from the manifest\'s navDate and say the map\'s rights; a dataset of its own is made from the map, opened, and chosen in step 1', settings_needed)
 
+    def settings_fixed():
+        # The dataset made, nothing named yet: its base address and title are its file's, fixed (beside the date, still editable).
+        page.click('#chora-trace-settings')
+        until(page, '() => !!document.getElementById("chora-trace-form")', 10)
+        f = page.evaluate('''() => { const b = document.getElementById('chora-tset-base'), t = document.getElementById('chora-tset-title'), d = document.getElementById('chora-tset-date');
+          return { base: b.readOnly, baseValue: b.value, title: t.readOnly, titleValue: t.value, date: d.readOnly, named: window.__chora.trace.named }; }''')
+        page.click('#chora-tset-cancel')
+        until(page, '() => !document.getElementById("chora-trace-form")', 10)
+        return (f['named'] == 0 and f['base'] and f['title'] and not f['date'] and f['baseValue'] == TRACE_BASE
+                and f['titleValue'] == 'Places traced from A synthetic grid over Cambridge (test fixture)'), f
+    attempt('Chora trace: once the dataset is made from the map, before anything is named, its base address and title are fixed in the settings (the file\'s own), the rest still editable', settings_fixed)
+
     def draw_name_enter():
         key = st['key']
         [xy] = to_screen(grid_id, [(256, 256)])
@@ -10184,12 +10196,24 @@ def trace_map_checks(pw, url, tmp):
         shown_before = page.evaluate(vis)
         page.click('#chora-leave'); page.wait_for_timeout(1500)
         hidden = page.evaluate(vis)
+        # Drawn again while hidden, as paused: nothing thrown.
+        page.evaluate("() => { const m = window.__chora_map; m.resize(); m.triggerRepaint(); }"); page.wait_for_timeout(700)
+        paused_errors = len(errors) - before
+        # The control, in the same state: the maps' layer drawn into the hidden map, as it was before the pause, throws
+        # (so the absence above is one the check could see). Its errors are this check's, and let go after it.
+        mark = len(errors)
+        page.evaluate("() => { const m = window.__chora_map; m.setLayoutProperty('chora-historical-maps', 'visibility', 'visible'); m.resize(); m.triggerRepaint(); }")
+        page.wait_for_timeout(1000)
+        control = [e for e in errors[mark:] if 'finite numbers' in e]
+        page.evaluate("() => window.__chora_map.setLayoutProperty('chora-historical-maps', 'visibility', 'none')")
+        page.wait_for_timeout(300); del errors[mark:]
         page.evaluate("() => { location.hash = '#chora'; }")
         until(page, "() => !document.getElementById('chora').hidden", 15); page.evaluate(SETTLE)
         back = page.evaluate(vis)
-        return (shown_before == 'visible' and hidden == 'none' and back == 'visible' and len(errors) == before and len(cstate(page)['overlays']) >= 1), {
-            'visibility': [shown_before, hidden, back], 'page errors': errors[before:][:3]}
-    attempt('Chora: left with its historical maps shown, they are not drawn while it is hidden, and no error is thrown; back on the map, they are drawn again', hidden_and_back)
+        return (shown_before == 'visible' and hidden == 'none' and back == 'visible' and paused_errors == 0 and len(control) >= 1 and len(errors) == before
+                and len(cstate(page)['overlays']) >= 1), {
+            'visibility': [shown_before, hidden, back], 'errors while paused': paused_errors, 'errors drawn unpaused (the control)': len(control), 'page errors': errors[before:][:3]}
+    attempt('Chora: left with its historical maps shown, they are not drawn while it is hidden, and drawn again then nothing is thrown (drawn unpaused, the renderer throws: the control); back on the map, they are drawn again', hidden_and_back)
     attempt('Chora trace: across these checks, no page error', lambda: (len(st) >= 2 and not errors, {'errors': errors[:5], 'checks reached': list(st)}))
     ctx.close()
     stop_fixtures()
@@ -10278,11 +10302,11 @@ def trace_workflow_checks(pw, url, tmp):
         t = track(); r['begun'] = t
         return (s.get('canary') == 'enforced' and asked_now == ['will-identify', 'will-publish'] and not unplanned['follow'] and 'base address' in unplanned['verdict']
                 and unplanned['help'].startswith('Needed: every place you trace is given its address under it')
-                and planned == ['trace', 'check', 'lookup', 'review', 'apply', 'again', 'compare', 'out'] and len(before) == 1 and 'daily cap is 5,000 requests per token' in before[0]
+                and planned == ['trace', 'check', 'lookup', 'review', 'apply', 'again', 'compare', 'out'] and len(before) == 1 and 'cap is 5,000 requests a day per token' in before[0]
                 and list(t['steps']) == planned and t['steps']['trace'] == 'current' and t['status'] != 'pending' and 'Not started' not in t['message']
                 and page.input_value('#base') == TRACE_BASE and t['done']), {
             'asked': asked_now, 'unplanned': unplanned, 'planned': planned, 'before': before, 'tracker': t, 'Options base': page.input_value('#base')}
-    attempt('Trace a historical map: the interview (a map image, places on a map, identified, not published) needs the base address before it shows the plan, says WHG\'s daily cap of 5,000 requests per token, and, followed, begins at once at Chora\'s step, no file chosen', begin)
+    attempt('Trace a historical map: the interview (a map image, places on a map, identified, not published) needs the base address before it shows the plan, says WHG\'s cap of 5,000 requests a day per token, and, followed, begins at once at Chora\'s step, no file chosen', begin)
 
     def trace():
         need('begun')
@@ -10387,6 +10411,43 @@ def trace_workflow_checks(pw, url, tmp):
         refused = [m for m in consoled if 'Refused to connect' in m]
         return (not other and not refused and posts and not errors), {'other sites': other, 'refused': refused[:3], 'lookups': len(posts), 'errors': errors[:3]}
     attempt('Trace a historical map: every request went to this site, the map\'s server or WHG (the stub), each allowed, none to another site or stopped by the policy, and no page error', only_allowed)
+
+    def other_save_refused():
+        # A workflow at its step "trace", and a save in Chora that traced nothing (a point drawn on a place of a dataset of
+        # one's own): not the step's, said why; the step still waits (the presence: the save itself passed).
+        c2 = browser.new_context(accept_downloads=True, viewport={'width': 1400, 'height': 900}, reduced_motion='reduce')
+        c2.add_init_script('window.__plato_forceDownload = true;')
+        p2 = c2.new_page(); p2.set_default_timeout(T(30) * 1000)
+        try:
+            p2.goto(NOTOOLS if PROVE else base)
+            p2.evaluate("() => localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Trace Reviewer' }))")
+            wait_state(p2, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+            p2.click('#methodos-ask'); until(p2, "!document.getElementById('methodos').hidden", 5)
+            p2.check('input[name="methodos-have"][value="map"]'); p2.check('input[name="methodos-want"][value="map"]')
+            for k in ('will-identify', 'will-publish'): p2.check(f'input[name="methodos-ask-{k}"][value="no"]')
+            p2.fill('#methodos-base', TRACE_BASE)
+            until(p2, "() => !document.getElementById('methodos-start').hidden", 10); p2.click('#methodos-start')
+            until(p2, "() => document.querySelector('#methodos-track li[data-step=\"trace\"]')?.dataset.state === 'current'", 10)
+            f = tmp / 'trace-wf-own.json'
+            f.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': 'https://example.org/g', 'title': 'Own'}, 'spatialEntities': [
+                {'@id': 'https://example.org/p/cambridge', 'label': 'Cambridge', 'attestations': [{'names': [{'toponym': 'Cambridge'}], 'sources': [{'title': 's'}]}]}]}))
+            p2.click('#for-tool a[href="#chora"]')
+            until(p2, 'window.__chora && window.__chora.phase === "ready" && window.__chora.mapReadyCount >= 1')
+            p2.set_input_files('#picker', [str(f)])
+            until(p2, '["loaded", "error", "unrecognised"].includes(window.__chora.phase)', 60)
+            chora_pick(p2, 'cambridge')
+            x, y = map_centre(p2); draw(p2, 'point', [(x + 40, y + 20)]); p2.click('#chora-draw-tools button[data-mode="static"]')
+            until(p2, '() => window.__chora.draftWrites === 0 && window.__chora.pendingCount === 1', 15)
+            p2.click('#chora-save'); until(p2, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+            until(p2, '() => !!window.__chora.handedOver', 60)
+            ls = cstate(p2)['lastSave'] or {}
+            said = p2.inner_text('#chora-save-result')
+            step = p2.evaluate("() => document.querySelector('#methodos-track li[data-step=\"trace\"]')?.dataset.state")
+            msg = p2.inner_text('#methodos-message')
+            return (ls.get('passed') is True and step == 'current' and 'not saved from a map traced into a new dataset' in said and 'not saved from a map traced into a new dataset' in msg), {
+                'save': {k: ls.get(k) for k in ('passed', 'added')}, 'step': step, 'said': said[-300:], 'message': msg[:300]}
+        finally: c2.close()
+    attempt('Trace a historical map: a save in Chora that traced nothing from a map (a point drawn on a dataset of one\'s own) does not do the step "trace", and says why; the step still waits', other_save_refused)
     try: browser.close()
     except Exception: pass
     stop_fixtures()

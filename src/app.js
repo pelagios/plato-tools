@@ -1088,10 +1088,10 @@ function leaveChora() {
  * result (Methodos's placed), when `base`, the dataset Chora had open, is the one that went to the step.
  * Returns what to say of it, in words.
  */
-async function choraSaved(file, base) {
+async function choraSaved(file, base, how = {}) {
   const dt = new DataTransfer(); dt.items.add(file); $('picker').files = dt.files;
   choose([file]); keepChoice([file]);
-  const step = await methodos.placed([file], base);
+  const step = await methodos.placed([file], base, how);
   return [CHORA_HANDOVER.chosen(file.name), step].filter(Boolean).join(' ');
 }
 /**
