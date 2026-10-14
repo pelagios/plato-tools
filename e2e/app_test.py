@@ -5054,7 +5054,9 @@ def whg_checks(pw, url, tmp):
         out_['404'] = view(a)['said']; out_['link after 404'] = a.evaluate(WHG_LINKS_JS).get(r['wid'])
         # An origin WHG does not allow: refused by WHG itself (403 origin_not_allowed, its second line of defence after the
         # browser's CORS check, which Playwright's routing does not apply to a fulfilled answer: see whg_cors below).
-        fake('config', {'origins': ['https://pelagios.org']})
+        # Allowed: only an origin no page under test can have (the live check runs AT pelagios.org, so allowing that
+        # one alone tested nothing there).
+        fake('config', {'origins': ['https://not-this-page.example']})
         try:
             a.click('#whg-save')
             said(a, "() => /only from the tools at pelagios\\.org/.test(document.getElementById('whg-said').textContent)", 20)
