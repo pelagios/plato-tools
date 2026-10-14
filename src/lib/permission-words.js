@@ -18,6 +18,8 @@ export const CATEGORY_WORDS = {
 export const SERVICE_NAMES = {
   'basemap:openfreemap': 'OpenFreeMap',
   'basemap:osm': 'OpenStreetMap',
+  // Its tiles are served by the University of Iowa Libraries, which sees the part of the world looked at (the category's words).
+  'basemap:cawm': 'Consortium of Ancient World Mappers',
   'basemap:carto': 'CARTO',
   'allmaps:allmaps': 'Allmaps',
   'gazetteer:whg': 'World Historical Gazetteer',

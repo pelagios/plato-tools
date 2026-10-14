@@ -8034,6 +8034,69 @@ def chora_checks(pw, url, tmp):
             'first line': first, 'style unread before': unread, 'second site asked about': asked_second, 'style read': read, 'before allowing': before, 'used': used,
             'second fetched': got, 'hits': hits, 'third refused': third, 'blocked': after['blockedOrigins']}
     attempt('Chora: a pasted style on two sites needs each allowed before either is asked for tiles; once both are, both are used, and a third site is still refused', multi_origin)
+    # The Consortium of Ancient World Mappers' tiles (14 October 2026), answered here: a PNG for each,
+    # or, while cawm_mode says so, a failed connection, as a browser that refuses the site's certificate
+    # would see it (its chain is incomplete: DEVELOPERS.md).
+    CAWM = 'https://cawm.lib.uiowa.edu'
+    hits['cawm'] = 0; cawm_mode = {'fail': False}
+    def cawm(route):
+        hits['cawm'] += 1
+        if cawm_mode['fail']: route.abort('failed')
+        else: route.fulfill(status=200, content_type='image/png', body=PNG, headers=CORS)
+    ctx.route(CAWM + '/**', cawm)
+    cawm_zooms = lambda since: [int(m.group(1)) for u in requests[since:] for m in [re.match(re.escape(CAWM) + r'/tiles/(\d+)/\d+/\d+\.png$', u)] if m]
+    ATTRIB = '''() => { const a = document.querySelector('#chora-map .maplibregl-ctrl-attrib-inner'); return a ? { text: a.textContent, links: [...a.querySelectorAll('a')].map((x) => x.href) } : null; }'''
+    def cawm_basemap():
+        fresh(); since = len(requests); h0 = hits['cawm']
+        choose('cawm')
+        line = page.inner_text('[data-permission="basemap:cawm"]') if page.is_visible('[data-permission="basemap:cawm"]') else ''
+        note = page.inner_text('#chora-basemap-options')
+        before = {'cawm asked': hits['cawm'] - h0 + len([u for u in requests[since:] if u.startswith(CAWM)]), 'basemap': cstate(page)['basemap']}
+        since = len(requests); at = allow_in_panel('basemap:cawm')
+        used = soon(page, '() => window.__chora.basemap === "cawm" && window.__chora_map.isStyleLoaded()', 30)
+        got = soon(page, '() => window.__chora_map.isSourceLoaded("basemap")', 30) and hits['cawm'] > h0
+        page.evaluate(SETTLE)
+        zooms = cawm_zooms(since); sites = foreign(since); attrib = page.evaluate(ATTRIB) or {}
+        ours = page.evaluate('() => ["chora-overview-points", "chora-vague-marks", "chora-place-points"].filter((l) => !!window.__chora_map.getLayer(l))')
+        # Beyond its zoom 11 the tiles of 11 are drawn larger: asked at 11, never above.
+        z0 = len(requests)
+        page.evaluate('() => window.__chora_map.jumpTo({ center: [12.49, 41.89], zoom: 13.6 })'); page.evaluate(SETTLE)
+        over = cawm_zooms(z0)
+        s = cstate(page)
+        return ('Needs permission: Consortium of Ancient World Mappers' in line and 'ancient Mediterranean and Middle East' in note
+                and before['cawm asked'] == 0 and before['basemap'] == 'natural-earth'
+                and at['open'] and at['focusKey'] == 'basemap:cawm' and at['focusValue'] == 'undecided'
+                and used and got and zooms and all(1 <= z <= 11 for z in zooms) and sites == ['cawm.lib.uiowa.edu']
+                and 'Consortium of Ancient World Mappers' in (attrib.get('text') or '') and 'CC BY 4.0' in (attrib.get('text') or '')
+                and CAWM + '/' in (attrib.get('links') or []) and len(ours) == 3
+                and over and set(over) == {11} and not s.get('basemapError')), {
+            'line': line, 'note shown': 'ancient Mediterranean' in note, 'before': before, 'panel focus': at, 'used': used, 'tiles': hits['cawm'] - h0,
+            'zooms asked': sorted(set(zooms)), 'sites asked': sites, 'attribution': attrib, 'our layers': ours, 'zooms asked at 13.6': sorted(set(over)), 'error': s.get('basemapError')}
+    attempt('Chora: Ancient World (CAWM) chosen asks nothing and says "Needs permission"; allowed and reloaded, its tiles (zooms 1 to 11, 11 when zoomed in further) are asked of cawm.lib.uiowa.edu and no other site, with its attribution and its regional note shown', cawm_basemap)
+    def cawm_remembered():
+        fresh({'basemap:cawm': {'state': 'allowed'}}, 'cawm')
+        first = soon(page, '() => window.__chora.basemap === "cawm" && window.__chora_map.isSourceLoaded("basemap")', 30)
+        h0 = hits['cawm']; since = len(requests)
+        s = chora_boot(page, base)                              # a reload, as the user's next visit
+        again = soon(page, '() => window.__chora.basemap === "cawm" && window.__chora_map.isSourceLoaded("basemap")', 30)
+        checked = page.evaluate('() => document.querySelector(\'input[name="basemap"]:checked\')?.value || null')
+        name = page.inner_text('#chora-basemap-name')
+        return (first and again and hits['cawm'] > h0 and checked == 'cawm' and name == 'Ancient World (CAWM)' and foreign(since) == ['cawm.lib.uiowa.edu']), {
+            'first load': first, 'after the reload': again, 'tiles after': hits['cawm'] - h0, 'checked': checked, 'named': name, 'sites': foreign(since)}
+    attempt('Chora: Ancient World (CAWM), allowed and chosen, is still the basemap after a reload, and its tiles are asked again', cawm_remembered)
+    def cawm_unreachable():
+        cawm_mode['fail'] = True
+        try:
+            h0 = hits['cawm']
+            fresh({'basemap:cawm': {'state': 'allowed'}}, 'cawm')
+            back = soon(page, '() => window.__chora.basemap === "natural-earth" && !!window.__chora.basemapError', 30)
+            text = page.inner_text('#chora-basemap-options'); s = cstate(page)
+        finally:
+            cawm_mode['fail'] = False
+        err = s.get('basemapError') or ''
+        return (hits['cawm'] > h0 and back and err.startswith(f'Ancient World (CAWM) could not be loaded from {CAWM} (none of its tiles could be loaded')
+                and 'back on Natural Earth' in err and err in text), {'asked': hits['cawm'] - h0, 'back': back, 'error': err, 'said': text[:300]}
+    attempt('Chora: Ancient World (CAWM) allowed, but its site unreachable (no tile loads), gives way to Natural Earth, and the page says it could not be loaded from cawm.lib.uiowa.edu', cawm_unreachable)
     # ---- The shared origin, the frame and the referrer: the security audit of 1 October 2026.
     # Every page of pelagios.org can write this browser's storage for the tools. What one could write:
     # a grant for a site, marked as if the user had added it, a pasted basemap on that site and the

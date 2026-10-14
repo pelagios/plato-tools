@@ -2025,7 +2025,7 @@ below), and its engine `src/engine/chora/` (`store.js`, `view.js`, `draw.js`, `s
   permission is allowed, at every request, and Chora counts each refusal (`window.__chora.blocked`).
   Beneath it is the page's Content Security Policy, and MapLibre's worker is made from a `blob:`
   (`blobWorkerUrl`) so that its requests are under the policy too.
-- **Other basemaps** (OpenFreeMap, OpenStreetMap, CARTO, or a pasted style or tile address) are
+- **Other basemaps** (OpenFreeMap, Ancient World (CAWM), OpenStreetMap, CARTO, or a pasted style or tile address) are
   used only once their permission is allowed: `basemap:<provider>` for a built-in one, whose sites
   are all in the module's `REGISTRY` (a style's sources, glyphs and sprites may be on sites other
   than its own: CARTO's are on `tiles.basemaps.cartocdn.com`, and its TileJSON's tiles on `tiles-a`
@@ -2043,16 +2043,38 @@ below), and its engine `src/engine/chora/` (`store.js`, `view.js`, `draw.js`, `s
   the site's origin can write, so at load, and when a permission changes (which may be another tab's
   doing), the map stays on Natural Earth, the site is asked nothing, and one line names it as the
   remembered choice with "Use it now"; the user's click (that button, its radio, or pasting) uses it,
-  for this load. A provider of the `REGISTRY` (OpenFreeMap, OpenStreetMap, CARTO), whose sites are
+  for this load. A provider of the `REGISTRY` (OpenFreeMap, CAWM, OpenStreetMap, CARTO), whose sites are
   fixed in the code, loads as before. After the reload for a pasted site's permission the click is
   needed again, which is the cost of the rule. A basemap whose style cannot be loaded
-  gives way to Natural Earth, and the page says why. A map error goes to the console with only the
+  gives way to Natural Earth, and the page says why ("… could not be loaded from <site> (…)"). So does
+  a raster one none of whose tiles loads: its style is made here (`styleFor`), so it always loads, and
+  `map.js` counts its tiles from each `setStyle` instead; once the map is idle with none of them
+  loaded and one failed (a refused one is not a failure), that is the style's failure. One tile
+  failing among others loaded is not. A map error goes to the console with only the
   site of its addresses, since a key may be in the query or the path. A drawing's note names the
   basemap it was drawn on if it is a built-in one, and a pasted one only as such. CARTO's key is given at build time as `VITE_CARTO_API_KEY`, and without it CARTO
   is shown disabled. It is scoped by referrer to `https://pelagios.org`, so it never works on
   localhost and no test may need it. Vite writes it into the built page, where anyone can read it:
   the scope is its protection. Never commit it (`.gitignore` does not cover `.env` files). It is to
   reach the build from a GitHub Actions variable, which `pages.yml` does not yet pass.
+- **Ancient World (CAWM)** (`cawm`, added 14 October 2026) is the Consortium of Ancient World
+  Mappers' raster tiles, `https://cawm.lib.uiowa.edu/tiles/{z}/{x}/{y}.png` (256-pixel PNG, XYZ,
+  Web Mercator, CORS `*`), in a group of its own. Its TileJSON (`index.json`) gives zooms 1 to 11, and
+  zoom 0 is not there (404), so its source says `minzoom: 1, maxzoom: 11` and the map's own zooms are
+  untouched: MapLibre draws zoom 11's tiles larger beyond 11, and below zoom 1 the map shows no
+  basemap. Its licence is CC BY 4.0, as its site says, and is kept on the basemap as
+  `licence: {iri, credit, confirmed: true}` (`credit` is their suggested citation), the shape the
+  export of #37 is to read; no other basemap carries one yet. The tiles are made for the ancient
+  Mediterranean and Middle East: elsewhere their water may be missing or wrong (the site says another
+  region may need water polygons of its own), and the chooser says so beside its name (a basemap's
+  `note`). The raster wrapper has no `glyphs`, and needs none: nothing Chora draws over a basemap
+  has text (the precision marks are a symbol layer of icons alone). **Known risk: the
+  server's TLS chain is incomplete** (14 October 2026: `curl` without `-k` fails with "unable to
+  verify the first certificate"). Browsers usually repair it by fetching the missing intermediate
+  (AIA), but one that does not refuses every tile; the map then goes back to Natural Earth and says
+  that it could not be loaded from `https://cawm.lib.uiowa.edu`, as above. Its e2e checks answer its tiles by a route, and a failed
+  connection by `route.abort('failed')`. Scope's drawn area is on Natural Earth alone, with no
+  chooser, so CAWM is not offered there.
 - **The gazetteer lookup** (`src/engine/gazetteer/`), shared with Krisis, speaks the W3C
   reconciliation protocol, with the token in the `Authorization` header only. WHG has 16 slots for
   the whole site, so there is one request in flight whoever asks. `createLookup` gives one shared
@@ -3266,7 +3288,7 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
 `src/lib/permission-words.js`.
 
 - **A permission is (category, subject)**, categories by what the site learns: `basemap` (a provider
-  of the `REGISTRY`, `openfreemap`, `osm` or `carto`, each declaring every site it asks, or a pasted
+  of the `REGISTRY`, `openfreemap`, `osm`, `cawm` or `carto`, each declaring every site it asks, or a pasted
   basemap's site), `iiif` (a historical map's host), `allmaps` (the service), `gazetteer` (`whg`, or
   another service's site), `linked` (a host), `collaborate` (`whg`: WHG's Workbench, which keeps the
   projects saved to it, whole, and lets whoever has a share link read them; a service only, apart from

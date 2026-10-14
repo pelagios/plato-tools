@@ -871,7 +871,7 @@ function renderBasemaps() {
   $('basemap-options').innerHTML = (basemapError ? `<p class="warn" role="status">${esc(basemapError)}</p>` : '')
     + (remembered ? `<p class="needs-permission" id="chora-basemap-remembered">${esc(REMEMBERED_BASEMAP.line(remembered.name))} <button type="button" class="link" id="chora-use-remembered">${esc(REMEMBERED_BASEMAP.use)}</button></p>` : '')
     + '<div id="chora-basemap-needs"></div>' + [...groups].map(([g, bs]) => `<fieldset><legend>${esc(g)}</legend>${bs.map((b) => `<label class="${b.disabled ? 'disabled' : ''}">
-      <input type="radio" name="basemap" value="${esc(b.id)}"${b.id === (waiting || cur).id ? ' checked' : ''}${b.disabled ? ' disabled' : ''}> ${esc(b.name)}${b.disabled ? ` <small>(${esc(b.disabled)})</small>` : ''}
+      <input type="radio" name="basemap" value="${esc(b.id)}"${b.id === (waiting || cur).id ? ' checked' : ''}${b.disabled ? ' disabled' : ''}> ${esc(b.name)}${b.disabled ? ` <small>(${esc(b.disabled)})</small>` : ''}${b.note ? ` <small class="basemap-note">${esc(b.note)}</small>` : ''}
       ${b.group === 'Pasted' ? ` <button type="button" class="link" data-unpaste="${esc(b.id)}">remove</button>` : ''}</label>`).join('')}</fieldset>`).join('')
     + `<form id="chora-paste-form"><label for="chora-paste">Paste a style address or a tile template</label>
       <input id="chora-paste" type="url" placeholder="https://…/style.json or https://…/{z}/{x}/{y}.png" autocomplete="off">

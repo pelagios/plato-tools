@@ -4,7 +4,7 @@
 // it was drawn on. Written for the pre-push review of 30 September 2026: each test failed before its fix.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { builtIn, fromPaste, subjectsOf, originsOf, styleOrigins, drawnOn, current, automatic, permitted, pasted, sameBasemap } from '../src/chora/basemaps.js';
+import { builtIn, fromPaste, subjectsOf, originsOf, styleOrigins, styleFor, drawnOn, current, automatic, permitted, pasted, sameBasemap } from '../src/chora/basemaps.js';
 import { originsFor, policyFor } from '../src/lib/permissions-core.js';
 import * as permissions from '../src/lib/permissions.js';
 import { choraDrawingNote } from '../src/engine/words.js';
@@ -154,4 +154,36 @@ test('a stored pasted basemap is read from its address alone: local, provider, g
   assert.deepEqual(pasted(), [mine]);
   assert.equal(current().id, 'natural-earth');
   delete globalThis.localStorage; delete globalThis.sessionStorage; delete globalThis.__platoCsp;
+});
+
+// The Consortium of Ancient World Mappers' tiles (14 October 2026): offered in a group of their own, on
+// their one site under their own permission, their licence recorded as read on their site, and their
+// zooms the TileJSON's (1 to 11) on the source alone, so that MapLibre over-zooms beyond 11.
+test('the Ancient World (CAWM) basemap: its own group, one site under basemap:cawm, CC BY 4.0 recorded, zooms 1 to 11 on its source', async () => {
+  const all = builtIn(), b = all.find((x) => x.id === 'cawm');
+  assert.ok(b, `offered among ${all.map((x) => x.id).join(', ')}`);
+  assert.equal(b.name, 'Ancient World (CAWM)');
+  assert.equal(all.filter((x) => x.group === b.group).map((x) => x.id).join(), 'cawm', 'a group of its own');
+  assert.equal(b.kind, 'raster');
+  assert.equal(b.tiles, 'https://cawm.lib.uiowa.edu/tiles/{z}/{x}/{y}.png');
+  assert.deepEqual(originsOf(b), ['https://cawm.lib.uiowa.edu']);
+  assert.deepEqual(subjectsOf(b), [['basemap', 'cawm']]);
+  assert.deepEqual(originsFor('basemap', 'cawm'), ['https://cawm.lib.uiowa.edu']);
+  assert.equal(automatic(b), true, 'a provider of the REGISTRY, so a remembered choice of it is used at load once allowed');
+  assert.deepEqual(b.licence, { iri: 'https://creativecommons.org/licenses/by/4.0/', confirmed: true,
+    credit: 'Consortium of Ancient World Mappers Map Tiles. The Consortium of Ancient World Mappers and the Digital Scholarship & Publishing Studio at the University of Iowa, 2022, https://cawm.lib.uiowa.edu.' });
+  assert.ok(/Mediterranean/.test(b.note || ''), b.note);
+  assert.match(b.attribution, /Consortium of Ancient World Mappers/);
+  assert.match(b.attribution, /href="https:\/\/cawm\.lib\.uiowa\.edu"/);
+  assert.match(b.attribution, /CC BY 4\.0/);
+  assert.equal(drawnOn(b), 'Ancient World (CAWM)');
+  const style = await styleFor(b);
+  assert.deepEqual(Object.keys(style.sources), ['basemap']);
+  const src = style.sources.basemap;
+  assert.deepEqual({ tiles: src.tiles, minzoom: src.minzoom, maxzoom: src.maxzoom, attribution: src.attribution },
+    { tiles: [b.tiles], minzoom: 1, maxzoom: 11, attribution: b.attribution });
+  assert.equal(style.maxzoom, undefined); assert.equal(style.glyphs, undefined, 'none of our layers over it needs text');
+  // The control: OpenStreetMap's source, through the same wrapper, has no minzoom and its own maxzoom, as before.
+  const osm = (await styleFor(all.find((x) => x.id === 'osm'))).sources.basemap;
+  assert.deepEqual([osm.minzoom, osm.maxzoom], [undefined, 19]);
 });

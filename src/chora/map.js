@@ -58,9 +58,22 @@ export function createMap(container, { state, onPlaceClick, onStyleError, polygo
   // A style being loaded that fails (it is not there, or not a style) never fires style.load: the map
   // is left with nothing on it, and nothing to draw on. An error with no source or tile is the style's.
   let styleLoading = false;
+  // A raster basemap (basemaps.js styleFor: one source, 'basemap') loads as a style whatever its site
+  // does, so a site that answers none of its tiles (it is down, or the browser refuses its certificate)
+  // would leave a blank map and say nothing. Once the map is idle with none of the tiles asked since the
+  // style was set loaded, and at least one failed (a refused one is not a failure), that is the style's
+  // failure, said in the same words. Counted again at each setStyle; one tile failing among others loaded is not.
+  let tiles = null;   // {loaded, failed, why} for the style set last, until it is known to have tiles
+  map.on('sourcedata', (e) => { if (tiles && e.sourceId === 'basemap' && e.tile && e.dataType === 'source') tiles.loaded++; });
+  map.on('idle', () => {
+    if (!tiles || styleLoading) return;
+    if (tiles.loaded) { tiles = null; return; }
+    if (tiles.failed) { const why = tiles.why; tiles = null; onStyleError?.(`none of its tiles could be loaded: ${why}`); }
+  });
   map.on('error', (e) => {
     const why = redact(e?.error?.message || e?.error || 'unknown error');
     if (styleLoading && !e?.sourceId && !e?.tile) { styleLoading = false; onStyleError?.(why); }
+    if (tiles && e?.sourceId === 'basemap' && e?.tile && !/Refused a request to /.test(why)) { tiles.failed++; tiles.why ||= why; }
     // A refused request surfaces as an error event; it has been counted, and is not a fault.
     if (!/Refused a request to /.test(why)) console.warn(`Map, ${kindOf(e)}:`, why);
   });
@@ -191,7 +204,7 @@ export function createMap(container, { state, onPlaceClick, onStyleError, polygo
         try { draw.stop(); } catch {}
         draw = null;
       }
-      styleLoading = true;
+      styleLoading = true; tiles = { loaded: 0, failed: 0, why: '' };
       map.setStyle(style, { diff: false });
     },
     get styleVersion() { return styleVersion; },

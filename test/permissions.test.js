@@ -548,3 +548,29 @@ test('the canary says in the console, once per load, that the blocked data: requ
   assert.equal(seen.length, 1, JSON.stringify(seen));
   assert.equal(seen[0][0], 'warn');
 });
+
+test('the policy admits the Consortium of Ancient World Mappers\' site only once basemap:cawm is allowed', async () => {
+  const CAWM = 'https://cawm.lib.uiowa.edu';
+  const allowed = core.allowedOrigins({ 'basemap:cawm': { state: 'allowed' } }, []);
+  assert.deepEqual(allowed, [CAWM]);
+  const policy = core.policyFor(allowed);
+  assert.ok(policy.includes(`img-src 'self' data: blob: ${CAWM}`) && policy.includes(`connect-src 'self' blob: ${CAWM}`), policy);
+  for (const g of [{}, { 'basemap:cawm': { state: 'never' } }, { 'basemap:osm': { state: 'allowed' } }]) {
+    const os = core.allowedOrigins(g, []);
+    assert.ok(!os.includes(CAWM) && !core.policyFor(os).includes('uiowa'), JSON.stringify(g));
+  }
+  assert.deepEqual(core.allowedOrigins({ 'basemap:osm': { state: 'allowed' } }, []), [OSM], 'the control: another basemap allowed is admitted');
+  assert.deepEqual(core.allowedOrigins({}, ['basemap:cawm']), [CAWM], 'allowed for this tab');
+  assert.deepEqual(core.parse('basemap', 'cawm'), { cat: 'basemap', subj: 'cawm' });
+  // Asked through fetch() only once allowed, and only at its site.
+  inPolicy(CAWM);
+  await assert.rejects(permissions.fetch(`${CAWM}/tiles/1/1/0.png`, { cat: 'basemap', subj: 'cawm' }), { kind: 'undecided' });
+  assert.equal(calls.length, 0);
+  permissions.set('basemap', 'cawm', 'allowed');
+  await permissions.fetch(`${CAWM}/tiles/1/1/0.png`, { cat: 'basemap', subj: 'cawm' });
+  assert.equal(calls.length, 1);
+  await assert.rejects(permissions.fetch(`${OSM}/1/1/0.png`, { cat: 'basemap', subj: 'cawm' }), { kind: 'address' });
+  const words = await import('../src/lib/permission-words.js');
+  assert.equal(words.nameOf('basemap', 'cawm'), 'Consortium of Ancient World Mappers');
+  assert.match(words.CATEGORY_WORDS.basemap.learns, /which part of the world you look at/);
+});
