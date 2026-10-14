@@ -4848,6 +4848,7 @@ def whg_checks(pw, url, tmp):
         until(c, "() => /Opened the project/.test(document.getElementById('methodos-message').textContent)", 30)
         panel(c)
         before = c.evaluate(WHG_LINKS_JS)
+        fake('share', {'id': r['second']})   # shared already, from the first browser: the link made here must say so
         n = len(projects()); log(clear=True)
         c.click('#whg-save')
         until(c, "() => !document.getElementById('whg-choice').hidden", 20)
@@ -4855,10 +4856,14 @@ def whg_checks(pw, url, tmp):
         c.click('#whg-choice button[data-choice="0"]')   # Save to it
         until(c, "() => /^Saved to WHG \\(version 3,/.test(document.getElementById('whg-said').textContent)", 20)
         sent = [(e['method'], e['path']) for e in log()]
+        linked = c.evaluate(WHG_LINKS_JS).get(r['wid'], {})
+        shared_now = view(c)
         c.context.close()
         return (before == {} and 'hold this workflow already' in v['choice'] and v['choices'] == ['Save to it', 'Save as a new WHG project'] and len(projects()) == n
-                and ('PUT', f"/reconciliation/projects/{r['second']}/") in sent and not [s for s in sent if s[0] == 'POST']), {'before': before, 'choice': v['choice'][:160], 'sent': sent}
-    attempt('WHG: a workflow with no link here that WHG already holds (opened from its file in a third browser) is offered "Save to it" or as new; "Save to it" updates that project, no second one', matched)
+                and ('PUT', f"/reconciliation/projects/{r['second']}/") in sent and not [s for s in sent if s[0] == 'POST']
+                and linked.get('shared') is True and shared_now['unshare'] and 'Shared: anyone with its link can read it' in shared_now['state']), \
+            {'before': before, 'choice': v['choice'][:160], 'sent': sent, 'link': linked, 'unshare': shared_now['unshare'], 'state': shared_now['state'][:160]}
+    attempt('WHG: a workflow with no link here that WHG already holds (opened from its file in a third browser) is offered "Save to it" or as new; "Save to it" updates that project, no second one, and, it being shared, says so and offers "Stop sharing"', matched)
 
     def share_and_stop():
         need('a', 'second')
@@ -4971,6 +4976,43 @@ def whg_checks(pw, url, tmp):
         gone = view(rc)
         return wrong['status'] != 'shared' and gone['status'] != 'shared', {'wrong': (wrong['message'] + wrong['projectSaid'])[:200], 'gone': (gone['message'] + gone['projectSaid'])[:200]}
     attempt('WHG, a share link: one to another kind of WHG project is refused in words, and one withdrawn says it opens nothing; neither is shown', recipient_refused)
+
+    def recipient_retry():
+        need('viewed')
+        # WHG down for a moment as the link is read: the token, already out of the address, is held in memory, "Try again" offered.
+        fake('config', {'fail': 1}); log(clear=True)
+        try:
+            rc.goto(NOTOOLS if PROVE else f"{base}#whg-shared={r['token']}")
+            until(rc, "() => !document.getElementById('whg-shared-retry').hidden && !document.getElementById('whg-shared-ask').hidden", 20)
+            v = view(rc)
+            held = rc.evaluate("() => sessionStorage.getItem('plato-tools.whg-shared')")
+            first = [e['status'] for e in log() if '/reconciliation/shared/' in e['path']]
+            rc.click('#whg-shared-retry')
+            until(rc, "() => document.getElementById('methodos-tracker').dataset.status === 'shared'", 20)
+            after = [e['status'] for e in log() if '/reconciliation/shared/' in e['path']]
+        finally: fake('config', {'fail': 0})
+        return (v['hash'] == '' and 'paste the link again' in v['ask'] and held is None and first == [503] and after == [503, 200] and view(rc)['ask'] == ''), \
+            {'hash': v['hash'], 'ask': v['ask'][:240], 'held in storage': held, 'first': first, 'after': after}
+    attempt('WHG, a share link read while WHG is down for a moment: the link is out of the address, so it is held in this tab\'s memory with "Try again", and a reload is said to need it pasted again; tried again, it opens', recipient_retry)
+
+    def recipient_never():
+        need('shared')
+        # Held in sessionStorage while the permission is asked; set to Never (in another tab of the same browser), it is let go at once.
+        ctx = browser.new_context(viewport={'width': 1440, 'height': 900})
+        ctx.route(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'), forward)
+        p1 = ctx.new_page()
+        p1.goto(NOTOOLS if PROVE else f"{base}#whg-shared={r['token']}")
+        until(p1, "() => !document.getElementById('whg-shared-ask').hidden", 20)
+        before = p1.evaluate("() => sessionStorage.getItem('plato-tools.whg-shared')")
+        p2 = ctx.new_page(); p2.goto(NOTOOLS if PROVE else base)
+        p2.evaluate("() => localStorage.setItem('plato-tools.permissions', JSON.stringify({ version: 1, grants: { 'collaborate:whg': { state: 'never', at: '2026-10-14T10:00:00Z' } } }))")
+        try: until(p1, "() => sessionStorage.getItem('plato-tools.whg-shared') === null", 10)
+        except Exception: pass
+        after = p1.evaluate("() => sessionStorage.getItem('plato-tools.whg-shared')")
+        said = view(p1)['ask']
+        ctx.close()
+        return (before == r['token'] and after is None and 'set to Never' in said), {'held before': before == r['token'], 'held after': after, 'said': said[:240]}
+    attempt('WHG, a share link waiting for its permission: the token held across a reload is let go from sessionStorage as soon as the permission is set to Never, and the page says so', recipient_never)
 
     def refusals():
         need('a')

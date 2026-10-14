@@ -1124,7 +1124,7 @@ function projectTarget(name) {
  */
 function projectSecrets() {
   // The share links' tokens seen in this tab, made here or opened (a share link is a capability: src/methodos/page.js).
-  const out = [permissions.token.get(), import.meta.env?.VITE_CARTO_API_KEY, ...(methodos?.shareTokens?.() || []), sharedHeld];
+  const out = [permissions.token.get(), import.meta.env?.VITE_CARTO_API_KEY, ...(methodos?.shareTokens?.() || []), sharedHeld, sharedRetry];
   try {
     const pasted = JSON.parse(localStorage.getItem('chora-basemaps') || '[]');
     for (const b of Array.isArray(pasted) ? pasted : []) {
@@ -1302,6 +1302,9 @@ if (location.hash === '#methodos') methodos.open();
 // policy is written at load), then cleared. WHG is asked with no token of the user's.
 const SHARED_HELD = 'plato-tools.whg-shared';
 let sharedHeld = null;
+// A link whose read failed for now (WHG not reached): held in this tab's memory only, for "Try again". It is no
+// longer in the address, so a reload loses it, and the page says to paste it again.
+let sharedRetry = null;
 /** The share token in the address, which is removed from it; null when there is none. */
 function sharedFromAddress() {
   const t = sharedToken(location.hash);
@@ -1316,17 +1319,26 @@ function openShared(t) {
     const go = sharedHeld;
     sharedHeld = null;
     try { sessionStorage.removeItem(SHARED_HELD); } catch { /* none kept */ }
-    $('whg-shared-ask').hidden = true; permissions.unneed($('whg-shared-needs'));
-    methodos.viewShared(go);
+    $('whg-shared-ask').hidden = true; $('whg-shared-retry').hidden = true; permissions.unneed($('whg-shared-needs'));
+    sharedRetry = null;
+    methodos.viewShared(go).then((r) => {
+      if (!r?.retry) return;
+      sharedRetry = go;
+      $('whg-shared-ask-words').textContent = 'The workflow shared with you could not be read from WHG just now. Try again; the link is no longer in the address, so if you reload this page, paste the link again.';
+      $('whg-shared-retry').hidden = false; $('whg-shared-ask').hidden = false;
+    });
     return;
   }
-  try { sessionStorage.setItem(SHARED_HELD, sharedHeld); } catch { /* for this load only */ }
   const st = permissions.needs($('whg-shared-needs'), 'collaborate', 'whg');
+  // Held across the reload the permission may need; never once it is set to Never, which no reload changes.
+  try { if (st === 'never') sessionStorage.removeItem(SHARED_HELD); else sessionStorage.setItem(SHARED_HELD, sharedHeld); } catch { /* for this load only */ }
+  $('whg-shared-retry').hidden = true;
   $('whg-shared-ask-words').textContent = `This address opens a workflow someone shared with you through the World Historical Gazetteer, to read. To read it, this page asks WHG for it, which needs your permission: nothing of yours is sent, not even your token.${st === 'never' ? ' The World Historical Gazetteer Workbench is set to Never in Permissions: change it there to read it.' : ''}`;
   $('whg-shared-ask').hidden = false;
 }
+$('whg-shared-retry').onclick = () => { const t = sharedRetry; sharedRetry = null; openShared(t); };
 $('whg-shared-not-now').onclick = () => {
-  sharedHeld = null;
+  sharedHeld = null; sharedRetry = null;
   try { sessionStorage.removeItem(SHARED_HELD); } catch { /* none kept */ }
   $('whg-shared-ask').hidden = true; permissions.unneed($('whg-shared-needs'));
 };
@@ -1335,7 +1347,8 @@ $('whg-shared-not-now').onclick = () => {
   try { held = sessionStorage.getItem(SHARED_HELD); } catch { held = null; }
   openShared(sharedFromAddress() || (isId(held) ? held : null));
 }
-permissions.onChange(() => { if (sharedHeld && permissions.allowed('collaborate', 'whg')) openShared(); });
+// Allowed: read now; set to Never: let go of the copy held for the reload, and say so.
+permissions.onChange(() => { if (sharedHeld) openShared(); });
 // "Keep working data" turned off in the Permissions panel: Methodos's records go at once, not at its next save.
 let keptBefore = permissions.keepWorkingData();
 permissions.onChange(() => { const now = permissions.keepWorkingData(); if (now !== keptBefore) { keptBefore = now; methodos.keepChanged(now); if (!now) { kept.forget(); keptOffer(null); } } });

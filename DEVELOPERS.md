@@ -3161,7 +3161,9 @@ the user's WHG token; nothing is sent until the user asks, and only under the `c
   read and removed from the address at once (`history.replaceState`). If `collaborate:whg` is not allowed in
   this load's policy, the page says what the link is and asks (the policy is written at load, so a reload may
   be needed: the token is held in `sessionStorage` `plato-tools.whg-shared` across it, and cleared once used,
-  or on "Not now"). The project is read with no `Authorization`, refused unless its `doc_type` is `plato`,
+  on "Not now", or as soon as the permission is set to Never). A read that fails for now (WHG not reached, or
+  answering with an error) keeps the token in the tab's memory only and offers "Try again", saying that a reload
+  would need the link pasted again, as it is no longer in the address. The project is read with no `Authorization`, refused unless its `doc_type` is `plato`,
   checked by `readProject()` without writing anything, and shown in the tracker read-only (`viewShared()`:
   every action hidden, its steps and where it is shown) with "Make my own copy", "Download .platoproj" and
   "Close". A copy is opened as a project is, given a new workflow id, and keeps its origin; opening the link

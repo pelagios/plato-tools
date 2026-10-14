@@ -1204,7 +1204,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       const [m] = found;
       whgSay(null);
       whgAsk(`Your projects in WHG hold this workflow already: “${m.title}”, version ${m.version}, saved ${whenWords(m.updated)}. Save to it, or as a new WHG project?`,
-        [['Save to it', () => whgSave(record, { projectId: m.id, version: m.version, title: m.title })], ['Save as a new WHG project', () => whgSave(record, null)]]);
+        [['Save to it', () => whgSave(record, { projectId: m.id, version: m.version, title: m.title, shared: !!m.shared })], ['Save as a new WHG project', () => whgSave(record, null)]]);
     });
   });
   /** Save `record` to WHG: to `to` (its link, or a match), or as a new project. A newer save in WHG is offered, never saved over. */
@@ -1213,14 +1213,14 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     let res;
     try {
       const parts = await projectParts(record);
-      res = await whg.save({ project: parts, to, review: parts.review?.text ?? null, shared: !!(to && whgLink?.projectId === to.projectId && whgLink.shared), wait: pause(whgSay) });
+      res = await whg.save({ project: parts, to, review: parts.review?.text ?? null, shared: !!(to && (to.shared || (whgLink?.projectId === to.projectId && whgLink.shared))), wait: pause(whgSay) });
     } catch (e) {
       if (e instanceof WorkbenchError && e.kind === 'conflict') {
         whgSay(null);
         whgAsk(`WHG has a newer save of this workflow (version ${e.version}), perhaps your own from another browser, so this one was not saved over it: nothing was changed, here or there.`, [
           ['Open the copy on WHG', async () => {
             let got;
-            try { got = { ...fromSnapshot(e.snapshot, to.title || whgLink?.title || record.name), projectId: to.projectId, version: e.version, shared: !!whgLink?.shared }; } catch (x) { whgFailed(x, 'open'); return; }
+            try { got = { ...fromSnapshot(e.snapshot, to.title || whgLink?.title || record.name), projectId: to.projectId, version: e.version, shared: !!(to.shared || (whgLink?.projectId === to.projectId && whgLink.shared)) }; } catch (x) { whgFailed(x, 'open'); return; }
             openOrAsk(got.blob, got.name, { whg: got, what: `WHG's copy (version ${e.version})` });
           }],
           ['Save mine as a new WHG project', () => whgSave(record, null)],
@@ -1332,25 +1332,31 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
    * A share link (#whg-shared=<token>, read and removed from the address by the host): the workflow it
    * opens, read from WHG with no token, checked as a project file is (readProject, nothing written), and
    * shown read-only in the tracker, every action off but "Make my own copy", "Download .platoproj" and
-   * "Close". Opened again, it shows WHG's newest save, never a second copy.
+   * "Close". Opened again, it shows WHG's newest save, never a second copy. Resolves with { ok, retry }: `retry`
+   * when WHG could not be read for now (the host holds the link to try again).
    */
   function viewShared(token) {
-    if (!whg) return;
+    if (!whg) return Promise.resolve(null);
     shareTokens.add(token);
     // After a workflow kept from before is taken up, so that what is said of the shared one is not said over.
     const go = () => chain(async () => {
       if (viewing) { viewing = null; render(false); }   // another link: the one shown before is closed, whatever this one opens
       tell('Reading the shared workflow from WHG…');
       let got;
-      try { got = await whg.shared(token, pause((w) => tell(w))); } catch (e) { tell(whyWords(e, 'shared'), true); return; }
+      try { got = await whg.shared(token, pause((w) => tell(w))); } catch (e) {
+        tell(whyWords(e, 'shared'), true);
+        // WHG not reached, or not answering as it should, for now: the host offers to try again.
+        return { ok: false, retry: e instanceof WorkbenchError && ['network', 'permission', 'server', 'rate', 'bad-answer'].includes(e.kind) };
+      }
       let read;
-      try { read = await readProject(blobSource(got.blob), { name: got.name }); } catch (e) { tell(`The shared workflow was not opened. ${e.message || e}`, true); return; }
+      try { read = await readProject(blobSource(got.blob), { name: got.name }); } catch (e) { tell(`The shared workflow was not opened. ${e.message || e}`, true); return { ok: false, retry: false }; }
       viewing = { read, blob: got.blob, name: got.name, title: got.title, version: got.version };
       if (projectSaid) { projectSaid.hidden = true; projectSaid.textContent = ''; }
       say(null); render(true);
       q(sharedEl, '#methodos-shared-copy').focus();
+      return { ok: true };
     });
-    takenUp.then(go, go);
+    return takenUp.then(go, go);
   }
   q(sharedEl, '#methodos-shared-copy').addEventListener('click', () => {
     const v = viewing;

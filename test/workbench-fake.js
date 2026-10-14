@@ -50,7 +50,7 @@ export function workbenchFake({ origins = ['https://pelagios.org'], self = 'http
   const users = new Map(), tokens = new Map(), teams = new Map(), projects = new Map(), budget = new Map();
   let nextUser = 1, nextTeam = 1;
   const log = [];
-  const cfg = { origins: [...origins], rate, bodyMax, retryAfter: null };   // retryAfter: a fixed wait for a 429, for the browser checks (WHG's is the rest of its minute)
+  const cfg = { origins: [...origins], rate, bodyMax, retryAfter: null, fail: 0 };   // fail: the next n requests (not preflights) answered 503, as a server down for a moment   // retryAfter: a fixed wait for a 429, for the browser checks (WHG's is the rest of its minute)
 
   function addUser({ token, name = `user${nextUser}`, beta = true, active = true } = {}) {
     const u = { id: nextUser++, name, beta, active };
@@ -200,6 +200,7 @@ export function workbenchFake({ origins = ['https://pelagios.org'], self = 'http
       Object.assign(out.headers, { 'Access-Control-Allow-Methods': methods.join(', '), 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Max-Age': '86400' });
       return out;
     }
+    if (cfg.fail > 0) { cfg.fail -= 1; return withCors({ status: 503, headers: { 'Content-Type': 'text/html' }, body: '<h1>Service Unavailable</h1>' }, corsOrigin); }
     return withCors(dispatch(req, url, methods, auth, view, m, origin), corsOrigin);
   }
   function dispatch(req, url, methods, auth, view, m, origin) {
@@ -259,13 +260,13 @@ export function workbenchFake({ origins = ['https://pelagios.org'], self = 'http
 
 // ---- As a server, for the browser checks (e2e/app_test.py) -------------------------------------------
 // POST /__fake/<what> (JSON) sets it up and reads it back: user {token, beta?, active?}; config {origins?,
-// rate?, bodyMax?, retryAfter?}; log (the requests so far, and clears them if {clear: true}); projects (every project,
+// rate?, bodyMax?, retryAfter?, fail?}; remove {id}; log (the requests so far, and clears them if {clear: true}); projects (every project,
 // with its snapshot); push {id, snapshot} (another browser's save); share {id} / unshare {id} as the owner
 // would; create {token, title, snapshot, doc_type} (a project made elsewhere); newMinute.
 export function serve(fake, port, host = '127.0.0.1') {
   const control = {
     user: (b) => ({ id: fake.addUser(b).id }),
-    config: (b) => { for (const k of ['origins', 'rate', 'bodyMax', 'retryAfter']) if (b[k] !== undefined) fake.cfg[k] = b[k]; return { ...fake.cfg }; },
+    config: (b) => { for (const k of ['origins', 'rate', 'bodyMax', 'retryAfter', 'fail']) if (b[k] !== undefined) fake.cfg[k] = b[k]; return { ...fake.cfg }; },
     log: (b) => { const out = fake.log.map((x) => ({ ...x, body: x.body.length > 4096 ? `${x.body.slice(0, 4096)}…` : x.body, size: x.body.length })); if (b.clear) fake.log.length = 0; return out; },
     projects: () => [...fake.projects.values()].map((p) => ({ id: p.id, title: p.title, version: p.version, doc_type: p.doc_type, shared: !!p.public_token, token: p.public_token, snapshot: p.snapshot, team: p.team })),
     push: (b) => ({ version: fake.pushAs(b.id, b.snapshot) }),
