@@ -24,6 +24,7 @@ export default {
   cannot: [
     "The other dataset's places must have web addresses of their own (an @id): a decision names both places by their addresses, so a place without one cannot be matched. The match counts them.",
     'Places are matched by their names, and only within 50 km of each other where both have a location; each of your places is given at most its five best candidates. Nothing is accepted in bulk: every decision is yours.',
+    'Measured with 50,000 places in each dataset (constructed ones), the match took about 65 seconds on a laptop of 2024 and held under 500 MB; larger datasets are not refused, but are unmeasured.',
     'A candidate of another kind of place than yours (a lake for a village) is ranked after the others and marked, never left out.',
     "The other dataset is checked after the match, and what the check finds is shown, but does not stop the workflow; a file the tools cannot read stops the match.",
   ],

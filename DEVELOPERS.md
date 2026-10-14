@@ -2781,7 +2781,7 @@ page's interview and tracker (below); keeping a workflow beyond the tab is phase
   Chora's save is no operation of its own: it completes the interactive step `place` (`placed()` in
   `src/methodos/page.js`; "Chora, the map", above).
 - **Recipes** (`recipes/`) are data: "Map your data", "Publish a dataset", "Places from an edition
-  (TEI)" and "Places from Recogito" (below). A step names an
+  (TEI)", "Places from Recogito" and "Match two datasets" (below). A step names an
   operation, where each input comes from (a file chosen at the start, `$files`, or an earlier step's
   output, `mint.dataset`, with `??` for "this, or that if it was skipped"), its options (literal or
   from an answer) and the yes-or-no question under which it runs. `recipe.js` checks a recipe
@@ -2790,7 +2790,9 @@ page's interview and tracker (below); keeping a workflow beyond the tab is phase
   workflow records. A recipe may also say what it cannot carry from the files it begins with
   (`cannot`, a list of sentences: a reader's limits, in words), which `plan()` gives and the page shows
   under the interview's plan and, folded, in the tracker (`#methodos-cannot`, hidden for a recipe that
-  names nothing).
+  names nothing). A recipe's file may be chosen late (`late: true`: the other dataset of a match, chosen
+  at the match, not at the start), and a yes-or-no question may name its two answers in words
+  (`answers`, Yes's then No's) and the one it defaults to (`default`), which the interview shows chosen.
 - **Hand-offs** (`handoffs.js`) are references, never content: `{ type, name, size, sha256 }`, made by
   Krisis's `fileRecords`, with a type from a closed list (`files`, `dataset`, `mapping`,
   `work.krisis`, `work.hermes-text`, `deposit`, `site`, `w3id`). A hand-off of the wrong type is
@@ -2801,6 +2803,14 @@ page's interview and tracker (below); keeping a workflow beyond the tab is phase
   for the user (`waiting`, with what for), a data problem (`stopped`, with what to put right and the
   step to run again) and an execution failure (`failed`, kept so that it can be tried again).
   `invalidate` does a step again and resets every step that took its outputs.
+  Files chosen late are recorded by `supply(state, recipe, key, refs)` (by name, size and SHA-256, as the
+  files chosen at the start are); until then `inputsOf` refuses, in words, the steps that take them, and
+  the state's `late` names them in the recipe's words. Once recorded, other files are refused until the
+  ones recorded are forgotten (`forget`, `forgettable`), which is possible only while no step has been done
+  with them; doing again the step they are chosen at (the first that takes them) resets every step that
+  takes them. A step whose options say `problems: 'report'` (the check of a match's other dataset) is done
+  with what its report found, `complete(state, id, outputs, { findings })`, kept with the step and shown
+  ("done, with a report"); one that could not read its file to the end still stops.
 - **The adapters** (`adapters.js`) are one per automatic operation that has landed (check, convert,
   compare, the four parts of publishing, match, apply, lookup), each calling the engine as the worker
   does. The front end gives a host: `open(ref)` for the file a reference names, `env()` for one run's
@@ -2961,6 +2971,53 @@ lookup goes through the gazetteer module's batched requests (25 queries a POST b
 A place name with no ref, an unlinked mention, and a region with no transcription or quoted name (whose
 name, in a Studio export, is only the gazetteer's title, which is not carried) give nothing to look up;
 the lookup counts the last as `withoutName`.
+
+**Match two datasets** (plan #34, item 4; Stephen's decisions of 14 October 2026). `recipes/match-two-datasets.js`:
+the user's table, the dataset the decisions are about, is read as Map your data reads it (its columns
+matched, checked, made PLATO JSON under the base address, by Map your data's own three steps); the other
+dataset goes to Krisis's local match as it is, in any format the tools read. It is a file chosen late
+(`files.others`, `late: true`): the workflow begins without it, and it is chosen at the match, in Krisis's
+"Match with another dataset…" (`src/app.js` tells Methodos the run's `others`; `began()` in
+`src/methodos/page.js` records it with `supply`, keeps it in this browser as the user's own file, and does
+not count a match on another file once one is recorded: "Forget <name>", below the steps, lets it go while
+no step has been done with it). The tracker names it from the start ("The other dataset: not yet chosen…",
+`#methodos-late`). After the match it is checked (Elenchos, `check-other`, `problems: 'report'`): what the
+check finds is kept with the step and shown in its row, and does not stop the workflow; a file that cannot be
+read stops the match itself. As that run puts the review away, the review step offers "Open the review
+(<work file>)", which opens the match's work file again on the dataset it was made of. One question, "Add the
+decisions to your dataset, or keep them in a file of their own about it?" (Yes by default): Yes writes the
+dataset with the new attestations (`apply`'s 'dataset'), compared with the dataset made from the table
+(Mneme, only additions); No writes the attestation-centric document of the answers alone, with no
+comparison (it is not a version of the dataset). The apply adapter takes the output from the answer
+(`intoDataset`), and the page counts a Finish only when it makes that output. When the result is
+published (`exportCandidates`, from "Will you publish the result?"), the review's suggestions are exported
+as a candidate set before the decisions are recorded, as `relate.containment` does, for the dataset's own
+address or the base address, so that every answer names the candidate it answers (`promotedFrom`); on the
+page the Finish counts only once they are exported (`unexported()` in `containment.js`). Publishing follows
+as in the other recipes. In the interview, "A list of place names" with "A match of two datasets" leads to
+it; a match from anything else still names Krisis, one step at a time.
+
+In the review, a candidate of the other dataset whose kind of place conflicts with the place's own (kinds.js
+`kindFit`, from the types both give: a lake for a village) comes after the others and says why
+(`kindOfCandidate` and `candidatesOf` in `src/engine/krisis/work.js`); a place of the other dataset already
+accepted for another of yours says so ("Already accepted for Newton.", `acceptedFor`), and can still be
+accepted. Neither changes which pairs the match suggests, its algorithm or the candidates' addresses, and
+there is no bulk accept of a local match. Tested in `test/methodos-match.test.js` (the plan, the routes, the
+late file, both outputs walked in Node with fetch throwing, the candidate set, the review's ordering, and
+the project file holding both of the user's files) and `match_two_checks` in `e2e/app_test.py`.
+
+**How large, measured** (14 October 2026, on this machine: an Intel Core i7-14650HX, 24 threads; through
+`~/.config/plato-tools/heavy.sh`, capped at 6 GB). `node e2e/match_scale.mjs 50000` matched two synthetic
+datasets of 50,000 places each with the command line's `plato-tools match`, three times: 66.4 s (13.9 million
+pairs of names compared, 4,918 of 5,000 planted pairs suggested), and, with a fifth of each dataset a common
+word and three letters, 67.6 s ("San Xyz") and 63.4 s ("Kafr Xyz"), each under 1% of the pairs of names
+compared, 13,942 of 14,000 planted pairs suggested. The whole run took 3 min 19 s, and its largest process
+held at most 486 MB (`/usr/bin/time -v`, maximum resident set size). The first trial's review (a.json, 13.3 MB,
+with its 6.4 MB work file: 8,469 suggestions for 7,378 places) opened in the page's Krisis review in 0.1 s,
+with 19 MB of the page's JavaScript heap in use, and each move to the next place took 0.04 to 0.06 s
+(headless Chromium; the worker's own heap not measured). Nothing is refused for its size. Above 50,000 places in
+a dataset, the match is unmeasured; and a review in which most places have several candidates (the synthetic
+data gives few) is unmeasured at this size too.
 
 **The base address, in one field** (Stephen, 12 October 2026). Every workflow that publishes asks it in the
 interview, through the one field (`#methodos-base`), optional, filled in from Options and written back
@@ -3407,6 +3464,8 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   workbook over 50 MB is warned of, as tables or as a table of places. Only one sheet of a workbook
   of one's own is read per run; a hidden sheet of an ODS workbook is not known as hidden. CSV files, and a zip of them, stream at any size, as the JSON,
   JSON Lines, LPF and RDF routes do.
+- **Matching two datasets is measured to 50,000 places each** (about 65 s, under 500 MB, on 14 October
+  2026; "Match two datasets", above): nothing larger is refused, and nothing larger is measured.
 - **A document's header comes first.** `dataSets` or `relationTypes` written after the records are
   reported, not read.
 - **Web annotations** give attestations about places the file does not describe, so each place is

@@ -425,7 +425,7 @@ written now; the rest wait on a branch.
 |---|---|---|
 | **Publish a dataset** | Elenchos → Agora report → Agora mint → Agora site → Agora w3id | Nothing: Agora's card already lists it "in order" |
 | **Release a new version** | Elenchos → Mneme against the previous release → Agora mint with `--previous` → site | Nothing |
-| **Match two datasets** | Elenchos on both → Krisis match → review → apply → Mneme | Nothing |
+| **Match two datasets** | Hermes columns → Elenchos → Metaphrasis (your table) → Krisis match (the other dataset chosen there) → Elenchos on the other → review → apply → Elenchos → Mneme (when added to your dataset) → write out → Publish (if publishing) | Built (14 October 2026): section 6.2 |
 | **Census figures as a Data Cube** | Hermes columns → Arithmos (convert, cube) → `datacube` check → Publish | Nothing |
 | **Places from an edition (TEI)** | Elenchos → Hermes TEI → Krisis lookup → review → apply → Chora (if drawing) → Elenchos → Mneme → write out → Publish (if publishing) | Built (phase 5, 12 October 2026): section 6.1 |
 | **Places from Recogito** | Elenchos → Hermes annotations (+ georeferenced regions) → Krisis lookup → review → apply → Chora (if drawing) → Elenchos → Mneme → write out → Publish (if publishing) | Built (phase 5, 12 October 2026): section 6.1 |
@@ -477,6 +477,47 @@ points, or on a map with no georeference.
 Still not asked as a question: the georeferences for Recogito. The step 1 words say to drop them with the
 export, and the step that reads it now says how many of its regions were placed ("7 of 16 regions on
 images placed on a map"), so a georeference for another map is not silent.
+
+### 6.2 Match two datasets, as built
+
+*14 October 2026 (plan #34, item 4).* `src/engine/methodos/recipes/match-two-datasets.js`. Stephen's decisions
+of 14 October 2026, as built:
+
+1. *The inputs.* Your table, the dataset the answers are about, is read as Map your data reads it: its
+   columns matched, checked, made PLATO JSON under the base address (asked, optional, through the shared
+   field). The other dataset goes straight to the match, in any format the tools read; its places must have
+   web addresses of their own, which the recipe's `cannot` says. The interview routes "A list of place names"
+   with "A match of two datasets" to it. (A TEI edition or Recogito export as your dataset: later.)
+2. *The other dataset is chosen at the match,* through Krisis's "Match with another dataset…": a file chosen
+   late (`late: true`), which the workflow begins without, the match refused in words until it is chosen,
+   recorded by name, size and SHA-256, and checked by them from then on: a match on another file is not the
+   step's. The tracker says "The other dataset: not yet chosen" from the start.
+3. *One question:* "Add the decisions to your dataset, or keep them in a file of their own about it?",
+   into the dataset by default. Into it, Mneme then shows the result only added to; a file of its own is the
+   attestation-centric document, not compared.
+4. *In the review,* a place of the other dataset already accepted for another of yours says "Already
+   accepted for …", and never blocks.
+5. *Kind of place,* in the review only: a candidate of a conflicting kind is ranked after the others and
+   marked. The match itself is unchanged (no new algorithm version, the same candidates, the same
+   addresses). No dates, no bulk accept of a local match.
+6. *Size:* measured, not refused (below, and DEVELOPERS.md, "Limits").
+7. *The candidate set* is exported only when the result is published, as the region step does, so that
+   each answer names the candidate it answers; otherwise none.
+8. *The other dataset is checked* after the match, its problems kept with the step and shown ("done, with a
+   report"), never stopping the workflow; a file that cannot be read stops the match.
+
+**How large, measured** (14 October 2026, on this machine: an Intel Core i7-14650HX, 24 threads; through
+`~/.config/plato-tools/heavy.sh`, capped at 6 GB). `node e2e/match_scale.mjs 50000` matched two synthetic
+datasets of 50,000 places each with the command line's `plato-tools match`, three times: 66.4 s (13.9 million
+pairs of names compared, 4,918 of 5,000 planted pairs suggested), and, with a fifth of each dataset a common
+word and three letters, 67.6 s ("San Xyz") and 63.4 s ("Kafr Xyz"), each under 1% of the pairs of names
+compared, 13,942 of 14,000 planted pairs suggested. The whole run took 3 min 19 s, and its largest process
+held at most 486 MB (`/usr/bin/time -v`, maximum resident set size). The first trial's review (a.json, 13.3 MB,
+with its 6.4 MB work file: 8,469 suggestions for 7,378 places) opened in the page's Krisis review in 0.1 s,
+with 19 MB of the page's JavaScript heap in use, and each move to the next place took 0.04 to 0.06 s
+(headless Chromium; the worker's own heap not measured). Nothing is refused for its size. Above 50,000 places in
+a dataset, the match is unmeasured; and a review in which most places have several candidates (the synthetic
+data gives few) is unmeasured at this size too.
 
 ## 7. Persistence
 
