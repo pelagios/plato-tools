@@ -90,6 +90,9 @@ Usage:
   plato-tools project info [--json] FILE    list what a PLATO tools project (.platoproj, saved
                                             by Methodos on the page) holds, and check the size
                                             and SHA-256 of every part; exit 1 if it is refused
+  plato-tools project info [--json] LINK    the same for a project shared from WHG, given its
+                                            read-only link (…#whg-shared=…): the one command
+                                            that asks WHG for anything, and with no token
 
 Each INPUT is one file, or one set of spreadsheet tables:
   - the sheets of the tables (places.csv, names.csv...) are one set of tables per directory,
@@ -1057,11 +1060,15 @@ async function review(action, args, o, resources) {
 
 // Methodos's project file (src/engine/methodos/project.js): its manifest listed, and every part read
 // through, its size and SHA-256 checked, as the page checks it before opening it. Nothing is written.
+// Given a share link instead of a file (plan #34, item A1, D5), the project shared from WHG's Workbench is
+// read (shared/<token>/, with no token of the user's and a User-Agent of these tools) and checked the same
+// way: the only network this command uses, and only on that explicit request.
 async function projectCommand(args, o) {
   const [sub, file, ...rest] = args;
   if (sub !== 'info') return usage(`${sub ? `"project ${sub}" is not a command; ` : ''}the project command is "project info FILE": it lists what a project holds and checks every part's hash.`);
-  if (!file || rest.length) return usage('project info takes one file, a PLATO tools project (.platoproj).');
-  const { readProject, describe } = await import('../src/engine/methodos/project.js');
+  if (!file || rest.length) return usage('project info takes one file, a PLATO tools project (.platoproj), or a link to one shared from WHG.');
+  const { readProject, describe, blobSource } = await import('../src/engine/methodos/project.js');
+  if (/whg-shared=/.test(file)) return sharedProjectInfo(file, o, { readProject, describe, blobSource });
   const { open } = await import('node:fs/promises');
   try { if (!statSync(file).isFile()) return usage(`${file} is not a file.`); } catch (e) { process.stderr.write(`plato-tools: ${file} cannot be read (${e.code || e.message}).\n`); return 2; }
   let read;
@@ -1075,6 +1082,40 @@ async function projectCommand(args, o) {
   } finally { await fh.close(); }
   if (o.json) process.stdout.write(JSON.stringify({ file, ok: true, manifest: read.manifest }, null, 2) + '\n');
   else process.stdout.write(`${file}\n${describe(read).join('\n')}\n`);
+  return 0;
+}
+
+/**
+ * `project info <share link>`: the project a WHG share link opens, read and checked as a file is. The link
+ * is a capability (whoever has it reads the project), and it is now in the shell's history: said, once. The
+ * token in it is never printed. Exit 0 when it would open, 1 when it is refused (or the link opens nothing),
+ * 2 when WHG cannot be asked. PLATO_TOOLS_WORKBENCH (an https address, or http on this computer) asks another
+ * Workbench than WHG's: for the tests.
+ */
+async function sharedProjectInfo(link, o, { readProject, describe, blobSource }) {
+  const { workbench, unwrap, sharedToken, whyWords, WORKBENCH, WorkbenchError } = await import('../src/engine/workbench.js');
+  const { isOrigin, originOf } = await import('../src/lib/permissions-core.js');
+  process.stderr.write('plato-tools: the share link is now in your shell\'s history; anyone who can read that history can read the project it shares.\n');
+  const token = sharedToken(link);
+  const fail = (code, problem) => {
+    if (o.json) process.stdout.write(JSON.stringify({ link: 'shared from WHG', ok: false, problem }, null, 2) + '\n');
+    else process.stdout.write(`The project shared from WHG: ${problem}\n`);
+    return code;
+  };
+  if (!token) return fail(1, 'That is not a WHG share link: it ends #whg-shared= and a token of 36 characters.');
+  const base = process.env.PLATO_TOOLS_WORKBENCH || WORKBENCH;
+  if (!isOrigin(originOf(base) || '') || !/\/$/.test(base)) return usage('PLATO_TOOLS_WORKBENCH is not an https address ending in /.');
+  const wb = workbench({ base, fetch: (url, init) => fetch(url, init), userAgent: `plato-tools/${PKG.version} (+https://pelagios.org/plato-tools/)` });
+  let got, bytes;
+  try { got = await wb.shared(token); bytes = unwrap(got.snapshot); } catch (e) {
+    const unreachable = e instanceof WorkbenchError && ['network', 'server', 'bad-answer'].includes(e.kind);
+    return fail(unreachable ? 2 : 1, e instanceof WorkbenchError ? whyWords(e, 'shared') : String(e?.message || e));
+  }
+  let read;
+  try { read = await readProject(blobSource(bytes), { name: 'shared.platoproj' }); } catch (e) { return fail(1, e.message); }
+  const about = `"${String(got.title).slice(0, 300)}", shared from WHG (version ${got.version} there)`;
+  if (o.json) process.stdout.write(JSON.stringify({ link: 'shared from WHG', title: got.title, version: got.version, ok: true, manifest: read.manifest }, null, 2) + '\n');
+  else process.stdout.write(`${about}\n${describe(read).join('\n')}\n`);
   return 0;
 }
 
