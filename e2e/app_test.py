@@ -4660,7 +4660,7 @@ def whg_checks(pw, url, tmp):
     view = lambda p: p.evaluate(WHG_VIEW)
     def shot(p, name):
         if shots and not PROVE:
-            try: p.screenshot(path=str(pathlib.Path(shots) / name), full_page=False)
+            try: p.mouse.move(1, 1); p.screenshot(path=str(pathlib.Path(shots) / name), full_page=False)   # no tooltip left where a click was
             except Exception: pass
     def begin(p, csv=MYDATA_CSV):
         """Table to map, no regions, no drawing, no publishing: begun with the table, at its columns step (a step boundary)."""
