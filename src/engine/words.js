@@ -766,10 +766,87 @@ export function lineEnds(results) {
   const known = results.filter((r) => Array.isArray(r?.ends));
   return known.length ? known.flatMap((r) => r.ends) : null;
 }
+/** The sentence a feature traced carries when its uncertainty radius is the one the user gave for the map (src/chora/traced.js). */
+export const choraTracedRadiusNote = (km) => `Its uncertainty radius (${km} km) is the tracer's own estimate for this map, not computed.`;
+/**
+ * Tracing a historical map into a new dataset, in Chora (src/chora/traced.js and app.js; Stephen's decisions
+ * of 14 October 2026): the panel, its settings, the name form over the map, and the list of what is traced.
+ */
+export const CHORA_TRACE = {
+  heading: 'Trace into a new dataset',
+  intro: 'Trace a map shown into a dataset of its own: each feature you trace becomes a place, named as the map writes it, and cites the map and its georeference.',
+  noMap: 'Add a georeferenced map above, and trace it into a new dataset of its own.',
+  button: 'Trace into a new dataset',
+  intoOpen: 'Trace it into the dataset open',
+  tracingThis: 'Being traced: see “Trace into a new dataset” below.',
+  workflowStep: "This workflow's step: add the map under Historical maps, then trace it into a new dataset (“Trace into a new dataset”). Its save does the step.",
+  settingsFor: (title) => `Tracing “${title || 'a historical map'}” into a new dataset. Settled once, for the map; each can be changed for one place as you go.`,
+  baseQuestion: 'Base address: your places will have their web addresses under it',
+  baseHelp: 'Needed: every place you trace is given its address under it as you name it. It is the base address in Options, which this changes too.',
+  baseFixed: 'Fixed now: the places traced have their addresses under it.',
+  titleQuestion: "The dataset's title",
+  dateQuestion: "The map's date, as you would cite it",
+  dateHelp: "Filled in from the map's own date where its description gives one (its navDate). It is written as the map's date, as you give it, with its years read from it.",
+  dateEach: 'Date each place by the map: what it shows is as of then',
+  languageQuestion: 'The language of the names on the map (a code: en, la, fr…)',
+  languageHelp: 'Given to every name you trace, and changed for one name in the form where it differs.',
+  scriptQuestion: 'The names are written in',
+  latinScript: 'Latin letters (a romanised form)',
+  defaultsSummary: 'What each feature marks, and how well it is known, until you say otherwise',
+  defaultsHelp: 'A point stands for the place, a line or an area is the extent of the feature (a route only where you say so), each approximate. Each can be changed for one feature in the list.',
+  radiusQuestion: 'An uncertainty radius of your own for this map, in km (optional)',
+  radiusHelp: "Given to every feature you trace, and said in its notes to be your estimate. The georeference's own error is said in the notes, and never made the radius.",
+  outlineQuestion: "Look the places up within the map's outline: the gazetteer lookup's Scope becomes the area the map covers",
+  begin: 'Make the dataset, and trace',
+  keepSettings: 'Keep these settings',
+  needBase: 'Give the base address: a web address beginning https://, under which every place traced is given its own.',
+  badLanguage: (v) => `“${v}” is not a language code such as en, la or fr: correct it, or leave it empty.`,
+  badRadius: 'The uncertainty radius must be a distance in kilometres, 0 or more, or empty.',
+  tracing: (map, dataset, n, unnamed) => `Tracing “${map}” into “${dataset}”: ${n.toLocaleString('en-GB')} place${n === 1 ? '' : 's'} traced${unnamed ? `, ${unnamed.toLocaleString('en-GB')} not named yet` : ''}.`,
+  howTo: 'Draw a point, line or area on the map with no place chosen, or press “New place”: name it, and press Enter. Cancel lets the drawing go.',
+  newPlace: 'New place',
+  resume: (title) => `Go on tracing “${title || 'the map'}”: the dataset made from it, not yet saved`,
+  mapGone: (title) => `“${title || 'The map'}” is not shown now: add it again under Historical maps to trace from it. What is drawn meanwhile is drawn on the basemap, and cites no map.`,
+  changeSettings: 'Change the settings',
+  stopTracing: 'Stop tracing',
+  scopeSet: (n) => `The lookup's Scope is the map's outline, ${n.toLocaleString('en-GB')} corners: the gazetteer is asked only for places within it. It is shown under Scope, and can be changed there.`,
+  scopeNot: (why) => `The map's outline could not be made the lookup's Scope (${why}): set its area under Scope if you want one.`,
+  listHeading: 'Traced from the map',
+  listCount: (n, from, to) => (n ? `${n.toLocaleString('en-GB')} traced${n > to - from + 1 ? `, showing ${from.toLocaleString('en-GB')}–${to.toLocaleString('en-GB')}` : ''}, the latest first.` : 'Nothing traced yet.'),
+  notNamed: 'Not named yet',
+  nameIt: 'Name it',
+  notTraced: 'drawn on the basemap, not traced from the map',
+  defaulted: "(the map's defaults)",
+  radiusMine: (km) => `radius ${km} km, your estimate`,
+  partOf: (name) => `Part of “${name}”`,
+  edit: 'Edit the name',
+  whatPoint: 'A point drawn: name the place it marks, as the map writes it.',
+  whatLine: 'A line drawn: name the feature, as the map writes it.',
+  whatArea: 'An area drawn: name the place, as the map writes it.',
+  whatNone: 'Name the new place, and draw it on the map: a point, a line or an area. Then press Enter.',
+  whatEdit: (name) => `Changing the name of “${name}”.`,
+  toponymQuestion: 'The name, as the map writes it',
+  labelQuestion: 'Its label in lists',
+  labelHelp: '(a display form, not evidence: the name, unless you change it)',
+  labelPlaceholder: 'the name, as written',
+  kindQuestion: 'What kind of place it is',
+  nameLanguage: 'The language of the name',
+  romanizedQuestion: 'A romanised form of the name',
+  addPlace: 'Add the place',
+  saveName: 'Keep the changes',
+  addTo: (name) => `Add to “${name}” instead`,
+  discard: 'Cancel: let the drawing go',
+  needName: 'Give the name as the map writes it.',
+  needDrawing: 'Draw the place on the map first: a point, a line or an area.',
+  unnamedRefused: (n) => `${n.toLocaleString('en-GB')} feature${n === 1 ? ' traced is' : 's traced are'} not named yet, so nothing was saved: name ${n === 1 ? 'it' : 'them'} in the list “Traced from the map”, or remove ${n === 1 ? 'it' : 'them'}.`,
+  placesTraced: (n) => `${n.toLocaleString('en-GB')} place${n === 1 ? '' : 's'} traced from the map`,
+};
 /** What a Chora save reports of itself (src/engine/chora/save.js), by kind. */
 export const CHORA_TEXT = {
   'chora-addition-invalid': 'A drawing could not be added, because PLATO would not accept it as it is, so nothing was saved',
   'chora-no-such-place': 'A drawing is for a place this dataset does not have, so nothing was saved. Open the dataset the drawing was made on.',
+  'chora-place-exists': 'A place traced as new has the address of a place the dataset has already, so nothing was saved. Name it again, and it is given an address of its own',
+  'chora-new-place-invalid': 'A place traced as new could not be added, because PLATO would not accept it as it is, so nothing was saved',
   'chora-not-placed': 'A drawing did not reach its place in the saved file, so the file must not be used.',
   'chora-attestations-not-a-list': 'A drawing is for a place whose attestations are not a list, as PLATO requires, so the drawing could only replace them, and nothing was saved. Correct that place in the dataset first',
   'chora-unreadable': 'The dataset could not be read to the end, so it was not saved',
@@ -835,8 +912,10 @@ export function choraSaveProgress(p) {
 export function choraSaveText(result) {
   const n = result.report?.counts?.['attestations added'] || 0;
   if (!result.mneme) return 'Nothing was saved.';
+  const p = result.report?.counts?.['places added'] || 0;
+  const places = p ? ` and ${p.toLocaleString('en-GB')} new place${p === 1 ? '' : 's'}` : '';
   return result.mneme.passed
-    ? `Saved, with ${n.toLocaleString('en-GB')} new attestation${n === 1 ? '' : 's'}; the version check (Mneme) confirms that every attestation of the dataset is there as it was.`
+    ? `Saved, with ${n.toLocaleString('en-GB')} new attestation${n === 1 ? '' : 's'}${places}; the version check (Mneme) confirms that every attestation of the dataset is there as it was.`
     : CHORA_TEXT['chora-mneme-failed'];
 }
 

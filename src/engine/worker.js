@@ -21,6 +21,7 @@ import { teiKeyPrefixes, EDITORIAL_IRI } from './hermes/tei.js';
 import { preview, previewLine, PREVIEW_LIMIT } from './hermes/preview.js';
 import { load as choraLoad } from './chora/store.js';
 import { save as choraSave } from './chora/save.js';
+import { mintPlaceId } from './chora/seed.js';
 
 let resources = null, pool = null, runs = 0, poolName = null;
 // A take-up of the main page's pool is under way (unpauseVfs): it is not to be let go meanwhile.
@@ -412,6 +413,8 @@ async function choraCommand(data) {
     try {
       result = await choraSave(input, data.additions || [], env, {
         name: inputName(input, data.name), contributor: data.contributor || undefined,
+        // The places traced from a map into a new dataset (src/engine/chora/seed.js), added after the dataset's own.
+        ...(Array.isArray(data.newPlaces) && data.newPlaces.length ? { newPlaces: data.newPlaces } : {}),
         hasPlace: same ? (id) => session.store.has(id) : undefined, record: same ? (id) => session.store.record(id) : undefined,
         // What the opening of this dataset read: one that could not all be read is refused at once, and
         // the writing's progress is shown against the attestations it has.
@@ -432,5 +435,12 @@ async function choraCommand(data) {
   } else if (data.cmd === 'chora-place') {
     const boxes = data.ccodes || await ccodeBoxes();
     postMessage({ type: 'chora-place', id: data.id, view: session.store.getPlace(data.id, { ccodeBbox: (c) => (Array.isArray(boxes[c]) ? boxes[c] : null) }) });
+  } else if (data.cmd === 'chora-mint') {
+    // A place traced into a new dataset, named: its address under the base address (seed.js mintPlaceId), one that
+    // neither the dataset open nor the places traced and not yet saved (`taken`) has.
+    const taken = new Set(Array.isArray(data.taken) ? data.taken.filter((x) => typeof x === 'string') : []);
+    let id;
+    for (;;) { id = mintPlaceId(data.base, data.label, taken, { romanized: data.romanized }); if (!session.store.has(id)) break; taken.add(id); }
+    postMessage({ type: 'chora-minted', id });
   } else throw new Error(`Unknown command: ${data.cmd}`);
 }

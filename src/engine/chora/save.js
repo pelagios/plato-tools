@@ -84,9 +84,9 @@ const refuse = (rep, key, rec) => rep.error('chora-attestations-not-a-list', CHO
  * here as there. makeWriter names the file from options.name, so the output is `name`. Returns run()'s
  * result.
  */
-function writeWithAdditions(input, byPlace, placed, unlisted, env, name, target) {
+function writeWithAdditions(input, byPlace, placed, unlisted, env, name, target, newPlaces = []) {
   const keyOf = keyer();
-  return run({ input, action: 'convert', target, options: { name, augment: (rec) => appendTo(rec, keyOf(rec), byPlace, placed, unlisted) } }, env);
+  return run({ input, action: 'convert', target, options: { name, augment: (rec) => appendTo(rec, keyOf(rec), byPlace, placed, unlisted), ...(newPlaces.length ? { extraRecords: newPlaces } : {}) } }, env);
 }
 /**
  * env, with the name of each output the run opens kept in `opened`. A run stopped part-way (a
@@ -106,10 +106,11 @@ const BREACHES = new Set(['attestation-removed', 'attestation-changed', 'attesta
   'identity-removed', 'identity-changed', 'identity-gone', 'description-changed', 'description-removed', 'version-not-read', 'unreadable']);
 /**
  * Mneme's verdict on a save: `later` (a File: the saved document) against `input`, with `added`
- * attestations expected new. Returns { passed, report, reasons }.
+ * attestations expected new, and `places` places (a save that adds places traced from a map: exactly
+ * that many more places have attestations, by the version check's own count). Returns { passed, report, reasons }.
  */
-export async function verify(input, later, added, env) {
-  const r = await compare({ earlier: input, later: await detect([later]) }, env);
+export async function verify(input, later, added, env, { places = 0 } = {}) {
+  const r = await compare({ earlier: input, later: await detect([later]), ...(places ? { options: { countPlaces: true } } : {}) }, env);
   const rep = r.report, c = rep.counts || {};
   const reasons = [];
   if (r.incomplete) reasons.push('a version could not be read to the end');
@@ -123,6 +124,7 @@ export async function verify(input, later, added, env) {
   else {
     if (c.lost || c.changed) reasons.push(`${c.lost} lost, ${c.changed} changed`);
     if (c.added !== added || c.later !== c.earlier + added) reasons.push(`${c.added} added where ${added} were expected`);
+    if (places && (!c.places || c.places.later - c.places.earlier !== places)) reasons.push(`${c.places ? c.places.later - c.places.earlier : 'no'} places added where ${places} were expected`);
   }
   return { passed: reasons.length === 0, report: rep, reasons };
 }
@@ -142,7 +144,12 @@ export async function verify(input, later, added, env) {
  *   that could not all be read is refused before anything is written;
  * - readIncomplete: that reading was cut short, or could not read part of its input (Chora's store,
  *   loaded.incomplete): refused before anything is written, with readReport's errors as why;
- * - attestations: how many the dataset has, when the caller knows, for the progress of the writing.
+ * - attestations: how many the dataset has, when the caller knows, for the progress of the writing;
+ * - newPlaces: places the dataset does not have, to be added after its own ([{ '@id', label,
+ *   attestations }]: the places traced from a map into a new dataset, seed.js). Each is checked as an
+ *   addition is, and refused if the dataset has a place of its address already; an addition whose placeId
+ *   is one of them goes into it, after its own attestations. The version check then expects exactly
+ *   their attestations added too, and that many more places.
  * The file is PLATO JSON Lines for a dataset read from them, else PLATO JSON (choraSavedFormat).
  * Progress goes to env.progress, each event saying which step of the save it is (`save`: 'finding',
  * 'writing', 'checking') and, where known, how many attestations that step will read (`total`).
@@ -156,6 +163,19 @@ export async function save(input, additions, env, options = {}) {
   const fail = () => ({ report: rep.toJSON(), outputs: [], mneme: null, incomplete: true });
   // Every addition is checked, and grouped by its place, before anything is read or written.
   const byPlace = new Map();
+  // The places to add (newPlaces), each checked as a place-centric place of its own, its attestations as additions.
+  const fresh = new Map();
+  for (const [i, rec0] of (options.newPlaces || []).entries()) {
+    const id = rec0 && typeof rec0['@id'] === 'string' ? rec0['@id'] : null;
+    const where = `new place ${i + 1}${id ? ` (${id})` : ''}`;
+    if (!id || !/^[A-Za-z][A-Za-z0-9+.-]*:\S+$/.test(id)) { rep.error('chora-new-place-invalid', CHORA_TEXT['chora-new-place-invalid'], `${where}: it has no address`); continue; }
+    if (fresh.has(id)) { rep.error('chora-new-place-invalid', CHORA_TEXT['chora-new-place-invalid'], `${where}: two new places have this address`); continue; }
+    const atts = (Array.isArray(rec0.attestations) ? rec0.attestations : []).map((a) => (a && typeof a === 'object' && a.contributor === undefined && options.contributor ? { ...a, contributor: options.contributor } : a));
+    const why = atts.map((a) => checkAddition(a, env.resources.validators)).find(Boolean)
+      || (env.resources.validators['place-centric'].entity({ ...rec0, attestations: atts }) ? null : explainSchema(env.resources.validators['place-centric'].entity.errors, false));
+    if (why) { rep.error('chora-new-place-invalid', CHORA_TEXT['chora-new-place-invalid'], `${where}: ${why}`); continue; }
+    fresh.set(id, { ...rec0, attestations: atts });
+  }
   for (const [i, add] of (additions || []).entries()) {
     const where = `drawing ${i + 1}${add && add.placeId ? ` (${add.placeId})` : ''}`;
     if (!add || typeof add.placeId !== 'string' || !add.placeId) { rep.error('chora-addition-invalid', CHORA_TEXT['chora-addition-invalid'], `${where}: it names no place`); continue; }
@@ -163,17 +183,22 @@ export async function save(input, additions, env, options = {}) {
     if (a && typeof a === 'object' && a.contributor === undefined && options.contributor) a = { ...a, contributor: options.contributor };
     const why = checkAddition(a, env.resources.validators);
     if (why) { rep.error('chora-addition-invalid', CHORA_TEXT['chora-addition-invalid'], `${where}: ${why}`); continue; }
+    // A drawing added to a place traced in this save goes into that place, after its own attestations.
+    if (fresh.has(add.placeId)) { fresh.get(add.placeId).attestations.push(a); continue; }
     (byPlace.get(add.placeId) || byPlace.set(add.placeId, []).get(add.placeId)).push(a);
   }
+  // A new place is added for what is attested of it: one with nothing would be a label alone.
+  for (const [id, r] of fresh) if (!r.attestations.length) rep.error('chora-new-place-invalid', CHORA_TEXT['chora-new-place-invalid'], `${id}: nothing traced of it`);
   if (rep.toJSON().errors) return fail();
   // A place the dataset does not have: reported now, not found missing in the file afterwards.
   // And a place whose attestations are not a list (a dataset the schema would refuse, which Chora
   // still opens): its drawings could only replace them, so nothing is written. The first of a place
   // given twice is the one looked at, as it is the one the drawings go to.
-  let missing;
+  let missing, taken;
   const unlisted = new Map();
   if (options.hasPlace) {
     missing = [...byPlace.keys()].filter((k) => !options.hasPlace(k));
+    taken = [...fresh.keys()].filter((k) => options.hasPlace(k));
     if (options.record) for (const k of byPlace.keys()) { const rec = missing.includes(k) ? null : options.record(k); if (rec && !listed(rec)) unlisted.set(k, rec); }
   } else {
     const seen = new Set(), keyOf = keyer();
@@ -181,6 +206,7 @@ export async function save(input, additions, env, options = {}) {
       if (ev.type !== 'record') return;
       const k = keyOf(ev.value);
       if (k !== null && byPlace.has(k) && !seen.has(k)) { seen.add(k); if (!listed(ev.value)) unlisted.set(k, ev.value); }
+      if (k !== null && fresh.has(k)) seen.add(k);
     }, async close() {} } } }, step('finding', options.attestations));
     if (r.incomplete) {
       const cut = r.report.items.find((i) => i.kind === 'unreadable');
@@ -191,6 +217,7 @@ export async function save(input, additions, env, options = {}) {
       return fail();
     }
     missing = [...byPlace.keys()].filter((k) => !seen.has(k));
+    taken = [...fresh.keys()].filter((k) => seen.has(k));
     options = { ...options, readReport: r.report };
   }
   // A dataset whose reading was cut short, or read on past part of its input it could not read (a
@@ -202,17 +229,19 @@ export async function save(input, additions, env, options = {}) {
   const unread = refusalOf(options.readReport);
   if (unread.length) { refuseNotKept(rep, unread); return fail(); }
   for (const k of missing) rep.error('chora-no-such-place', CHORA_TEXT['chora-no-such-place'], k);
+  for (const k of taken) rep.error('chora-place-exists', CHORA_TEXT['chora-place-exists'], k);
   for (const [k, rec] of unlisted) refuse(rep, k, rec);
-  if (missing.length || unlisted.size) return fail();
+  if (missing.length || taken.length || unlisted.size) return fail();
 
   const { target } = choraSavedFormat(input);
   const name = savedName(options.name || input.name || input.files[0].name, target);
   const placed = new Set();
   progress({ save: 'writing', attestations: 0, ...(options.attestations ? { total: options.attestations } : {}), elapsedMs: Date.now() - t0 });
   const opened = [];
-  const w = await writeWithAdditions(input, byPlace, placed, unlisted, naming(step('writing', options.attestations), opened), name, target);
+  const newPlaces = [...fresh.values()];
+  const w = await writeWithAdditions(input, byPlace, placed, unlisted, naming(step('writing', options.attestations), opened), name, target, newPlaces);
   const report = w.report;
-  const added = [...byPlace.values()].reduce((s, l) => s + l.length, 0);
+  const added = [...byPlace.values()].reduce((s, l) => s + l.length, 0) + newPlaces.reduce((s, r) => s + r.attestations.length, 0);
   // The files written, or, from a run that ended with no outputs (stopped part-way, or knowingly
   // short), the file it was writing: run() has closed it, and it is removed here, by the name it was
   // opened under and the name expected.
@@ -251,6 +280,6 @@ export async function save(input, additions, env, options = {}) {
   progress({ save: 'checking', version: 'earlier', phase: 'reading', attestations: 0, ...(earlier ? { total: earlier } : {}), elapsedMs: Date.now() - t0 });
   // The version check reads the dataset, then the file written, which has the additions besides.
   const checking = { ...env, progress: (p) => progress({ ...p, save: 'checking', ...(earlier ? { total: p.version === 'later' ? earlier + added : earlier } : {}), elapsedMs: Date.now() - t0 }) };
-  const mneme = await verify(input, await options.reopen(w.outputs[0]), added, checking);
+  const mneme = await verify(input, await options.reopen(w.outputs[0]), added, checking, { places: newPlaces.length });
   return { report, outputs: w.outputs, mneme };
 }

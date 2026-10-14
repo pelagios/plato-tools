@@ -15,6 +15,7 @@ import * as georef from '../georef/index.js';
 import { DataError } from '../input.js';
 import { choraTracingNote, choraAssistedNote } from '../words.js';
 import { countEdits } from './ink/edits.js';
+import { areaCheck, MAX_AREA_POINTS } from '../krisis/scope.js';
 
 /**
  * What a point traced from a historical map is taken to be until the user says otherwise: a point
@@ -157,8 +158,10 @@ export async function traceFor(g, drawn, meta = {}) {
  * georefNote's fixed sentences (with the date the georeference was fetched, and the label-anchor
  * sentence when the role is LabelAnchor), then how it was drawn (by hand, or with assistance:
  * trace.assisted, its edits counted against `geometry`). The citations are the same however it was drawn.
+ * `misfit`: georefNote's control-point misfit sentence too (featureParts always says it; Chora's drawing of a
+ * place the dataset has does not, as before).
  */
-export function tracedParts(trace, { zoom, role, geometry, version } = {}) {
+export function tracedParts(trace, { zoom, role, geometry, version, misfit = false } = {}) {
   const anchor = role === 'LabelAnchor' || role === georef.LABEL_ANCHOR;
   const record = anchor ? { ...trace.record, role: georef.LABEL_ANCHOR } : trace.record;
   // The box of image pixels, padded by `pad` canvas pixels on every side by georef (converted to image
@@ -168,13 +171,90 @@ export function tracedParts(trace, { zoom, role, geometry, version } = {}) {
   const citations = [map, ...(record.annotationId ? [georef.georefAnnotationCitation(record)] : [])];
   // Traced with assistance (a shape proposed from the map's ink, then accepted): said so, with what was
   // done to it by hand, counted against the proposal (`geometry`, the drawing as saved).
-  const how = trace.assisted
-    ? choraAssistedNote(trace.assisted, geometry ? countEdits(trace.assisted.proposed, geometry) : null, { version, zoom, proposedFrom: proposedElsewhere(trace.assisted, trace.key) })
-    : choraTracingNote({ zoom });
+  const how = howTraced(trace, { zoom, geometry, version });
   // georefNote's fixed template comes first, as Hermes writes it and PLATO's example has it; Chora's
   // own sentence is appended after, as the template's contract requires.
-  const notes = `${georef.georefNote(record, trace.fetchedAt ? { fetched: trace.fetchedAt } : {})} ${how}`;
+  const notes = `${georef.georefNote(record, { ...(trace.fetchedAt ? { fetched: trace.fetchedAt } : {}), misfit })} ${how}`;
   return { citations, notes };
+}
+
+/** How one part of a feature was traced, in words (tracedParts's `how`). */
+function howTraced(trace, { zoom, geometry, version }) {
+  return trace.assisted
+    ? choraAssistedNote(trace.assisted, geometry ? countEdits(trace.assisted.proposed, geometry) : null, { version, zoom, proposedFrom: proposedElsewhere(trace.assisted, trace.key) })
+    : choraTracingNote({ zoom });
+}
+const isAnchor = (role) => role === 'LabelAnchor' || role === georef.LABEL_ANCHOR;
+/**
+ * The citations and notes of one feature traced from a map into a new place (featureAttestation, seed.js):
+ * `parts` its geometries as drawn, each { trace, role, geometry, zoom } (a part not traced, trace null, cites
+ * nothing). The map is cited as the evidence once for each part's box on it (georefCitation, padded as the
+ * part's trace says), its source carrying the map's licence, its credit as written (`credit`, the manifest's
+ * requiredStatement: decision 10) and its date (`sourceTimespan`, plato:source_timespan: decision 9); the
+ * georeference once, as the method. The notes: georefNote's fixed sentences with the control-point misfit
+ * (decision 5: said, and never made the position's precision), the label-anchor sentence only when every
+ * part is where the map writes the name; then how each part was traced, each said once. Null when no part
+ * was traced from a map.
+ */
+export function featureParts(parts, { version, credit = null, sourceTimespan = null } = {}) {
+  const traced = (parts || []).filter((p) => p && p.trace);
+  if (!traced.length) return null;
+  const citations = [], seen = new Set(), records = new Map();
+  for (const p of traced) {
+    const t = p.trace;
+    const c = georef.georefCitation(t.record, { region: t.region, ...(t.pad ? { pad: t.pad } : {}) });
+    const source = { ...c.source, ...(t.licence ? { licence: t.licence } : {}), ...(credit ? { citation: credit } : {}), ...(sourceTimespan ? { timespan: { ...sourceTimespan } } : {}) };
+    const key = `${source['@id'] ?? ''}|${c.locator ?? ''}`;
+    if (!seen.has(key)) { seen.add(key); citations.push({ ...c, source }); }
+    const id = t.record.annotationId ?? t.record.imageServiceId;
+    if (!records.has(id)) records.set(id, t);
+  }
+  for (const t of records.values()) if (t.record.annotationId) citations.push(georef.georefAnnotationCitation(t.record));
+  const anchor = traced.every((p) => isAnchor(p.role));
+  const said = [...records.values()].map((t) => georef.georefNote(anchor ? { ...t.record, role: georef.LABEL_ANCHOR } : t.record, { ...(t.fetchedAt ? { fetched: t.fetchedAt } : {}), misfit: true }));
+  const how = [...new Set(traced.map((p) => howTraced(p.trace, { zoom: p.zoom, geometry: p.geometry, version })))];
+  return { citations, notes: [...said, ...how].join(' ') };
+}
+
+/** Douglas–Peucker: the points of an open line kept within `tol` of it (degrees, flat). */
+function simplifyLine(pts, tol) {
+  if (pts.length < 3) return pts;
+  const keep = new Uint8Array(pts.length); keep[0] = keep[pts.length - 1] = 1;
+  const stack = [[0, pts.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop();
+    const [ax, ay] = pts[a], [bx, by] = pts[b], dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy);
+    let far = -1, worst = tol;
+    for (let i = a + 1; i < b; i++) {
+      const [x, y] = pts[i];
+      const d = len ? Math.abs(dy * x - dx * y + bx * ay - by * ax) / len : Math.hypot(x - ax, y - ay);
+      if (d > worst) { worst = d; far = i; }
+    }
+    if (far >= 0) { keep[far] = 1; stack.push([a, far], [far, b]); }
+  }
+  return pts.filter((_, i) => keep[i]);
+}
+/**
+ * The sheet's outline in the world, for a gazetteer lookup's area Scope (decision 10): the georeference's
+ * mask (else the whole image) taken through toWorld, its edges followed along the map's curve, then
+ * simplified until it has at most `max` corners (WHG takes at most MAX_AREA_POINTS: scope.js areaCheck).
+ * Returns { area: the Polygon as areaCheck makes it, corners, from: 'mask' | 'image', simplified }; throws
+ * DataError when the georeference cannot place the outline, or it is not an area WHG takes.
+ */
+export async function sheetOutline(g, { max = MAX_AREA_POINTS } = {}) {
+  const { width: w, height: h } = g.image || {};
+  const from = g.mask && g.mask.length >= 3 ? 'mask' : 'image';
+  const ring = from === 'mask' ? g.mask.map((p) => [p[0], p[1]]) : [[0, 0], [w, 0], [w, h], [0, h]];
+  if (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1]) ring.push([...ring[0]]);
+  const tol = Math.max(1, Math.max(w || 0, h || 0) / 400);
+  const world = (await georef.toWorld(g, { type: 'Polygon', coordinates: [ring] }, { space: 'image', densify: tol })).geojson.coordinates[0];
+  let open = world.slice(0, -1), simplified = false;
+  // The degrees a pixel of the map is, roughly: the simplification starts finer than that, and doubles.
+  const span = Math.max(...open.map((p) => p[0])) - Math.min(...open.map((p) => p[0])) || 1;
+  for (let t = span / 1e5; open.length > max; t *= 2) { open = simplifyLine([...open, open[0]], t).slice(0, -1); simplified = true; }
+  const r = areaCheck({ type: 'Polygon', coordinates: [[...open, open[0]]] });
+  if (!r.area) throw new DataError(`The outline of the map could not be made an area for the lookup (${r.problem}).`);
+  return { area: r.area, corners: r.area.coordinates[0].length - 1, from, simplified };
 }
 
 /**

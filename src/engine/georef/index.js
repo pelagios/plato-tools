@@ -56,7 +56,7 @@ import {
 } from './shapes.js';
 
 // Public helpers for reading IIIF, kept in iiif.js (see the list of exports above).
-export { allmapsLookupUrl, parseImageRequest, normaliseId, manifestCanvases, partOfCanvases, labelText } from './iiif.js';
+export { allmapsLookupUrl, parseImageRequest, normaliseId, manifestCanvases, partOfCanvases, labelText, manifestNavDate } from './iiif.js';
 /**
  * The transformation library, as the record names it. A test checks this against
  * node_modules/@allmaps/transform/package.json, so it cannot drift from package.json's pin.

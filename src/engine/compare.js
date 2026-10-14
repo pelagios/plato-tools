@@ -426,6 +426,8 @@ export function attestationLines(context, out) {
  * earlier version describes only within those places and the later version not at all went with
  * them: it is a warning ('description-left-out'), not a description removed. Any other loss is
  * reported as without it.
+ * options.countPlaces: the counts also say how many places each version's attestations are about
+ * (counts.places: { earlier, later }), for a save that adds places (src/engine/chora/save.js, verify).
  */
 export async function compare({ earlier, later, options = {} }, env) {
   try { return await comparing({ earlier, later, options }, env); }
@@ -594,7 +596,9 @@ async function comparing({ earlier, later, options }, env) {
       }
     }
 
-    rep.counts = { ...(isSet ? { of: 'candidates' } : {}), earlier: had, later: has, unchanged: Math.max(0, had - lost - changed), changed, lost, added: Math.max(0, has - (had - lost)), retracted, superseded, ...(leftOut !== null ? { leftOut } : {}), ...(replaced !== null ? { replaced } : {}) };
+    rep.counts = { ...(isSet ? { of: 'candidates' } : {}), earlier: had, later: has, unchanged: Math.max(0, had - lost - changed), changed, lost, added: Math.max(0, has - (had - lost)), retracted, superseded, ...(leftOut !== null ? { leftOut } : {}), ...(replaced !== null ? { replaced } : {}),
+      // options.countPlaces: how many places each version's attestations are about (a save that adds places: save.js verify).
+      ...(options.countPlaces && !isSet ? { places: { earlier: ledger.one('SELECT COUNT(DISTINCT about) FROM a WHERE v=? AND k=?', [EARLIER, ATTESTATION]), later: ledger.one('SELECT COUNT(DISTINCT about) FROM a WHERE v=? AND k=?', [LATER, ATTESTATION]) } } : {}) };
     progress({ phase: 'done', elapsedMs: Date.now() - t0 });
     return { report: rep.toJSON(), outputs: [], versions: { earlier: old, later: neu } };
   } finally {

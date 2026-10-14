@@ -922,6 +922,13 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       }
     } finally { store.close(); }
   }
+  // options.extraRecords: place-centric records a caller adds after the input's own (Chora: the places
+  // traced from a map into a new dataset), written as they are, after every record read and before the
+  // writer closes. Like options.augment's additions, they are the caller's to check (save.js does), and they
+  // are counted apart from the places read.
+  if (writer && action === 'convert' && Array.isArray(options.extraRecords)) {
+    for (const value of options.extraRecords) { stop(); await writer.event({ type: 'record', value }); rep.count('places added'); }
+  }
   cands?.finish();
   for (const c of membershipCycles(membership)) rep.error('membership-cycle', 'A route, itinerary or network is, through its members, a member of itself (MemberOf, followed round, comes back to where it started)', c);
   if (writer) await writer.close();

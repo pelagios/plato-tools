@@ -138,3 +138,15 @@ export function partOfCanvases(resource) {
 }
 
 export const manifestId = (manifest) => idOf(manifest);
+
+/**
+ * The manifest's navDate (IIIF Presentation 3; also read from a 2 manifest, which may give it): the date
+ * the map is navigated by, as an xsd:dateTime string, trimmed, or null when it gives none that is one. Read
+ * as written; nothing else of the manifest (its metadata, in words) is read for a date.
+ */
+export function manifestNavDate(manifest) {
+  const v = manifest && typeof manifest === 'object' ? manifest.navDate : undefined;
+  if (typeof v !== 'string') return null;
+  const t = v.trim();
+  return /^-?\d{4,}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?$/.test(t) && !Number.isNaN(Date.parse(t.replace(/^-/, ''))) ? t : null;
+}

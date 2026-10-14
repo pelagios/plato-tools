@@ -30,6 +30,7 @@
 // again on the next load, admitted afresh (so a permission withdrawn is needed again).
 import { readGeoreference, allmapsTransformationName, normaliseId, manifestCanvases, labelText, parseImageRequest, partOfCanvases } from '../engine/georef/index.js';
 import { DataError } from '../engine/input.js';
+import { attributionOf, rightsOf } from '../engine/chora/rights.js';
 import { ALLMAPS_ANNOTATIONS, ALLMAPS_EDITOR, RemoteError, subjectOf, upgrade, infoUrl, allmapsImageUrls } from './remote.js';
 
 export { ALLMAPS_ANNOTATIONS, ALLMAPS_EDITOR, allmapsTransformationName };
@@ -309,7 +310,7 @@ function infoUnder(info, id) {
  * Read a georeference, check it may be shown, and fetch its image's information: everything the
  * renderer is to be given, or an error in words. `resolved` is what resolve() gave; `enforced`
  * whether the page's policy was shown to be enforced (permissions.enforced()). Returns { g, item,
- * info, manifest, fetchedAt, title, attribution, notes, subject }. Throws DataError (in words),
+ * info, manifest, fetchedAt, title, attribution, rights (rights.js rightsOf), notes, subject }. Throws DataError (in words),
  * NeedPermission, NeedChoice, RemoteError or PermissionError.
  */
 export async function admit(resolved, { fetchJson, allowed, enforced }) {
@@ -333,63 +334,21 @@ export async function admit(resolved, { fetchJson, allowed, enforced }) {
     throw new DataError(`The image server says the image is at ${infoId ?? '(no address)'}, not at ${g.imageServiceId}, where the georeference places it. The map was not shown: its image would have been asked for there.`);
   }
   const id = upgrade(infoId);
+  const item = itemOf(resolved.annotation, g);
   return {
     // The georeference as written: the renderer is given it under the image's id (show(), withImageId).
-    g, item: itemOf(resolved.annotation, g), info: infoUnder(info, id), manifest, manifestUrl: resolved.manifestUrl || null, fetchedAt: resolved.fetchedAt || null,
-    title: g.title || labelText(manifest?.label) || 'A map with no title', attribution: attributionOf(manifest, g.imageServiceId), notes, subject,
+    g, item, info: infoUnder(info, id), manifest, manifestUrl: resolved.manifestUrl || null, fetchedAt: resolved.fetchedAt || null,
+    title: g.title || labelText(manifest?.label) || 'A map with no title', attribution: attributionOf(manifest, g.imageServiceId),
+    // The one reading of what may be done with the map and what is traced from it (rights.js).
+    rights: rightsOf({ manifest, serviceId: g.imageServiceId, annotation: item, annotationId: g.annotationId }), notes, subject,
   };
 }
 
-// ---- Attribution -------------------------------------------------------------------------------
+// ---- Attribution ----------------------------------------------------------------------------------
 
-/**
- * What the collection says of the map's use, where its manifest says nothing: by the site the map is
- * on. David Rumsey's manifests carry a credit but no licence; the licence is on its site.
- */
-export const HOSTS = [
-  {
-    hosts: ['www.davidrumsey.com', 'davidrumsey.com'],
-    credit: 'David Rumsey Map Collection, David Rumsey Map Center, Stanford University Libraries',
-    licence: 'https://creativecommons.org/licenses/by-nc-sa/3.0/', licenceLabel: 'CC BY-NC-SA 3.0',
-  },
-];
-const LICENCE_LABELS = [
-  [/creativecommons\.org\/publicdomain\/zero\//, 'CC0'], [/creativecommons\.org\/publicdomain\/mark\//, 'Public Domain Mark'],
-  [/creativecommons\.org\/licenses\/([a-z-]+)\/(\d\.\d)/, (m) => `CC ${m[1].toUpperCase()} ${m[2]}`],
-  [/rightsstatements\.org\/vocab\/([A-Za-z-]+)\//, (m) => `RightsStatements.org ${m[1]}`],
-];
-/** Text only: a IIIF value may hold a little HTML, which is shown as its words, never as markup. */
-function text(v) {
-  const t = labelText(v);
-  return t ? t.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim() || null : null;
-}
-const httpUri = (u) => (typeof u === 'string' && /^https?:\/\/\S+$/.test(u.trim()) ? u.trim() : null);
-function labelOfLicence(uri) {
-  for (const [re, label] of LICENCE_LABELS) { const m = re.exec(uri || ''); if (m) return typeof label === 'function' ? label(m) : label; }
-  return null;
-}
-/**
- * The credit and licence of a map: { credit, licence, licenceLabel, nonCommercial, from } from the
- * manifest (Presentation 3 requiredStatement and rights; 2 attribution and license), else from HOSTS
- * by the manifest's or the image's site. Text only; only a licence, and only an http(s) one, is ever
- * an address (the manifest's logo, thumbnail, rendering, homepage and seeAlso are never used).
- */
-export function attributionOf(manifest, serviceId) {
-  const m = manifest && typeof manifest === 'object' ? manifest : {};
-  let credit = null;
-  if (m.requiredStatement) credit = text(m.requiredStatement.value) || text(m.requiredStatement.label);
-  if (!credit && m.attribution !== undefined) credit = text(m.attribution);
-  let licence = httpUri(m.rights) || [].concat(m.license ?? []).map(httpUri).find(Boolean) || null;
-  let from = credit || licence ? 'manifest' : null;
-  const hosts = [m.id ?? m['@id'], serviceId].map((u) => { try { return new URL(u).hostname; } catch { return null; } }).filter(Boolean);
-  const known = HOSTS.find((h) => h.hosts.some((x) => hosts.includes(x)));
-  if (known) {
-    if (!credit) { credit = known.credit; from = 'table'; }
-    if (!licence) { licence = known.licence; from = from === 'manifest' ? 'manifest and table' : 'table'; }
-  }
-  const licenceLabel = licence ? (known && licence === known.licence ? known.licenceLabel : labelOfLicence(licence)) : null;
-  return { credit, licence, licenceLabel, nonCommercial: !!licence && /\/licenses\/by-nc/.test(licence), from };
-}
+// The map's credit and licence, and the rights of what is traced from it, are read in one place
+// (src/engine/chora/rights.js), for every tool that shows or traces a map.
+export { HOSTS, attributionOf, rightsOf } from '../engine/chora/rights.js';
 /** The one neutral line shown for a non-commercial licence (the licence itself is linked where it is shown). */
 export const nonCommercialLine = (a) => `The map image is licensed ${a.licenceLabel || 'for non-commercial use'}; this may bear on how what you trace from it can be reused.`;
 
