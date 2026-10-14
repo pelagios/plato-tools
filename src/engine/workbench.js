@@ -146,6 +146,12 @@ export class WorkbenchError extends Error {
   constructor(kind, message, extra = {}) { super(message); this.name = 'WorkbenchError'; this.kind = kind; Object.assign(this, extra); }
 }
 
+/**
+ * WHG's cap, in one phrase wherever it is said: the request body (2 MiB), and the project that fits in it once
+ * base64 has made its every 3 bytes 4 (about three quarters of it), in the page's units (fmtBytes).
+ */
+export const capWords = (limit = BODY_MAX) => `WHG takes a save of at most ${fmtBytes(limit)}, room for a project of about ${fmtBytes(Math.floor((limit * 3) / 4))}`;
+
 /** What is said of each refusal, in words: what happened, and what to do. Never the token, never an address that holds one. */
 export const WORDS = {
   token: 'Your WHG token is needed first: give it in the token field, which is opened for you. Nothing was sent.',
@@ -166,8 +172,8 @@ export const WORDS = {
     delete: 'WHG no longer has this project: it was already deleted, perhaps from another browser.',
   },
   goneShared: 'This share link no longer opens anything: the project was deleted, or its owner stopped sharing it.',
-  tooLarge: (limit, size) => `Too large for WHG: the request came to ${fmtBytes(size)}, and WHG takes at most ${fmtBytes(limit)}.`,
-  tooLargeAlone: (limit, review) => `Too large for WHG even with every file left out: the workflow${review ? ' and the review open' : ''} alone come to more than WHG takes (${fmtBytes(limit)}). Save the project to a file instead (“Save the project”).`,
+  tooLarge: (limit, size) => `Too large for WHG: the request came to ${fmtBytes(size)}, and ${capWords(limit)}.`,
+  tooLargeAlone: (limit, review) => `Too large for WHG even with every file left out (${capWords(limit)}): the workflow${review ? ' and the review open' : ''} alone come to more. Save the project to a file instead (“Save the project”).`,
   rate: (s) => `WHG asks for a pause of ${s} ${s === 1 ? 'second' : 'seconds'} (too many requests in a minute).`,
   rateAgain: 'WHG is still asking for a pause: try again in a minute.',
   failed: {

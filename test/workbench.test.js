@@ -229,6 +229,17 @@ test('a project WHG no longer has is said for what was being done: unlinked only
   assert.match(whyWords(gone, 'delete'), /already/);
 });
 
+test('WHG\'s cap is said in one phrase everywhere: the 2 MiB request and the project of about three quarters of it that fits, in the page\'s units', async () => {
+  const { capWords } = await import('../src/engine/workbench.js');
+  const { fmtBytes } = await import('../src/engine/words.js');
+  assert.equal(capWords(), `WHG takes a save of at most ${fmtBytes(BODY_MAX)}, room for a project of about ${fmtBytes(BODY_MAX * 0.75)}`);
+  assert.equal(capWords(), 'WHG takes a save of at most 2.1 MB, room for a project of about 1.6 MB');
+  assert.ok(WORDS.tooLarge(BODY_MAX, 3e6).includes(capWords()));
+  assert.ok(WORDS.tooLargeAlone(BODY_MAX, true).includes(capWords()));
+  const page = (await import('node:fs')).readFileSync(new URL('../src/methodos/page.js', import.meta.url), 'utf8');
+  assert.ok(page.includes('(${capWords()})') && !/at most 2 MB/.test(page), 'the page says the same');
+});
+
 test('a pause asked for (429) is waited once, as long as WHG asks, then the request is made again; asked again, it stops in words', async () => {
   const fake = setup(), wb = client(fake);
   fake.cfg.rate = 1; fake.newMinute();

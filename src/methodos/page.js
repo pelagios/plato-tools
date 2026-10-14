@@ -17,7 +17,7 @@ import { outputStore } from './outputs.js';
 import { stepAt, currentInput, startFiles, keptBy, keptWords, distinct, projectWords } from './seams.js';
 import { regionsSettled, notReviewed, relateProblem, writesItself } from '../engine/methodos/containment.js';
 import { stepMark, whereWords, lower } from './layout.js';
-import { whyWords, shareLink, ENROL, WorkbenchError } from '../engine/workbench.js';
+import { whyWords, shareLink, ENROL, WorkbenchError, capWords } from '../engine/workbench.js';
 import { stateOf, fromSnapshot } from './whg.js';
 
 // The input of each automatic operation that the page's run takes from the files chosen in step 1: a
@@ -1174,7 +1174,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     const record = toSave();
     projectParts(record).then((parts) => whg.fit(parts, whgLink?.projectId ? whgLink : null)).then((f) => {
       const n = f.tooLarge.length;
-      return n ? `Too large for WHG with every file: ${f.tooLarge.map((r) => r.name).join(', ')} will not go to WHG (it takes at most 2 MB a project). The workflow${review ? ' and the review' : ''} will, and ${n === 1 ? 'the file left out is' : 'each file left out is'} listed in it, to be chosen again where a step needs ${n === 1 ? 'it' : 'them'}.` : '';
+      return n ? `Too large for WHG with every file: ${f.tooLarge.map((r) => r.name).join(', ')} will not go to WHG (${capWords()}). The workflow${review ? ' and the review' : ''} will, and ${n === 1 ? 'the file left out is' : 'each file left out is'} listed in it, to be chosen again where a step needs ${n === 1 ? 'it' : 'them'}.` : '';
     }, (e) => (e instanceof WorkbenchError || e instanceof ProjectError ? e.message : '')).then((words) => {
       if (planned?.key !== key) return;
       planned.words = words; whgLeaves.textContent = words; whgLeaves.hidden = !words;
