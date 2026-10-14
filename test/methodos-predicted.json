@@ -205,5 +205,43 @@
    "compare",
    "out"
   ]
+ },
+ {
+  "have": "map",
+  "want": "map",
+  "yes": {
+   "will-identify": true,
+   "will-publish": false
+  },
+  "base": "https://example.org/traced/",
+  "recipe": "trace-a-map",
+  "steps": [
+   "trace",
+   "check",
+   "lookup",
+   "review",
+   "apply",
+   "again",
+   "compare",
+   "out"
+  ]
+ },
+ {
+  "have": "map",
+  "want": "publish",
+  "yes": {
+   "will-identify": false
+  },
+  "base": "https://example.org/traced/",
+  "recipe": "trace-a-map",
+  "steps": [
+   "trace",
+   "check",
+   "out",
+   "mint",
+   "report",
+   "site",
+   "w3id"
+  ]
  }
 ]

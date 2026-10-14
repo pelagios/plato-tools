@@ -8,6 +8,9 @@
 //                         be done until they are chosen (runner.supply);
 //   cannot                optionally, what the workflow cannot carry from those files, each in a sentence,
 //                         said before it is followed and while it is (a reader's limits, in words);
+//   before                optionally, what is to be known before it is followed, each { words, when? }: a
+//                         sentence the plan says, under the yes-no answer `when` (as a step's), else always
+//                         (a gazetteer's daily cap of requests, for a workflow that looks places up);
 //   asks                  the questions it asks, each { question, kind: 'yes-no' | 'text' | 'list' | 'choice',
 //                         choices? (for 'choice'), optional?, and, for a yes-or-no question whose two
 //                         answers are two ways of doing a thing, answers? (the words of Yes and of No, in
@@ -70,6 +73,11 @@ export function check(recipe) {
   }
   if (r.cannot !== undefined && !(Array.isArray(r.cannot) && r.cannot.every((c) => typeof c === 'string' && c.trim())))
     say('what it cannot carry ("cannot") must be a list of sentences.');
+  if (r.before !== undefined && !(Array.isArray(r.before) && r.before.every((b) => b && typeof b.words === 'string' && b.words.trim())))
+    say('what is to be known before it is followed ("before") must be a list of sentences, each { words, when? }.');
+  for (const b of r.before || []) {
+    if (b.when !== undefined && asks[String(b.when).replace(/^!/, '')]?.kind !== 'yes-no') say(`what is said before it is followed, under "${b.when}", is under no yes-or-no question it asks.`);
+  }
   if (!Array.isArray(r.steps) || !r.steps.length) say('it has no steps.');
   const seen = new Map();
   for (const s of r.steps) {

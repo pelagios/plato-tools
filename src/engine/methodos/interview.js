@@ -37,6 +37,10 @@ export const WANT = Object.freeze([
 // where `needed` is true, or names an answer that is yes (Map your data, when the table gives regions, which
 // are minted under it). Map your data asks it with regions (needed) and when publishing (optional); Places
 // from an edition and Places from Recogito when publishing; Publish a dataset always (optional).
+// Why the base address is needed, where it is (said under its field): the regions a table gives are minted under it
+// (REGIONS), or every place traced from a map is (TRACED).
+const REGIONS = 'Needed: the regions are given addresses under it.';
+const TRACED = 'Needed: every place you trace is given its address under it as you name it.';
 const ROUTES = [
   { have: 'table', want: 'map', recipe: 'map-your-data', set: { target: 'plato-json' }, ask: ['has-regions', 'will-draw', 'will-publish'], base: { when: ['has-regions', 'will-publish'], needed: 'has-regions' } },
   { have: 'table', want: 'publish', recipe: 'map-your-data', set: { target: 'plato-json', 'will-publish': true }, ask: ['has-regions', 'will-draw'], base: { when: ['has-regions', 'will-publish'], needed: 'has-regions' } },
@@ -53,6 +57,10 @@ const ROUTES = [
   // dataset, whose places have theirs, when publishing, as Publish a dataset asks it.
   { have: 'table', want: 'match', recipe: 'match-two-datasets', set: { target: 'plato-json', 'from-table': true }, ask: ['into-dataset', 'will-publish'], base: { needed: false } },
   { have: 'plato', want: 'match', recipe: 'match-two-datasets', set: { target: 'plato-json', 'from-table': false }, ask: ['into-dataset', 'will-publish'], base: { when: 'will-publish', needed: false } },
+  // A historical map, traced into a new dataset (Stephen, 14 October 2026): the base address is needed from the
+  // start, as every place traced is given its address under it as it is named; the lookup asked as a question.
+  { have: 'map', want: 'map', recipe: 'trace-a-map', set: { target: 'plato-json' }, ask: ['will-identify', 'will-publish'], base: { needed: true, why: TRACED } },
+  { have: 'map', want: 'publish', recipe: 'trace-a-map', set: { target: 'plato-json', 'will-publish': true }, ask: ['will-identify'], base: { needed: true, why: TRACED } },
 ];
 
 // Answers that name no recipe yet: what to use meanwhile, by what is wanted, as the page's tool keys
@@ -93,8 +101,9 @@ export const questionsFor = (choice) => (choice?.kind === 'recipe' ? choice.ask.
 const given = (choice, yesNo, k) => (typeof yesNo[k] === 'boolean' ? yesNo[k] : RECIPES[choice.recipe].asks[k].default);
 
 /**
- * Whether the base address is asked under these answers: { needed } (needed: a workflow that mints
- * regions under it cannot go on without one), or null when it is not asked.
+ * Whether the base address is asked under these answers: { needed, question, why } (needed: a workflow that
+ * mints regions, or traced places, under it cannot go on without one; why: the words that say so), or null
+ * when it is not asked.
  */
 export function baseAsked(choice, yesNo = {}) {
   const b = choice?.kind === 'recipe' ? choice.base : null;
@@ -102,7 +111,7 @@ export function baseAsked(choice, yesNo = {}) {
   const yes = (k) => (yesNo[k] ?? choice.set[k] ?? RECIPES[choice.recipe].asks[k]?.default) === true;
   const when = [].concat(b?.when ?? []);
   if (!b || (when.length && !when.some(yes))) return null;
-  return { needed: b.needed === true || (typeof b.needed === 'string' && yes(b.needed)), question: RECIPES[choice.recipe].asks.base.question };
+  return { needed: b.needed === true || (typeof b.needed === 'string' && yes(b.needed)), question: RECIPES[choice.recipe].asks.base.question, why: b.why || REGIONS };
 }
 /** A base address as the interview takes one: a web address, trimmed, or null. */
 export const baseAnswer = (v) => (typeof v === 'string' && /^https?:\/\/\S+$/.test(v.trim()) ? v.trim() : null);
@@ -142,6 +151,8 @@ export function plan(recipeKey, answers, { recipes = RECIPES } = {}) {
   const skipped = steps.filter((s) => s.available !== true);
   return { key: recipe.key, title: recipe.title, version: recipe.version, digest: recipe.digest, steps, left,
     cannot: [...(recipe.cannot || [])],
+    // What is to be known before it is followed, under these answers (the recipe's `before`).
+    before: (recipe.before || []).filter((b) => applies(b, answers)).map((b) => b.words),
     // The files chosen at a step, not at the start (the other dataset of a match), as the tracker names them until they are.
     late: Object.entries(recipe.files || {}).filter(([, f]) => f.late).map(([key, f]) => ({ key, words: f.words })),
     unavailable: skipped.map((s) => s.id),

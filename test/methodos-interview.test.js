@@ -18,16 +18,19 @@ test('each pair of answers that names a recipe gives it, with its questions, and
     assert.equal(c.kind, 'recipe'); assert.equal(c.recipe, p.recipe);
     assert.deepEqual(questionsFor(c).map((q) => q.key), Object.keys(p.yes));
     for (const q of questionsFor(c)) assert.equal(q.question, RECIPES[p.recipe].asks[q.key].question);
-    assert.equal(answered(c, {}), Object.keys(p.yes).length === 0);
-    assert.equal(answered(c, p.yes), true);
-    const a = answersFor(c, p.yes);
+    assert.equal(answered(c, {}), Object.keys(p.yes).length === 0 && !p.base);
+    // A row whose workflow needs the base address gives one (Trace a historical map): without it, not answered.
+    assert.equal(answered(c, p.yes), !p.base);
+    assert.equal(answered(c, p.yes, { base: p.base }), true);
+    const a = answersFor(c, p.yes, { base: p.base });
     const pl = plan(c.recipe, a);
     assert.deepEqual(pl.steps.map((s) => s.id), p.steps);
     assert.deepEqual(pl.unavailable, []);
     assert.deepEqual(pl.notes, []);
     assert.equal(pl.digest, RECIPES[p.recipe].digest);
     // The plan is the runner's: the steps it would run are the ones the plan shows.
-    const st = runner.start(RECIPES[c.recipe], a, { files: [ref] });
+    // A workflow that begins from no file (Trace a historical map) is started with none.
+    const st = runner.start(RECIPES[c.recipe], a, Object.keys(RECIPES[c.recipe].files).length ? { files: [ref] } : {});
     assert.deepEqual(st.steps.filter((s) => s.state === 'pending').map((s) => s.id), p.steps);
   }
 });
@@ -41,7 +44,7 @@ test('"not sure" gives the plain grid, whatever is had; nothing is chosen until 
 });
 
 test('every other pair names no recipe, says why, and names tools that exist', () => {
-  const named = new Set(['table|map', 'table|publish', 'table|match', 'plato|publish', 'plato|match', 'tei|map', 'tei|publish', 'recogito|map', 'recogito|publish']);
+  const named = new Set(['table|map', 'table|publish', 'table|match', 'plato|publish', 'plato|match', 'tei|map', 'tei|publish', 'recogito|map', 'recogito|publish', 'map|map', 'map|publish']);
   const keys = new Set(['read', 'check', 'convert', 'figures', 'versions', 'publish', 'match', 'chora']);
   let none = 0;
   for (const h of HAVE) for (const w of WANT) {

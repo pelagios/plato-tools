@@ -45,6 +45,15 @@ export const OPERATIONS = Object.fromEntries([
   op({ key: 'place', title: 'Draw or trace the places on a map', tool: 'Chora', kind: 'interactive',
     waitsFor: 'the places to be drawn or traced in Chora, and the dataset saved there, which does the step',
     takes: { dataset: { types: ANY } }, gives: { dataset: 'dataset' } }),
+  // Tracing a historical map into a new dataset (the recipe "Trace a historical map"): in Chora, which makes the
+  // dataset from the map (its seed), adds a place for each feature traced, and gives the dataset its save wrote
+  // to this step (src/methodos/page.js, placed), as for "place". It begins from no file of the user's. Its
+  // permissions are the map's server's (iiif:<site>, the site known only once the map's address is given) and,
+  // only when a georeference is looked for, Allmaps's: each asked in Chora's own "Needs permission" line.
+  op({ key: 'trace', title: 'Trace the places from a historical map, into a new dataset', tool: 'Chora', kind: 'interactive', networked: true,
+    permissions: [['iiif', '<site>'], ['allmaps', 'allmaps']],
+    waitsFor: 'the places to be traced from the map in Chora, into a new dataset, and that dataset saved there, which does the step',
+    takes: {}, gives: { dataset: 'dataset' } }),
   // The regions a table's places lie in (Hermes's "within" columns, minted as regions of their own when
   // the table is converted under a base address), identified level by level, the widest first, each
   // level looked up within the match of the level above (Krisis's region review, src/engine/krisis/
