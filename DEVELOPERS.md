@@ -3121,7 +3121,7 @@ the user's WHG token; nothing is sent until the user asks, and only under the `c
   says why in words (`WORDS`, `whyWords(e, action)`): 401 (the token field is opened), 403 `beta_required`
   (the account is not enrolled; there is no self-service enrolment, so WHG's development page is linked),
   403 `origin_not_allowed`, 403 without a code (a viewer saving, an editor deleting), 404 (deleted, or a
-  share link withdrawn: the link here is let go), 409 (WHG's version and snapshot), 413, 429 (`withPause()`
+  share link withdrawn: said for what was being done, and the link here let go where a save or a share had one), 409 (WHG's version and snapshot), 413, 429 (`withPause()`
   waits as long as `Retry-After` says, once, the page counting down, then stops in words), and anything else
   "Not saved to WHG. Your work is kept in this browser." with the reason.
 - **The envelope** (`envelope()`, `unwrap()`; docs/project-file.md, "Stored in WHG"): the `.platoproj`
@@ -3145,7 +3145,8 @@ the user's WHG token; nothing is sent until the user asks, and only under the `c
   folded "Save, open or share the project", its part "In the World Historical Gazetteer"): "Save to WHG", on
   click only and at a step boundary (D3), to the personal team (D4); a workflow with no link first looks in
   your list for a project holding it (same title, then each opened to compare its envelope's workflow id and
-  `created`) and offers "Save to it" or "Save as a new WHG project". A stale save is never saved over (D2):
+  `created`: at most five, since WHG's list carries nothing of the envelope, so each comparison fetches a whole
+  snapshot of up to 2 MiB against the budget of 120 requests a minute) and offers "Save to it" or "Save as a new WHG project". A stale save is never saved over (D2):
   "Open the copy on WHG" (it may be your own from another browser; opened through the same question as any
   project, in place of the workflow open) or "Save mine as a new WHG project". "Open from WHG" (also the
   banner's "one kept in WHG") lists your projects (title, role, when saved, version), each opened through

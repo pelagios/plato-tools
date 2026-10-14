@@ -141,7 +141,7 @@ export async function fitProject({ record, files = [], left = [], review = null,
 }
 
 // ---- Asking WHG -------------------------------------------------------------------------------------
-/** Why a request to the Workbench did not do what was asked. kind: token | unauthenticated | beta | origin | forbidden | gone | conflict | too-large | rate | refused | server | network | permission | not-ours | bad-answer. */
+/** Why a request to the Workbench did not do what was asked. kind: token | unauthenticated | beta | origin | forbidden | gone | unlinked | conflict | too-large | rate | refused | server | network | permission | not-ours | bad-answer. */
 export class WorkbenchError extends Error {
   constructor(kind, message, extra = {}) { super(message); this.name = 'WorkbenchError'; this.kind = kind; Object.assign(this, extra); }
 }
@@ -158,7 +158,13 @@ export const WORDS = {
     share: 'Only an editor or the owner of a WHG project can share it, or stop sharing it.',
     open: 'WHG does not let your account open this project: you are not a member of its team.',
   },
-  gone: 'WHG no longer has this project: it was deleted, perhaps from another browser. It is no longer linked here; “Save to WHG” makes a new one.',
+  gone: {
+    save: 'WHG no longer has this project: it was deleted, perhaps from another browser. It is no longer linked here; “Save to WHG” makes a new one.',
+    share: 'WHG no longer has this project: it was deleted, perhaps from another browser. It is no longer linked here; “Save to WHG” makes a new one, to share.',
+    open: 'WHG no longer has this project: it was deleted, perhaps from another browser.',
+    list: 'WHG no longer has this project: it was deleted, perhaps from another browser.',
+    delete: 'WHG no longer has this project: it was already deleted, perhaps from another browser.',
+  },
   goneShared: 'This share link no longer opens anything: the project was deleted, or its owner stopped sharing it.',
   tooLarge: (limit, size) => `Too large for WHG: the request came to ${fmtBytes(size)}, and WHG takes at most ${fmtBytes(limit)}.`,
   tooLargeAlone: (limit, review) => `Too large for WHG even with every file left out: the workflow${review ? ' and the review open' : ''} alone come to more than WHG takes (${fmtBytes(limit)}). Save the project to a file instead (“Save the project”).`,
@@ -184,6 +190,7 @@ export function whyWords(e, action = 'save') {
   if (!(e instanceof WorkbenchError)) return `${failed} ${e?.message || e}`;
   if (e.kind === 'forbidden') return WORDS.forbidden[action] || WORDS.forbidden.open;
   if (e.kind === 'gone' && action === 'shared') return WORDS.goneShared;
+  if (e.kind === 'gone' && e.status === 404) return WORDS.gone[action] || WORDS.gone.open;
   if (['network', 'permission', 'server', 'bad-answer', 'refused', 'rate'].includes(e.kind)) return `${failed} ${e.message}`;
   return e.message;
 }
@@ -275,7 +282,7 @@ function refusal(r, j) {
   if (status === 403 && code === 'beta_required') return new WorkbenchError('beta', WORDS.beta, { status, code, link: ENROL });
   if (status === 403 && code === 'origin_not_allowed') return new WorkbenchError('origin', WORDS.origin, { status, code });
   if (status === 403) return new WorkbenchError('forbidden', WORDS.forbidden.open, { status, code });
-  if (status === 404) return new WorkbenchError('gone', WORDS.gone, { status });
+  if (status === 404) return new WorkbenchError('gone', WORDS.gone.open, { status });
   if (status === 409) return new WorkbenchError('conflict', 'WHG has a newer save of this project than the one this browser last saved or opened.', { status, version: isObject(j) && Number.isSafeInteger(j.version) ? j.version : null, snapshot: isObject(j) && isObject(j.snapshot) ? j.snapshot : null });
   if (status === 413) { const limit = Number(j?.limit) || BODY_MAX, size = Number(j?.size) || 0; return new WorkbenchError('too-large', WORDS.tooLarge(limit, size), { status, limit, size }); }
   if (status === 429) {

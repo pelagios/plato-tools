@@ -216,6 +216,19 @@ test('every refusal in words, each with its control: 401, 403 beta (with the enr
   await rejects(moved.list(), 'server', /sending the request elsewhere/);
 });
 
+test('a project WHG no longer has is said for what was being done: unlinked only where a save or share had a link to let go', async () => {
+  const fake = setup(), wb = client(fake);
+  let gone;
+  await assert.rejects(wb.get('0f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b'), (e) => { gone = e; return e.kind === 'gone'; });
+  for (const action of ['save', 'share']) assert.match(whyWords(gone, action), /no longer linked here/, action);
+  for (const action of ['open', 'delete', 'list']) {
+    const w = whyWords(gone, action);
+    assert.match(w, /WHG no longer has this project/, action);
+    assert.doesNotMatch(w, /linked here|makes a new one/, action);
+  }
+  assert.match(whyWords(gone, 'delete'), /already/);
+});
+
 test('a pause asked for (429) is waited once, as long as WHG asks, then the request is made again; asked again, it stops in words', async () => {
   const fake = setup(), wb = client(fake);
   fake.cfg.rate = 1; fake.newMinute();

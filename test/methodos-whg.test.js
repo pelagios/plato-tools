@@ -179,11 +179,22 @@ test('matching a workflow with no link: only projects that hold it (its id and w
   assert.equal((await asViewer.list()).length, 1);
 });
 
+test('matching opens at most 5 of your projects titled as the workflow (WHG\'s list says nothing of what each holds), and fails no save for it', async () => {
+  const { fake, whg } = setup();
+  for (let i = 0; i < 7; i++) await whg.save({ project: (await workflow(`map-your-data-other${i}`, 'Parishes')).project });
+  const mine = await workflow('map-your-data-mine', 'Parishes');
+  const n = fake.log.length;
+  assert.deepEqual(await whg.matches(mine.record), []);
+  const asked = fake.log.slice(n);
+  assert.equal(asked.filter((e) => e.path === '/reconciliation/projects/?doc_type=plato').length, 1);
+  assert.equal(asked.filter((e) => /^\/reconciliation\/projects\/[0-9a-f-]{36}\/$/.test(e.path)).length, 5);
+});
+
 test('sharing: shared and stopped through the link, the token handed to the page and never kept; what the link opens, read with no token', async () => {
   const { fake, idb, session, store, whg } = setup();
   const { record, project } = await workflow();
   await store.save(record);
-  await assert.rejects(whg.share(record.id), (e) => e.kind === 'gone' && /not saved to WHG yet/.test(e.message));
+  await assert.rejects(whg.share(record.id), (e) => e.kind === 'unlinked' && /not saved to WHG yet/.test(e.message));
   await whg.save({ project });
   const token = await whg.share(record.id);
   assert.match(token, /^[0-9a-f-]{36}$/);

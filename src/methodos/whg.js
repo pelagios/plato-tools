@@ -83,9 +83,11 @@ export function whgProjects({ client, store, now = () => new Date() }) {
     },
     /**
      * The projects in your list that hold the workflow `record` (its id and when it was begun, as their
-     * envelope says), each opened to see (only those titled as it is, at most `limit`); those you can save to.
+     * envelope says), each opened to see (only those titled as it is, at most `limit`: WHG's list carries nothing
+     * of the envelope, so each is a whole snapshot fetched, of up to 2 MiB, against a budget of 120 requests a
+     * minute); those you can save to.
      */
-    async matches(record, wait, { limit = 10 } = {}) {
+    async matches(record, wait, { limit = 5 } = {}) {
       const title = titleOf(record);
       const same = (await this.list(wait)).filter((p) => p.title === title && ['owner', 'editor'].includes(p.role)).slice(0, limit);
       const out = [];
@@ -113,7 +115,7 @@ export function whgProjects({ client, store, now = () => new Date() }) {
     /** Share the linked project read-only: its token, which is never kept (only that it is shared). */
     async share(id, wait) {
       const link = await store.linkFor(id);
-      if (!link?.projectId) throw new WorkbenchError('gone', 'This workflow is not saved to WHG yet: save it there first.');
+      if (!link?.projectId) throw new WorkbenchError('unlinked', 'This workflow is not saved to WHG yet: save it there first.');
       let j;
       try { j = await run(() => client.share(link.projectId), wait); } catch (e) { if (e instanceof WorkbenchError && e.kind === 'gone') await this.forget(id); throw e; }
       await store.setLink(id, { ...link, shared: true });
