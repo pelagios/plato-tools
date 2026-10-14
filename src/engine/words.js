@@ -1111,6 +1111,7 @@ export const rowWords = {
 export const expectMissingWords = {
   present: 'A place the version check was told to expect missing (left out by the reviewer) is still in the later version, with what it said: it was not left out.',
   unknown: 'A place the version check was told to expect missing (left out by the reviewer) is not in the earlier version at all, so there was nothing of it to leave out: check that the review is of this dataset, and that the place was not renamed.',
+  describedWithin: 'A source, or something else with a web address of its own, that the earlier version described only within a place left out by the reviewer is no longer described: it went with that place. If its address is one this dataset serves, it will no longer resolve.',
 };
 /**
  * Krisis: region review (Methodos stages 3 and 4; src/engine/krisis/regions.js): the regions a

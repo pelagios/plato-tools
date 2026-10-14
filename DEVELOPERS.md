@@ -1586,9 +1586,12 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   through the same rule only while the region is matched (a claim the region's record in the dataset
   already holds, the same, is not written again; a changed match is retracted, as an acceptance is, but
   no test holds that yet), and a region settled with no match since is not examined, so its earlier
-  claim stays current. And leaving out of the dataset the only place that cites a source with an address
-  of its own fails Finish (`description-removed`, which the version check of a Krisis output counts as a
-  fault): met while testing a left-out place whose decision changed, and older than this.
+  claim stays current. A source with an address of its own (or a contributor, or anything else with
+  one) cited only by a place the reviewer leaves out goes with that place, since PLATO JSON describes
+  it inside the citing attestation: the version check, told which places are left out
+  (`expectMissing`), says so (`description-left-out`, a warning naming the address, passed on in the
+  Finish report) rather than counting it as a description removed, and Finish succeeds (#35). The test
+  is of the thing, not of each statement: one the later version still describes is compared as usual.
 - **The output**, by default, is the subject dataset with the new attestations appended to their
   places (`apply.js`, `writeDataset`). The dataset is converted to a PLATO JSON document by `run()`
   with `options.augment`, whatever format it came in (tables, LPF, RDF: the report says the output is

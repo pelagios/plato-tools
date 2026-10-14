@@ -474,6 +474,23 @@ test('EXCLUDE: finishing leaves the place out, lists it, and the version check e
   assert.equal(readWork(serialiseWork(work)).places[A('york')].rowState, 'exclude', 'the row state reads back');
 });
 
+test('EXCLUDE: a place left out that alone cites a source with an address of its own: Finish succeeds, and says the source went with it', async () => {
+  const only = { '@id': X + 'source/york-only', title: 'York only', authorityType: 'source' };
+  const york = () => place('york', 'York', -1.08, 53.96, { attestations: [named('York'), { ...at(-1.08, 53.96), sources: [only] }] });
+  const places = () => [place('newcastle', 'Newcastle', -1.61, 54.97), york(), place('leeds', 'Leeds', -1.55, 53.8)];
+  const { work } = await looked(places(), { Newcastle: NEWCASTLE, York: YORK });
+  decide(work, candOf(work, 20).id, 'match', { at: NOW });
+  setRowState(work, A('york'), 'exclude');
+  const e = env();
+  const done = await apply({ subjects: await detect([datasetFile(places())]), work: serialiseWork(work), options: { output: 'dataset', reviewer: REVIEWER } }, e);
+  assert.equal(done.report.errors, 0, JSON.stringify(done.report.items));
+  assert.deepEqual(done.leftOut, [A('york')]);
+  assert.equal(outText(e, done.outputs[0].name).includes(only['@id']), false, 'presence of the cause: the source is not in the dataset written');
+  const went = done.report.items.filter((i) => i.kind === 'description-left-out');
+  assert.deepEqual(went.map((i) => [i.severity, i.examples]), [['warning', [only['@id']]]], JSON.stringify(done.report.items));
+  assert.equal(done.report.counts.versionCheck.leftOut, 2, "control: York's two attestations were expected missing");
+});
+
 test('compare with expectMissing: exactly those places may be missing; any other loss still fails, and one still there is an error', async () => {
   const G = { '@id': X + 'g/1', title: 't', status: 'published' };
   const p = (id) => ({ '@id': `${X}place/${id}`, label: id, attestations: [{ '@id': `${X}att/${id}1`, names: [{ toponym: id }], sources: [src], created: NOW }] });

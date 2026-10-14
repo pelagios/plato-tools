@@ -87,6 +87,7 @@ const TEXT = {
   'facet-added-to': 'A name, location, date, type, property or citation that attestations of the earlier version point to by its web address has more said of it in the later version. What those attestations said still holds, but they now say more than was published.',
   'description-removed': 'A place, a source or something else the earlier version describes under a web address of its own is not described in the later one. Places and sources may be corrected, so this does not break the rule, but the dataset no longer says what it is.',
   'description-changed': 'A place, a source or something else with a web address of its own is described differently: what the earlier version says of it is not all in the later one. Places and sources may be corrected, so this does not break the rule.',
+  'description-left-out': expectMissingWords.describedWithin,
   'not-compared': 'has something that cannot be written as PLATO RDF, which is what is compared, so a difference there would not be seen',
   'added-without-created': 'An attestation added in the later version does not say when it was made (created). Without that, the state of the dataset at an earlier moment cannot be worked out from the data alone.',
   'earlier-unidentified': 'Attestations of the earlier version have no web address of their own (@id). They were compared by what they say, which cannot tell one that was changed from one deleted and another added, and no later attestation can retract or replace them. Give published attestations addresses.',
@@ -138,6 +139,11 @@ export const QUERIES = {
   facetsAddedTo: `SELECT f.s FROM f WHERE f.v=0 AND EXISTS(SELECT 1 FROM n o WHERE o.v=0 AND o.s=f.s)
       AND EXISTS(SELECT 1 FROM n x WHERE x.v=1 AND x.s=f.s AND NOT EXISTS(SELECT 1 FROM n o WHERE o.v=0 AND o.s=x.s AND o.h=x.h))
       AND NOT EXISTS(SELECT 1 FROM n o WHERE o.v=0 AND o.s=f.s AND NOT EXISTS(SELECT 1 FROM n x WHERE x.v=1 AND x.s=o.s AND x.h=o.h))`,
+  // Things with addresses of their own (a source, a contributor) that the earlier version describes
+  // only within places left out on purpose, and the later version does not describe at all.
+  leftOutDescribed: `SELECT d.s FROM d WHERE NOT EXISTS(SELECT 1 FROM x WHERE x.s=d.s)
+      AND NOT EXISTS(SELECT 1 FROM d e WHERE e.s=d.s AND NOT EXISTS(SELECT 1 FROM x WHERE x.s=e.about))
+      AND NOT EXISTS(SELECT 1 FROM n WHERE n.v=1 AND n.s=d.s) GROUP BY d.s ORDER BY d.s`,
   // An address the earlier version has, or one the later version gives an attestation the earlier
   // version had without one (Krisis gives an earlier answer the address its withdrawal points to).
   withAddress: `SELECT EXISTS(SELECT 1 FROM a INDEXED BY ai WHERE v=0 AND id=?1)
@@ -170,6 +176,7 @@ export class Ledger {
     this.insItem = db.prepare('INSERT INTO a(v,k,id,about,h,c) VALUES (?,?,?,?,?,?)');
     this.insStatement = db.prepare('INSERT OR IGNORE INTO n(v,s,h) VALUES (?,?,?)');
     this.insFacet = db.prepare('INSERT OR IGNORE INTO f(v,s) VALUES (?,?)');
+    this.insWithin = db.prepare('INSERT OR IGNORE INTO d(s,about) VALUES (?,?)');
   }
   static tables(db) {
     // v: which version; k: attestation or identity match; id: its address, if it has one; about: the
@@ -178,22 +185,28 @@ export class Ledger {
     db.exec('CREATE TABLE n(v INTEGER NOT NULL, s TEXT NOT NULL, h TEXT NOT NULL, PRIMARY KEY(v, s, h)) WITHOUT ROWID');
     // The addresses each version's attestations point to as facets.
     db.exec('CREATE TABLE f(v INTEGER NOT NULL, s TEXT NOT NULL, PRIMARY KEY(v, s)) WITHOUT ROWID');
+    // Only when places are left out on purpose (compare's options.expectMissing): the places expected
+    // missing, and which record (place) of the earlier version describes each thing with an address
+    // of its own ('' for none: the dataset's header, an identity relation).
+    db.exec('CREATE TABLE x(s TEXT PRIMARY KEY) WITHOUT ROWID');
+    db.exec('CREATE TABLE d(s TEXT NOT NULL, about TEXT NOT NULL, PRIMARY KEY(s, about)) WITHOUT ROWID');
   }
   static indexes(db) {
     db.exec('CREATE INDEX ai ON a(v, id, h)');
     db.exec('CREATE INDEX ah ON a(v, h)');
   }
   /** What reader() writes one version to: a digest of each thing's statements, not the statements. */
-  sink(v) {
+  sink(v, within = false) {
     return {
       item: (kind, id, about, lines, created) => this.insItem.bind([v, kind, id, about, digest(lines.join('\n')), created ? 1 : 0]).stepReset(),
       statement: (s, line) => this.insStatement.bind([v, s, digest(line)]).stepReset(),
       facet: (s) => this.insFacet.bind([v, s]).stepReset(),
+      ...(within ? { within: (s, record) => this.insWithin.bind([s, record]).stepReset() } : {}),
     };
   }
   /** No more rows: build the indexes the comparison reads by. */
   index() {
-    this.insItem.finalize(); this.insStatement.finalize(); this.insFacet.finalize();
+    this.insItem.finalize(); this.insStatement.finalize(); this.insFacet.finalize(); this.insWithin.finalize();
     Ledger.indexes(this.db);
   }
   *rows(sql, params = []) {
@@ -209,9 +222,17 @@ export class Ledger {
  * each one the earlier version never had is a warning ('expected-missing-unknown'), so that a stale
  * expectation is not met in silence; then the earlier version's rows about them are set aside. Returns how many attestations of the
  * earlier version were set aside.
+ *
+ * PLATO JSON describes a source (or a contributor, or anything else with an address of its own)
+ * inside the attestation that cites it, so a source cited only by a place left out goes with that
+ * place. Each thing the earlier version describes only within places left out, and the later
+ * version does not describe at all, is said ('description-left-out', a warning naming it), and what
+ * the earlier version says of it is set aside, so that it is not also reported as no longer
+ * described. The test is of the thing, not of each statement: one that the later version still
+ * describes, from a place kept or another way, is compared as usual, and a statement of it made
+ * only within the place left out is then reported as a change to its description.
  */
 function setAsideMissing(db, ledger, places, rep) {
-  db.exec('CREATE TEMP TABLE x(s TEXT PRIMARY KEY) WITHOUT ROWID');
   const ins = db.prepare('INSERT OR IGNORE INTO x(s) VALUES (?)');
   try { for (const s of places) if (typeof s === 'string') ins.bind([s]).stepReset(); } finally { ins.finalize(); }
   for (const q of ledger.rows('SELECT x.s FROM x WHERE EXISTS(SELECT 1 FROM a WHERE a.v=1 AND a.about=x.s) OR EXISTS(SELECT 1 FROM n WHERE n.v=1 AND n.s=x.s) ORDER BY x.s'))
@@ -221,7 +242,10 @@ function setAsideMissing(db, ledger, places, rep) {
   const n = ledger.one('SELECT COUNT(*) FROM a WHERE v=0 AND k=0 AND about IN (SELECT s FROM x)');
   db.exec('DELETE FROM a WHERE v=0 AND about IN (SELECT s FROM x)');
   db.exec('DELETE FROM n WHERE v=0 AND s IN (SELECT s FROM x)');
-  db.exec('DROP TABLE x');
+  const went = [];
+  for (const q of ledger.rows(QUERIES.leftOutDescribed)) went.push(q.get(0));
+  const del = db.prepare('DELETE FROM n WHERE v=0 AND s=?');
+  try { for (const s of went) { rep.warning('description-left-out', TEXT['description-left-out'], s); del.bind([s]).stepReset(); } } finally { del.finalize(); }
   return n;
 }
 
@@ -232,7 +256,9 @@ function setAsideMissing(db, ledger, places, rep) {
  * an attestation points to as a facet (out.facet).
  */
 function reader(context, out, side = { withdrawals: new Map() }) {
-  let triples = [], doc = null;
+  // The record in hand: the address of the place (or, an attestation alone, of the place it is about)
+  // that describes what is read now, for out.within.
+  let triples = [], doc = null, record = '';
   const j2r = new Json2Rdf(context, (s, p, o) => triples.push(s, p, o));
   const take = () => {
     // This record's statements, and only these: whatever happens below, none is left for the next.
@@ -273,7 +299,10 @@ function reader(context, out, side = { withdrawals: new Map() }) {
       const subject = list.find(([p]) => p === IDENTITY_SUBJECT), source = list.find(([p]) => p === CANDIDATE_SOURCE);
       const kind = about || meta ? ATTESTATION : source ? CANDIDATE : subject && !bundled.has(k) ? IDENTITY : null;
       if (kind === null) {
-        if (!isBlank(k)) for (const [p, o] of list) out.statement(k, p + ' ' + term(o));
+        if (!isBlank(k)) {
+          if (out.within) out.within(k, record);
+          for (const [p, o] of list) out.statement(k, p + ' ' + term(o));
+        }
         continue;
       }
       const of = nodeKey((about || meta || source || subject)[1]);
@@ -290,17 +319,21 @@ function reader(context, out, side = { withdrawals: new Map() }) {
       const own = head && (side.kind === 'candidate-set' ? head.candidateSet : head.gazetteer);
       side.gazetteer = (own && typeof own === 'object' && !Array.isArray(own) && own) || {};
       doc = j2r.header(head);
+      record = '';
       take();
     },
     event(ev) {
       const atts = ev.type === 'attestation' ? [ev.value] : ev.type === 'record' && ev.value && Array.isArray(ev.value.attestations) ? ev.value.attestations : [];
       collectWithdrawn(atts, side.withdrawals);
       if (side.answers && atts.length) collectAnswers(atts, ev.type === 'record' ? ev.value['@id'] : null, side.answers);
+      const own = ev.type === 'record' ? ev.value?.['@id'] : ev.type === 'attestation' ? ev.value?.about : null;
+      record = typeof own === 'string' ? own : '';
       j2r.record(ev.type === 'idr' ? 'identityRelations' : ev.type === 'attestation' ? 'attestations' : ev.newEntity ? 'newSpatialEntities' : 'spatialEntities', ev.value);
       take();
     },
     // One candidate of a candidate set (the pipeline gives a sink with this method a candidate set).
     candidate(c) {
+      record = '';
       j2r.record('candidates', c);
       take();
     },
@@ -389,7 +422,10 @@ export function attestationLines(context, out) {
  * version's attestations and identity matches about them, and what it says of them, are set aside
  * (counted as `leftOut`), and each one still found in the later version is an error
  * ('expected-missing-present'), and each one the earlier version never had is a warning
- * ('expected-missing-unknown'). Any other loss is reported as without it.
+ * ('expected-missing-unknown'). A source, or anything else with an address of its own, that the
+ * earlier version describes only within those places and the later version not at all went with
+ * them: it is a warning ('description-left-out'), not a description removed. Any other loss is
+ * reported as without it.
  */
 export async function compare({ earlier, later, options = {} }, env) {
   try { return await comparing({ earlier, later, options }, env); }
@@ -413,7 +449,7 @@ async function comparing({ earlier, later, options }, env) {
     for (const [v, input, word] of [[EARLIER, earlier, 'earlier'], [LATER, later, 'later']]) {
       const side = { kind: null, gazetteer: {}, withdrawals: new Map(), answers: [] };
       db.exec('BEGIN');
-      const r = await run({ input, action: 'check', options: { ...options, sink: reader(env.resources.context, ledger.sink(v), side) } },
+      const r = await run({ input, action: 'check', options: { ...options, sink: reader(env.resources.context, ledger.sink(v, v === EARLIER && !!options.expectMissing), side) } },
         { ...env, progress: (p) => progress({ ...p, version: word, phase: p.phase === 'done' ? 'read' : p.phase }) });
       db.exec('COMMIT');
       if (r.aborted) throw new Aborted();

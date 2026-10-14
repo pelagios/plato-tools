@@ -196,6 +196,37 @@ test('a source described differently is a warning, not a breach: the attestation
   assert.deepEqual(item(r, 'description-changed')?.examples, [src['@id']]);
   assert.equal(r.counts.unchanged, 3);
 });
+// A source PLATO JSON describes inside the attestation citing it goes with the place, when that place
+// is left out on purpose (Krisis's exclude) and is the only one citing it.
+test('a source described only within a place left out is said to have gone with it, not reported as removed; one still described is compared as usual', async () => {
+  const S2 = { '@id': X + 'source/only-a', title: 'Only A' };
+  const p = (id, sources = [src]) => place(id, [{ '@id': `${A}${id}1`, names: [{ toponym: id }], sources, created: '2026-01-01T00:00:00Z' }]);
+  const earlier = (bSources) => json(doc([p('a', [src, S2]), p('b', bSources), p('c')], G1));
+  const later = (bSources) => json(doc([p('b', bSources), p('c')], G2));
+  const run = async (e, l, expectMissing) => (await compare({ earlier: await detect([e]), later: await detect([l]), options: expectMissing ? { expectMissing } : {} }, env())).report;
+  const told = await run(earlier(), later(), [`${X}place/a`]);
+  assert.equal(told.errors, 0, JSON.stringify(told.items));
+  assert.equal(item(told, 'description-removed'), undefined, JSON.stringify(told.items));
+  assert.deepEqual([item(told, 'description-left-out')?.severity, item(told, 'description-left-out')?.examples], ['warning', [S2['@id']]], JSON.stringify(told.items));
+  assert.match(item(told, 'description-left-out').message, /went with that place/);
+  assert.equal(told.counts.leftOut, 1, 'the place\'s one attestation is set aside, and no more');
+  assert.equal(told.counts.unchanged, 2, 'presence: b and c were compared');
+  // Control: not told the place is left out, its loss and the source's are found.
+  const blind = await run(earlier(), later());
+  assert.deepEqual(item(blind, 'description-removed')?.examples, [`${X}place/a`, S2['@id']], JSON.stringify(blind.items));
+  assert.deepEqual(item(blind, 'attestation-removed')?.examples, [`${A}a1`]);
+  assert.equal(item(blind, 'description-left-out'), undefined);
+  // Control: a source b cites too is still described, so nothing is said of it.
+  const both = await run(earlier([src, S2]), later([src, S2]), [`${X}place/a`]);
+  assert.equal(both.errors, 0, JSON.stringify(both.items));
+  assert.deepEqual(kinds(both, 'warning'), [], JSON.stringify(both.items));
+  assert.equal(both.counts.unchanged, 2);
+  // Control: the later version cites it from b, saying something else of it: compared as usual, a change.
+  const moved = await run(earlier(), later([src, { ...S2, title: 'Only A, corrected' }]), [`${X}place/a`]);
+  assert.deepEqual(item(moved, 'description-changed')?.examples, [S2['@id']], JSON.stringify(moved.items));
+  assert.equal(item(moved, 'description-left-out'), undefined, JSON.stringify(moved.items));
+  assert.equal(moved.counts.leftOut, 1);
+});
 // A facet with its own address (a Name that attestations share) is part of what each attestation
 // pointing to it says. Without this, a dataset that gives every name an address could respell every
 // toponym and pass.

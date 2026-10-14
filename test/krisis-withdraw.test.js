@@ -362,10 +362,9 @@ test('a candidate set exported after the answer: its promotedFrom is not a chang
 });
 
 test('a place left out of the dataset whose decision changed: Finish writes the dataset without it, and withdraws nothing there', async () => {
-  // Another place cites the same sources, and the other dataset has no address of its own: a source cited
-  // only by the place left out would go with it, which the version check reports (a limit of leaving
-  // places out, met here, not of withdrawing).
-  const { subjects, work } = await reviewed({ [B('newton')]: ['match', { at: '2026-10-01T09:00:00Z' }] }, undefined, { title: 'Dataset B' }, [place(A('elsewhere'), 'Elsewhere', [at(30, 10)])]);
+  // Newton is the only place citing its sources (S, and Dataset B, which its answer cites): they go with
+  // it, and the version check says so, by their addresses, without failing Finish (#35).
+  const { subjects, work } = await reviewed({ [B('newton')]: ['match', { at: '2026-10-01T09:00:00Z' }] });
   const v1 = await finish(subjects, work);
   redecide(work, { [B('newton')]: ['distinct', { basis: 'The mill.', at: '2026-10-02T09:00:00Z' }] });
   setRowState(work, A('newton'), 'exclude');
@@ -373,6 +372,7 @@ test('a place left out of the dataset whose decision changed: Finish writes the 
   assert.equal(v2.r.report.errors, 0, JSON.stringify(v2.r.report.items));
   assert.ok(!v2.doc.spatialEntities.some((p) => p['@id'] === A('newton')), 'left out');
   assert.equal(v2.r.report.counts.retracted ?? 0, 0);
+  assert.deepEqual(v2.r.report.items.filter((i) => i.kind === 'description-left-out').map((i) => [i.severity, i.examples.sort()]), [['warning', [X + 'b/', src['@id']]]], JSON.stringify(v2.r.report.items));
   // Control: not left out, the same change is withdrawn.
   setRowState(work, A('newton'), null);
   assert.deepEqual(metas((await finish(await asInput(v1.text), work)).doc).map((y) => y[0]), ['Retracts']);

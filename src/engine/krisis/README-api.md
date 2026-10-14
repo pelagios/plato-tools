@@ -228,6 +228,9 @@ words them all.
 - `compare(…, { options: { expectMissing: [place IRI…] } })`: those places' earlier rows are set aside
   (`counts.leftOut`, attestations), and any still in the later version is `expected-missing-present`;
   any the earlier version never had is warned of (`expected-missing-unknown`), and finishing passes it on.
+  A thing with an address of its own (a source) that the earlier version describes only within those
+  places, and the later not at all, went with them: `description-left-out` (a warning naming it, passed
+  on by finishing), not `description-removed`. One the later version still describes is compared as usual.
 - pipeline `options.augment(record)` may return null to leave the record out of the output.
 - Work-file fields (optional, in version 3 as in version 2): see the top of work.js.
 ## Region review (Methodos #28, stages 3 and 4)

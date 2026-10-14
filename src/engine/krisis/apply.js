@@ -218,6 +218,9 @@ export function attestationsDocument(work, made, sets = []) {
 
 // ---- the dataset, with the new attestations added -------------------------------------------------
 // What the version check reports that a dataset only added to cannot have: something deleted or changed.
+// A place left out by the reviewer is not among them (the version check is told to expect it missing),
+// nor a source described only within it ('description-left-out', passed on as a warning); a
+// description lost any other way is.
 const CHANGED = new Set(['attestation-removed', 'attestation-changed', 'attestation-gone', 'attestation-readdressed', 'answered-both-ways', 'facet-changed', 'facet-removed', 'facet-added-to',
   'identity-removed', 'identity-changed', 'identity-gone', 'description-removed', 'description-changed']);
 // What stops part of the dataset being read: the dataset written would then lack what was not.
@@ -418,6 +421,7 @@ export async function checkAppendOnly({ earlier, later, added, withdrawing, opti
       for (const x of i.explained || []) rep.explain('not-append-only', x.example, x.earlier, x.later);
     } else if (i.kind === 'expected-missing-present' || i.kind === 'expected-removed-published' || i.kind === 'expected-removed-unknown') rep.add('error', 'not-append-only', `${K.notAppendOnly} ${i.message}`, i.examples[0], i.count);
     else if (i.kind === 'expected-missing-unknown') i.examples.forEach((x, j) => rep.add('warning', i.kind, i.message, x, j ? 0 : i.count));   // a stale "leave out": said, not passed in silence
+    else if (i.kind === 'description-left-out') i.examples.forEach((x, j) => rep.add('warning', i.kind, i.message, x, j ? 0 : i.count));   // a source that went with a place left out
     else if (i.kind === 'unreadable' || i.kind === 'version-not-read') rep.add('error', 'not-checked', `${K.notChecked}: ${i.message}`, i.examples[0], i.count);
     else if (i.kind === 'not-compared') rep.add('warning', i.kind, i.message, i.examples[0], i.count);
   }
