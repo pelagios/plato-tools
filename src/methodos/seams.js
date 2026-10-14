@@ -30,7 +30,7 @@ export function currentInput(state, s = stepAt(state)) {
   try { return runner.inputsOf(state, s.id)[slot] || null; } catch { return null; }
 }
 
-/** The files the workflow began with (step 1's, the user's own), as references. */
+/** The user's own files: those the workflow began with (step 1's), and any chosen at a step (a match's other dataset), as references. */
 export const startFiles = (state) => (state?.files ? Object.values(state.files).flat() : []);
 /**
  * The notes of the user's own files that could not be kept in this browser (each { name, sha256, why }), once
@@ -75,10 +75,13 @@ export function projectWords(state, { review = null, withOwn = true } = {}) {
   const own = distinct(startFiles(state)), mine = new Set(own.map((r) => r.sha256));
   const made = distinct(madeBy(state)).filter((r) => !mine.has(r.sha256));
   const parts = ['the workflow, with your answers and its Scope'];
-  if (own.length && withOwn) parts.push(`your file ${and(own.map((r) => r.name))}`);
+  // Your files: the one the workflow began with, and any chosen at a step (a match's other dataset).
+  const yours = (w) => `${w} ${own.length === 1 ? 'file' : 'files'} ${and(own.map((r) => r.name))}`;
+  if (own.length && withOwn) parts.push(yours('your'));
   if (made.length) parts.push(made.length === 1 ? 'the file its steps made' : `the ${made.length} files its steps made`);
   if (review) parts.push(`the review open (${review}), with its decisions`);
-  const left = own.length && !withOwn ? ` Your file ${and(own.map((r) => r.name))} is left out: whoever opens the project chooses it again where a step needs it.` : '';
+  const one = own.length === 1;
+  const left = own.length && !withOwn ? ` ${yours('Your')} ${one ? 'is' : 'are'} left out: whoever opens the project chooses ${one ? 'it' : 'them'} again where a step needs ${one ? 'it' : 'them'}.` : '';
   return `The project file holds your own data, to carry on in another browser or on another computer, or to give to a colleague: ${and(parts)}.${left} `
     + 'Never in it: your WHG token or any other key, the permissions you gave, and your other workflows; the reviewer\'s name is in it only where the review records who decided.';
 }

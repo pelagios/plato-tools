@@ -460,7 +460,7 @@ function checkParts(manifest, small) {
   const named = refsIn(record), own = new Set(ownIn(record).map((r) => r.sha256));
   for (const p of manifest.parts.filter((x) => x.role === 'file')) {
     if (!named.some((r) => r.sha256 === p.sha256 && r.size === p.size)) no(`This project holds ${p.name}, which its workflow does not name, so it is not opened.`);
-    if (p.own && !own.has(p.sha256)) no(`This project is damaged: it calls ${p.name} the file the workflow began with, which the workflow does not.`);
+    if (p.own && !own.has(p.sha256)) no(`This project is damaged: it calls ${p.name} one of the user's own files (the file the workflow began with, or one chosen at a step), which the workflow does not.`);
   }
   for (const x of manifest.left || []) if (!named.some((r) => r.sha256 === x.sha256)) no(`This project is damaged: it lists ${x.name} as left out, which its workflow does not name.`);
   let review = null, handback = null;

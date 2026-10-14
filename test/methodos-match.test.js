@@ -434,6 +434,16 @@ test('saved as a project and opened again, the workflow keeps both of your files
   assert.match(info, /match-other\.json \(the other dataset, chosen at the step “Find the places of yours that may be the same as places of the other dataset”\)/);
   const back = r.files.find((f) => f.part.name === 'match-other.json');
   assert.equal(await back.result.text(), await a.host.store.get('match-other.json').text());
+  // Where "Save the project" is, both are named as your files, in the plural, kept or left out.
+  const { projectWords } = await import('../src/methodos/seams.js');
+  assert.match(projectWords(record), /your files match-mine\.csv and match-other\.json/);
+  assert.match(projectWords(record, { withOwn: false }), /Your files match-mine\.csv and match-other\.json are left out: whoever opens the project chooses them again where a step needs them\./);
+  // Both left out to fit WHG's Workbench (format 1.1, 'too-large'): each listed, by name.
+  const chunks3 = [];
+  await writeProject({ record, files: files.filter((f) => !startFiles(record).some((r) => r.sha256 === f.ref.sha256)), left: startFiles(record).map((ref) => ({ ref, why: 'too-large' })), tools: { version: 'test', commit: null } }, async (c) => { chunks3.push(c); });
+  const r3 = await readProject(blobSource(new Uint8Array(await new Blob(chunks3).arrayBuffer())), { sink, name: 'match.platoproj' });
+  const left3 = describe(r3).join('\n');
+  assert.match(left3, /Named by the workflow but not in the project:\n  match-mine\.csv \(\d+ bytes\): left out to fit WHG's Workbench\n  match-other\.json \(\d+ bytes\): left out to fit WHG's Workbench/);
   // The other dataset forgotten (the match done again), it is no longer the workflow's, and is refused for its project (the presence: kept above).
   const bare = recordOf({ ...runner.forget(runner.invalidate(runner.cancel(a.state, 'review'), 'match'), M, 'others'), id: 'match-two-datasets-test' }, { name: 'Match' });
   assert.deepEqual(startFiles(bare).map((x) => x.name), ['match-mine.csv']);

@@ -735,8 +735,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     return reviewDiffers(work, { subjects: inputs.subjects, others: inputs.others });
   }
   /** The work file the review step at hand takes, kept in this browser, or null. */
-  function reviewInput(s = wf && !changed ? atStep() : null) {
-    if (!s || s.op !== 'review' || !['pending', 'waiting'].includes(s.state)) return null;
+  function reviewInput(s = wf && !changed && !viewing ? atStep() : null) {
+    if (viewing || !s || s.op !== 'review' || !['pending', 'waiting'].includes(s.state)) return null;
     let ref;
     try { [ref] = runner.inputsOf(wf, s.id).work; } catch { return null; }
     return ref && heldFor(ref) ? ref : null;
@@ -887,7 +887,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     reopenB.hidden = !partial;
     // Offered when the review is put away, or the one open is not of the match the workflow recorded.
     const openNow = page.review?.();
-    const toReview = !partial && reviewInput(s) && (!page.reviewShown?.() || (openNow && notTheMatch(s, openNow))) ? reviewInput(s) : null;
+    const toReview = !viewing && !partial && reviewInput(s) && (!page.reviewShown?.() || (openNow && notTheMatch(s, openNow))) ? reviewInput(s) : null;
     reviewB.hidden = !toReview;
     if (toReview) reviewB.textContent = `Open the review (${toReview.name})`;
     if (partial) reopenB.textContent = heldFor(partial) ? `Reopen ${partial.name}` : `Choose ${partial.name} again`;
@@ -905,7 +905,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     sharedEl.hidden = !viewing;
     projectEl.hidden = !!viewing; backB.hidden = !!viewing; leaveB.hidden = !!viewing;
     if (viewing) {
-      for (const b of [doneB, asIsB, pickB, useB, reopenB, restartB, downloadB, choraB]) b.hidden = true;
+      for (const b of [doneB, asIsB, pickB, useB, reopenB, reviewB, restartB, downloadB, choraB]) b.hidden = true;
       q(sharedEl, '#methodos-shared-words').textContent = `Read-only: “${viewing.title || shown.name || tTitle.textContent}”, shared with you through the World Historical Gazetteer, as it was last saved there (version ${viewing.version}). Nothing in it can be changed or run here: make your own copy to carry on with it, or download it as a project file.`;
     }
     showKept();
@@ -930,7 +930,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       const p = el('p', { className: 'track-late', textContent: got ? `${f.words}: ${names(got)}.`
         : `${f.words}: not yet chosen. It is chosen at the step “${at?.title || OPERATIONS[at?.op]?.title}”${at?.op === 'match' ? ", with Krisis's “Match with another dataset…”" : ''}.` });
       p.dataset.late = key; p.dataset.chosen = String(!!got);
-      if (got && wf && !changed && runner.forgettable(state, key)) {
+      // Not for a workflow shared from WHG, read-only: its files are not this browser's to forget.
+      if (got && wf && !changed && !viewing && state === wf && runner.forgettable(state, key)) {
         const b = el('button', { type: 'button', className: 'link methodos-forget', textContent: `Forget ${names(got)}` });
         b.dataset.late = key;
         p.append(' ', b);
@@ -1060,7 +1061,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     if (!st) return;
     const own = startFiles(st);
     ownBox.closest('label').hidden = !own.length;
-    ownWords.textContent = own.length ? `Put my own file in it (${own.map((r) => `${r.name}, ${fmtBytes(r.size)}`).join('; ')})` : '';
+    ownWords.textContent = own.length ? `Put my own ${own.length === 1 ? 'file' : 'files'} in it (${own.map((r) => `${r.name}, ${fmtBytes(r.size)}`).join('; ')})` : '';
     projectWhat.textContent = projectWords(st, { review: page.review?.()?.name || null, withOwn: ownBox.checked });
     saveP.disabled = !!wf && !atBoundary(wf);
   }
