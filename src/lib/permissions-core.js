@@ -11,7 +11,9 @@
 // - allmaps: Allmaps' annotation service (a REGISTRY id), which learns which map was looked for;
 // - gazetteer: a gazetteer's service (the REGISTRY's whg, or another service's site), which sees
 //   the names you look up;
-// - linked: a site a dataset links to (a site), which sees which of its pages you open.
+// - linked: a site a dataset links to (a site), which sees which of its pages you open;
+// - collaborate: a service that keeps the projects you save in it (the REGISTRY's whg: WHG's Workbench),
+//   which holds everything in them, and whose share links let others read them.
 // Its state is 'allowed', 'never', or, when nothing is recorded, 'undecided'.
 
 /** The categories, each with whether a subject may be a site (an origin) rather than a REGISTRY id. */
@@ -21,6 +23,7 @@ export const CATEGORIES = {
   allmaps: { sites: false },
   gazetteer: { sites: true },
   linked: { sites: true },
+  collaborate: { sites: false },
 };
 
 /**
@@ -38,6 +41,8 @@ export const REGISTRY = {
   allmaps: { allmaps: { origins: ['https://annotations.allmaps.org'] } },
   gazetteer: { whg: { origins: ['https://whgazetteer.org', 'https://www.whgazetteer.org'] } },
   linked: {},
+  // WHG's Workbench, under https://whgazetteer.org/reconciliation/ (src/engine/workbench.js).
+  collaborate: { whg: { origins: ['https://whgazetteer.org'] } },
 };
 
 export const STATES = ['allowed', 'never'];

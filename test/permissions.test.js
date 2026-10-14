@@ -244,6 +244,36 @@ test('the command line: the flag is the consent; --allow-host grants only the ca
   assert.equal(core.check(core.fromFlags({}).grants, 'gazetteer', 'whg'), 'undecided');
 });
 
+test('collaborate:whg, the projects kept in WHG\'s Workbench: a category of its own, apart from the lookup\'s gazetteer:whg, named and worded, on whgazetteer.org only (A1)', async () => {
+  assert.deepEqual(core.parse('collaborate', 'whg'), { cat: 'collaborate', subj: 'whg' });
+  assert.deepEqual(core.originsFor('collaborate', 'whg'), ['https://whgazetteer.org']);
+  // A service only: no site may be a subject of it (sites: false), whatever is kept.
+  assert.equal(core.parse('collaborate', 'https://whgazetteer.org'), null);
+  assert.equal(core.parse('collaborate', 'https://evil.example.org'), null);
+  assert.deepEqual(Object.keys(core.normalise({ 'collaborate:whg': { state: 'allowed' }, 'collaborate:https://evil.example.org': { state: 'allowed' } })), ['collaborate:whg']);
+  const words = await import('../src/lib/permission-words.js');
+  assert.equal(words.nameOf('collaborate', 'whg'), 'World Historical Gazetteer Workbench');
+  assert.ok(/share link/.test(words.CATEGORY_WORDS.collaborate.learns) && /reviewer/.test(words.CATEGORY_WORDS.collaborate.learns), words.CATEGORY_WORDS.collaborate.learns);
+  // Apart from the lookup's: one allowed is not the other (the presence: each, allowed, is).
+  const g = { 'gazetteer:whg': { state: 'allowed' } };
+  assert.equal(core.check(g, 'gazetteer', 'whg'), 'allowed');
+  assert.equal(core.check(g, 'collaborate', 'whg'), 'undecided');
+  assert.equal(core.check({ 'collaborate:whg': { state: 'allowed' } }, 'collaborate', 'whg'), 'allowed');
+  // Listed in the panel as a known service, undecided until decided; and asked through fetch() only once allowed.
+  inPolicy('https://whgazetteer.org');
+  assert.equal(permissions.list().find((x) => x.key === 'collaborate:whg')?.state, 'undecided');
+  await assert.rejects(permissions.fetch('https://whgazetteer.org/reconciliation/projects/?doc_type=plato', { cat: 'collaborate', subj: 'whg' }), { kind: 'undecided' });
+  assert.equal(calls.length, 0);
+  permissions.set('collaborate', 'whg', 'allowed');
+  await permissions.fetch('https://whgazetteer.org/reconciliation/projects/?doc_type=plato', { cat: 'collaborate', subj: 'whg' });
+  assert.equal(calls.length, 1);
+  await assert.rejects(permissions.fetch('https://www.whgazetteer.org/reconciliation/projects/', { cat: 'collaborate', subj: 'whg' }), { kind: 'address' });
+  // The command line's --allow-host whg is no longer one service (two categories name it): refused, never granted for both.
+  assert.deepEqual(core.fromFlags({ allowHost: ['whg'] }).refused, ['whg']);
+  // The head's policy takes it as it takes any permission.
+  assert.deepEqual(core.allowedOrigins({ 'collaborate:whg': { state: 'allowed' } }, []), ['https://whgazetteer.org']);
+});
+
 // ---- The policy written into each page's <head> --------------------------------------------------
 function runHead({ local = new Store(), session = new Store() } = {}) {
   const head = { prepended: [], prepend(m) { this.prepended.push(m); } };
