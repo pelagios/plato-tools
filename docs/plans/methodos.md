@@ -430,7 +430,7 @@ written now; the rest wait on a branch.
 | **Places from an edition (TEI)** | Elenchos → Hermes TEI → Krisis lookup → review → apply → Chora (if drawing) → Elenchos → Mneme → write out → Publish (if publishing) | Built (phase 5, 12 October 2026): section 6.1 |
 | **Places from Recogito** | Elenchos → Hermes annotations (+ georeferenced regions) → Krisis lookup → review → apply → Chora (if drawing) → Elenchos → Mneme → write out → Publish (if publishing) | Built (phase 5, 12 October 2026): section 6.1 |
 | **Places from a text** | Hermes text (a hosted model, or later an in-browser one) → review → Krisis → Chora → Publish | `llm-extract` deferred |
-| **Trace a historical map** | Chora: IIIF map, georeference, trace → save → Elenchos → Publish | Nothing |
+| **Trace a historical map** | Chora: a georeferenced map, traced into a new dataset → save → Elenchos → Krisis lookup within the map's outline → review → apply (if identifying) → Elenchos → Mneme → write out → Publish (if publishing) | Built (14 October 2026): section 6.3 |
 | **Map your data** | Section 5 | Krisis lookup, adoption, region columns, hand-back |
 
 "Convert for WHG" and "Convert for Peripleo" are not workflows: each is Metaphrasis to LPF, one step,
@@ -521,6 +521,43 @@ with 19 MB of the page's JavaScript heap in use, and each move to the next place
 (headless Chromium; the worker's own heap not measured). Nothing is refused for its size. Above 50,000 places in
 a dataset, the match is unmeasured; and a review in which most places have several candidates (the synthetic
 data gives few) is unmeasured at this size too.
+
+### 6.3 Trace a historical map, as built
+
+*14 October 2026 (plan #34, item 6).* `src/engine/methodos/recipes/trace-a-map.js`, and in Chora "Trace into a
+new dataset" (DEVELOPERS.md, "Tracing a map into a new dataset"). Stephen's decisions of 14 October 2026, as built:
+
+1. *Starting.* "Follow it" starts the workflow at once: it takes no file. Chora makes the dataset, from the map's
+   title and licence, at the step `trace`; "Trace into a new dataset" works outside a workflow too.
+2. *New places.* A drawing made with no place chosen opens a name form over the map: draw, name, Enter; Cancel
+   lets the drawing go; "Add to “…” instead" adds it to the place last named; "New place" deselects and opens the
+   form. A shape accepted from the map's ink with no place chosen is a new place too.
+3. *Names.* The toponym as written; the place's label (not evidence) defaults to it and is editable. The language
+   is asked once for the map and written into every name, editable for one name; the script is asked only when
+   the language implies one other than Latin, and a romanised form goes in `romanized`.
+4. *One attestation per feature,* with its names, geometries, kinds and the map cited by its box; a label's
+   position is a second geometry, `LabelAnchor`, in the same attestation. Chora's own path is unchanged.
+5. *The georeference's error* is said in the notes (georefNote's misfit sentence), never made a `precisionKm`.
+6. *Per-map defaults* for points, lines and areas, editable for one feature, marked as defaulted; an uncertainty
+   radius of the user's own for the map, said in the notes to be theirs.
+7. *Kinds:* a short fixed list, each a Getty AAT concept by its full IRI, free text the fallback, never required,
+   the last kept; Krisis's ranking reads them.
+8. *The base address* is needed at the start, filled in from Options; each place's address is minted under it by
+   the address scheme as it is named.
+9. *The map's date,* asked once, filled in from the manifest's navDate, is the map source's timespan (with
+   `sourceLabel` as written) and, by default, each place's.
+10. *Scope of v1.* The lookup is a question; Map your data's lookup, review and decisions follow under it; the
+    sheet's outline is the lookup's area Scope, on unless unticked, shown in the tracker's Scope line; the plan
+    says WHG's daily cap of 5,000 requests per token. One sheet per workflow, its settings kept by Chora's map key.
+    The manifest's credit goes into the cited source's `citation`; nothing at dataset level.
+
+Built for a later "Make an open map" (#37) to reuse: the map picker as one component (`overlays.js`
+`pickerForm`, `pickMap`, `pickerStatus`), and one reading of a map's rights (`src/engine/chora/rights.js`: the
+map's licence and its georeference's, Allmaps' being CC0, given one free-to-reuse verdict).
+
+**How large, measured:** at 5,001 features, a fifth of them areas traced with assistance, opened and shown in
+0.35 s, each change written in 245 ms, saved with the version check in 2.6 s; at 2,001, 0.24 s, 123 ms and 1.2 s
+(DEVELOPERS.md, "Limits").
 
 ## 7. Persistence
 

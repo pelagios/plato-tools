@@ -2286,6 +2286,107 @@ below), and its engine `src/engine/chora/` (`store.js`, `view.js`, `draw.js`, `s
 - **Georeferencing** comes from `src/engine/georef/`, which belongs to Hermes; Chora keeps none of
   its own.
 
+### Tracing a map into a new dataset
+
+Stephen's decisions of 14 October 2026 (plan #34, item 6). A map shown under "Historical maps" is traced
+into a dataset of its own, each feature a place: Chora's "Trace into a new dataset", outside a workflow, and
+the step `trace` of Methodos's "Trace a historical map" (below, "Workflows"). The engine is pure and in
+`src/engine/chora/` (`seed.js`, `trace.js`'s `featureParts` and `sheetOutline`, `save.js`'s `newPlaces`,
+`rights.js`); the page's part is `src/chora/traced.js` (what is kept, the forms, the new places a save adds),
+wired in `app.js`.
+
+- **The map's settings** are asked once, keyed by Chora's map key (`overlays.js` `keyOf`), and kept in
+  `localStorage` (`chora-trace`, working data: gone at the start when none is kept, as the drawings are):
+  the base address (needed, decision 8; written to Options' `#base`, its one store, through the host's
+  `setBase`), the dataset's title, the map's date (pre-filled from the manifest's `navDate`, read by
+  `georef/iiif.js` `manifestNavDate`; nothing else of the manifest is read for a date), whether each place is
+  dated by it, the names' language (and their script, asked only where the language implies one other than
+  Latin: `seed.js` `scriptOf`), the defaults for a point, a line and an area (`TRACED_DEFAULTS`:
+  RepresentativePoint, Extent and Extent, each approximate; a line is an Itinerary only when the user says
+  so), and an uncertainty radius of the user's own, written as `precisionKm` and said in the notes to be
+  the tracer's estimate. In a workflow that looks the places up, also whether the map's outline is the
+  lookup's Scope (on unless unticked).
+- **The seed** (`seedDataset`): place-centric, no places, a draft, titled "Places traced from <map>",
+  under the base address (its `uriSpace` and `@id`), with the map's licence where it names one. Its text is
+  kept with the settings until it is first saved, so that the very file, and the drawings kept under its
+  fingerprint (`drafts.js`), can be opened again: at a workflow's step `trace` with nothing open at once,
+  elsewhere from "Go on tracing …". It is chosen in "Choose your data" (`host.choose`) and kept there as the
+  user's own choice is (`host.keep`). A dataset saved from a tracing, opened again, can be traced into
+  ("Trace it into the dataset open").
+- **A feature** is a draft of its own kind (`kind: 'feature'`): a drawing made with no place chosen, or a
+  shape from the map's ink accepted with none, while a map is traced. It opens the name form over the map
+  (`#chora-name-panel`): the name as the map writes it, the place's label (a display form, not evidence: the
+  name until changed), its kind, the name's language (the map's), its script and a romanised form where the
+  language implies another script; Enter adds the place (its address minted by the worker's `chora-mint`,
+  `seed.js` `mintPlaceId`: `<base>place/<the label as letters, digits and hyphens>`, a number after it when
+  taken, by the dataset or by a feature not yet saved), Cancel or Esc lets the drawing go. "Add to “…”
+  instead" makes the drawing one more geometry of the place last named (a point: its `LabelAnchor`, with no
+  precision). "New place" deselects and opens the form before anything is drawn: the next drawing is the
+  form's, and what was typed stays. A feature's role and precision start as the map's defaults, marked so
+  (`defaulted`) until the user chooses, as `TRACED_POINT_DEFAULTS` are; dropped off the map, a feature keeps
+  them (a drawing of a place the dataset has does not).
+- **Kinds** (`seed.js` `KINDS`): 24 Getty AAT concepts, each checked against AAT's own record on 14 October
+  2026, written `{ label, identifier: <full AAT IRI> }`; free text is a label alone. Never required; the last
+  chosen is the next default. Krisis reads the identifier and the word (`kinds.js` `placeKinds`, through
+  `match.js`'s `typeIds`), so a lookup ranks a candidate of the place's kind first.
+- **Shown at once, listed a page at a time.** Every feature is given to the drawing tool with the place
+  chosen's drawings (`visibleDrafts`), not the chosen place's alone; "Traced from the map" lists them 50 at a
+  time, the latest first, each with its role and precision, "Edit the name" and Remove (removing a place's
+  first drawing removes what was added to it).
+- **Saved** (`traced.js` `newPlacesOf`, then `save()` with `newPlaces`): one place for each named, its label,
+  and one attestation (decision 4, `seed.js` `featureAttestation`, which wraps `newGeometryAttestation` and
+  adds the names, kinds and timespan: Chora's own path for a place the dataset has is unchanged), its
+  geometries in the order drawn (the one named first), the map's date as its timespan unless the settings say
+  not, and `featureParts`' citations and notes: the map cited as the evidence once for each part's box, its
+  source carrying the map's licence, its credit as written (`citation`, from the manifest's
+  requiredStatement or attribution: decision 10, nothing at dataset level) and its date
+  (`plato:source_timespan`, with `sourceLabel` as written); the georeference cited as the method; then
+  georefNote's sentences with the control-point misfit (`misfit: true`, decision 5: the misfit is never made
+  a precision), the label-anchor sentence only when every part is the label, and how each part was traced.
+  A feature not yet named is not saved, and the save says so. `save()` writes the new places after the
+  input's own (the pipeline's `options.extraRecords`), refuses one whose address the dataset has
+  (`chora-place-exists`) or that has nothing traced, and `verify()` expects their attestations added and
+  exactly that many more places (`compare`'s `countPlaces`: the places the attestations are about), so that
+  two places saved as one fail it. The save's line says the places added.
+- **Rights** (`src/engine/chora/rights.js`, one reading for every tool that shows or traces a map):
+  `attributionOf` (moved from `overlays.js`), the georeference's own licence (`annotationLicenceOf`: an
+  annotation's `rights`, else CC0 for Allmaps' annotations), and `rightsOf`, one verdict: free to reuse
+  (the public domain, CC0, CC BY, CC BY-SA, RightsStatements.org NoC-US and NKC), not (NC, ND, In
+  Copyright), or not known (no licence named: a credit in words is not read as one). Its words are shown
+  with the map's settings and the tracing.
+- **The picker** (`overlays.js`): `pickerForm`, `pickMap` (what was pasted, a map kept, or one chosen from
+  a page of several, to a map admitted or the offer to look for a georeference) and `pickerStatus` are the
+  one component a page that shows a georeferenced map uses (Chora's "Historical maps", and a later "Make an
+  open map").
+- **The sheet's outline** (`trace.js` `sheetOutline`): the georeference's mask (else the whole image)
+  through `toWorld`, its edges followed along the map's curve, simplified (Douglas–Peucker) to at most
+  1,000 corners, as `scope.js` `areaCheck` takes it. In a workflow that looks the places up it is set as the
+  workflow's area Scope (`host.setScopeArea`, Methodos's `setScope`), said under "Trace into a new dataset"
+  and shown in the tracker's Scope line, never silently.
+- **Hidden with a map shown**, Chora's historical maps are not drawn (`createLayerManager`'s `pause`, the
+  layer's visibility): drawn into a map of no size, the renderer threw ("coordinates must be finite
+  numbers", from proj4) when Chora was left with a map shown.
+- **How large, measured** (14 October 2026, on this machine: an Intel Core i7-14650HX, 24 threads; headless Chromium,
+  through `~/.config/plato-tools/heavy.sh`, capped at 6 GB). `e2e/trace_scale.py` traces one point by hand on the grid
+  fixture map, copies it into the drawings kept (`chora-drafts/`) as N features, each a place of its own, a fifth of
+  them areas traced with assistance (120 corners, their proposal kept, as Chora keeps it), opens them again from the
+  page loaded afresh, names one more, and saves. At 2,001 features (a kept file of 5.28 MB): opened and shown on
+  the map in 0.24 s (20 ms of it giving them to the drawing tool), the map idle at
+  0.29 s; the write of every drawing kept after one more change 123 ms; saved, with the version
+  check passing and 2,001 attestations added, in 1.2 s; 104 MB of the page's JavaScript heap. At
+  5,001 (13.2 MB kept): 0.35 s (68 ms), idle at 0.39 s; each write 245 ms; saved in
+  2.6 s (5,001 added); 141 MB. So `drafts.js`, which writes the whole file again at every change,
+  was left as it is: a change at 5,000 features is a quarter of a second of writing, after the change and not
+  before it, and the proposals kept are a small part of the file. Above 5,000 features it is unmeasured, and
+  nothing is refused for its size.
+- **Tests.** `test/chora-new-places.test.js` (the seed passing Elenchos, the citations shaped as PLATO's
+  `place-centric-georeference.json`, Mneme with N places and N attestations added and failing on one
+  changed, one missing, or two made one), `test/chora-traced.test.js` (golden attestations of a point, a line,
+  an area and a label anchor, `test/fixtures/chora/traced/`, made with `GOLDEN_WRITE=1` and read through
+  before they were committed; a missing one fails), and the browser checks `trace_map_checks` (on the IIIF
+  fixture server, its manifest given a `navDate` by a route) and `trace_workflow_checks` in
+  `e2e/app_test.py`. `e2e/trace_scale.py` measures it at scale (Limits).
+
 ### Adopting a gazetteer location
 
 "Find in a gazetteer…" on the place card (`src/chora/adopt-ui.js`; the engine, pure, is
@@ -2800,10 +2901,10 @@ page's interview and tracker (below); keeping a workflow beyond the tab is phase
   exist yet (regions level by level, the containment relation, adopting a match's geometry, finding
   places in a text) is declared with the reason it is not available, and a
   workflow whose answers would reach it is refused at the start, in those words.
-  Chora's save is no operation of its own: it completes the interactive step `place` (`placed()` in
+  Chora's save is no operation of its own: it completes the interactive step `place`, or `trace` (`placed()` in
   `src/methodos/page.js`; "Chora, the map", above).
 - **Recipes** (`recipes/`) are data: "Map your data", "Publish a dataset", "Places from an edition
-  (TEI)", "Places from Recogito" and "Match two datasets" (below). A step names an
+  (TEI)", "Places from Recogito", "Match two datasets" and "Trace a historical map" (below). A step names an
   operation, where each input comes from (a file chosen at the start, `$files`, or an earlier step's
   output, `mint.dataset`, with `??` for "this, or that if it was skipped"), its options (literal or
   from an answer) and the yes-or-no question under which it runs. `recipe.js` checks a recipe
@@ -2814,7 +2915,10 @@ page's interview and tracker (below); keeping a workflow beyond the tab is phase
   under the interview's plan and, folded, in the tracker (`#methodos-cannot`, hidden for a recipe that
   names nothing). A recipe's file may be chosen late (`late: true`: the other dataset of a match, chosen
   at the match, not at the start), and a yes-or-no question may name its two answers in words
-  (`answers`, Yes's then No's) and the one it defaults to (`default`), which the interview shows chosen.
+  (`answers`, Yes's then No's) and the one it defaults to (`default`), which the interview shows chosen. A
+  recipe may say what is to be known before it is followed (`before`, each `{ words, when? }`, under a
+  yes-or-no answer as a step is), which `plan()` gives and the interview shows under its plan; and one may
+  take no file at all (`files: {}`), which the page starts at once when it is followed.
 - **Hand-offs** (`handoffs.js`) are references, never content: `{ type, name, size, sha256 }`, made by
   Krisis's `fileRecords`, with a type from a closed list (`files`, `dataset`, `mapping`,
   `work.krisis`, `work.hermes-text`, `deposit`, `site`, `w3id`). A hand-off of the wrong type is
@@ -3051,6 +3155,28 @@ with 19 MB of the page's JavaScript heap in use, and each move to the next place
 (headless Chromium; the worker's own heap not measured). Nothing is refused for its size. Above 50,000 places in
 a dataset, the match is unmeasured; and a review in which most places have several candidates (the synthetic
 data gives few) is unmeasured at this size too.
+
+**Trace a historical map** (plan #34, item 6; Stephen's decisions of 14 October 2026). `recipes/trace-a-map.js`
+begins from no file (`files: {}`): followed, the page starts the runner at once (`startB` in
+`src/methodos/page.js`; `fileKey` is undefined for it, and the "not started" words are not said), and the
+workflow waits at its first step, `trace` (operation `trace`: interactive, Chora's, declaring `iiif:<site>`,
+the map's server, known once its address is given, and `allmaps:allmaps`, for looking a georeference up;
+taking nothing, giving a dataset). Chora makes the dataset from the map there ("Tracing a map into a new
+dataset", above), told the step at hand by `host.step()` (Methodos's `step()`), and its save does the step
+(`placed()`, for `place` or `trace`: `CHORA_STEPS`; with no dataset that went to the step, the guard on the
+dataset Chora had open is skipped); "This step is done" takes the dataset chosen in step 1. Then Elenchos;
+under "Will you look the places up in the World Historical Gazetteer…?" (`will-identify`, asked as a
+question) Map your data's lookup, review and decisions through the same operations and adapters, the
+lookup within the map's outline (its area Scope, set by Chora: `host.setScopeArea`), checked again and
+compared with the dataset traced; then written out, and published if asked (the w3id rules, as for every
+dataset, only once its status says published: the dataset made from a map is a draft). The base address
+is needed from the start (`asks.base` not optional; the interview's route `base: { needed: true, why }`,
+whose words are said under the field). The recipe's `before` says WHG's daily cap of 5,000 requests per
+token, under `will-identify`. In the interview, "A map image" with "Places on a map" or "A citable,
+published dataset" leads to it. Tested in `test/methodos-trace.test.js` (the recipe, the operation, the
+routes, the plan, the runner with no file, and walked end to end in Node against a fake WHG, which is sent
+the names and the outline as bounds and nothing else of the map or the dataset; with no Scope, no bounds)
+and `trace_workflow_checks` in `e2e/app_test.py`.
 
 **The base address, in one field** (Stephen, 12 October 2026). Every workflow that publishes asks it in the
 interview, through the one field (`#methodos-base`), optional, filled in from Options and written back
@@ -3499,6 +3625,10 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   JSON Lines, LPF and RDF routes do.
 - **Matching two datasets is measured to 50,000 places each** (about 65 s, under 500 MB, on 14 October
   2026; "Match two datasets", above): nothing larger is refused, and nothing larger is measured.
+- **Tracing a map into a new dataset is measured to 5,000 features** (14 October 2026; "Tracing a map into a
+  new dataset", above): at 5,000, opened and shown in 0.35 s, 245 ms to write the drawings kept after each
+  change, the save 2.6 s; the target, 2,000, at about half of each. Nothing larger is refused, and nothing larger
+  is measured.
 - **A document's header comes first.** `dataSets` or `relationTypes` written after the records are
   reported, not read.
 - **Web annotations** give attestations about places the file does not describe, so each place is
