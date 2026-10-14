@@ -11,7 +11,7 @@
 // overwrites a newer save in WHG: a 409 comes back to the page, which offers to open WHG's copy or to save
 // this one as a new project.
 import { Sha256 } from '../engine/krisis/digest.js';
-import { fitProject, unwrap, workflowOf, withPause, titleOf, WorkbenchError } from '../engine/workbench.js';
+import { fitProject, unwrap, workflowOf, withPause, titleOf, WorkbenchError, DOC_TYPE } from '../engine/workbench.js';
 import { projectName } from '../engine/methodos/project.js';
 
 /** The JSON of `v` with every object's keys in order, so that the same data gives the same text. */
@@ -41,11 +41,12 @@ export function whgProjects({ client, store, now = () => new Date() }) {
     setLink: (id, link) => store.setLink(id, link),
     /**
      * Fit the project (fitProject's arguments, `project`) to WHG as it would be sent: for an update of
-     * `linked` ({ projectId, version }) or, without one, as a new project. What the page says before saving.
+     * `linked` ({ projectId, version }) or, without one, as a new project: the very body sent (a new one's
+     * doc_type included), so that what is measured is what WHG measures.
      */
     fit(project, linked = null) {
       const title = titleOf(project.record);
-      return fitProject({ ...project, bodyOf: (snapshot) => (linked ? { snapshot, base_version: linked.version, title } : { snapshot, title }) });
+      return fitProject({ ...project, bodyOf: (snapshot) => (linked ? { snapshot, base_version: linked.version, title } : { snapshot, doc_type: DOC_TYPE, title }) });
     },
     /**
      * Save the workflow to WHG: `project` as fit() takes it; `to` the project to update ({ projectId,

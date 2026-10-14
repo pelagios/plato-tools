@@ -226,9 +226,9 @@ export function workbench({ fetch, token = () => null, base = WORKBENCH, userAge
       if (!Array.isArray(j.projects)) throw new WorkbenchError('bad-answer', WORDS.badAnswer);
       return j.projects.filter((p) => isObject(p) && isId(p.id) && p.doc_type === DOC_TYPE);
     },
-    /** A new project in your personal team: { id, version: 1, role }. */
+    /** A new project in your personal team: { id, version: 1, role }. `body` is sent as given (fitProject measured it so), its doc_type `plato`. */
     async create(body) {
-      const j = await call('POST', 'projects/', { body: { ...body, doc_type: DOC_TYPE } });
+      const j = await call('POST', 'projects/', { body: body.doc_type === DOC_TYPE ? body : { ...body, doc_type: DOC_TYPE } });
       if (!isId(j.id) || !Number.isSafeInteger(j.version)) throw new WorkbenchError('bad-answer', WORDS.badAnswer);
       return j;
     },

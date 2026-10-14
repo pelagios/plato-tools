@@ -102,6 +102,18 @@ test('save: a new project in WHG, the link kept with its version and SHA-256; sa
   assert.equal(fake.log.filter((e) => e.method === 'PUT').length, 1);
 });
 
+test('the body fitted is the body sent: with WHG\'s cap 10 bytes over the fitted size, a new project is made, not refused (413)', async () => {
+  const { fake, whg } = setup();
+  const { project } = await workflow();
+  const f = await whg.fit(project);
+  fake.cfg.bodyMax = f.size + 10;
+  const saved = await whg.save({ project });
+  assert.equal(saved.created, true);
+  const [post] = fake.log.filter((e) => e.method === 'POST');
+  assert.equal(Buffer.byteLength(post.body), saved.size, 'what was measured is what was sent');
+  assert.ok(saved.size <= fake.cfg.bodyMax);
+});
+
 test('a stale save is refused, nothing stored either side, and the link stays at the version it was; "save mine as new" makes a second project, linked from then', async () => {
   const { fake, store, whg } = setup();
   const { record, project } = await workflow();
