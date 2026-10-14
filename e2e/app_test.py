@@ -4393,6 +4393,17 @@ def match_two_checks(pw, url, tmp):
     def matched(others):
         page.set_input_files('#others', [str(others)])
         return wait_state(page, lambda s: s.get('phase') in ('reviewing', 'error') or (s.get('action') == 'match' and s.get('phase') == 'done'), T(120), 'matching')
+    # The review open, by the files it records it was made of: its own dataset's and the other dataset's names.
+    REVIEW_OF = "() => { const w = window.__plato?.work; return w && !document.getElementById('review').hidden ? { subjects: (w.subjects?.files || []).map((f) => f.name), others: (w.others?.files || []).map((f) => f.name) } : null; }"
+    def open_review(others):
+        # "Open the review" from the tracker, then a wait for the review it opens: one whose other dataset is `others`.
+        # Waiting only for a review to be shown passed at once when another review (Krisis's match on another file)
+        # was already on the page, and the next click then landed in it, while it was being replaced (the live run of
+        # 4a09869). So the review shown before is read first, and must change to the match's own.
+        before = page.evaluate(REVIEW_OF)
+        click('#methodos-open-review')
+        until(page, f"() => {{ const r = ({REVIEW_OF})(); return !!r && JSON.stringify(r.others) === {json.dumps(json.dumps([others]))}; }}", 30)
+        return before, page.evaluate(REVIEW_OF)
     def goto_place(label):
         # To the first place, then on to `label` (a review opened again may be anywhere in its order).
         for _ in range(8):
@@ -4402,7 +4413,9 @@ def match_two_checks(pw, url, tmp):
             if page.inner_text('#review-subject').strip() == label: return True
             if page.evaluate("() => document.getElementById('review-next').disabled"): break
             click('#review-next'); page.wait_for_timeout(100)
-        return page.inner_text('#review-subject').strip() == label
+        if page.inner_text('#review-subject').strip() != label:
+            raise RuntimeError(f'the place {label} is not in the review open ({page.evaluate(REVIEW_OF)}), at {page.inner_text("#review-subject")!r}')
+        return True
     steps = ['columns', 'check', 'dataset', 'match', 'check-other', 'review', 'apply', 'again', 'compare', 'out']
 
     def begin():
@@ -4518,8 +4531,7 @@ def match_two_checks(pw, url, tmp):
     def review_and_resume():
         need('checked other')
         offer = page.evaluate("() => { const b = document.getElementById('methodos-open-review'); return b && !b.hidden ? b.textContent : null; }")
-        click('#methodos-open-review')
-        until(page, "() => !document.getElementById('review').hidden", 30)
+        r['review before'], r['review opened'] = open_review('match-other.json')
         goto_place('Newton')
         newton = page.evaluate("() => document.querySelector('#review-place li.candidate')?.dataset.id")
         click(f'#review-place li.candidate[data-id="{newton}"] button[data-act="match"]')
@@ -4545,8 +4557,10 @@ def match_two_checks(pw, url, tmp):
         click('#methodos-done'); step_is('review', 'done', 15)
         r['reviewed'] = True
         return (offer == f'Open the review (match-mine.krisis.json)' and twice == 'Already accepted for Newton.' and back['steps'].get('review') == 'current'
-                and still == ['The other dataset: match-other.json.'] and track()['steps'].get('apply') == 'current'), \
-            {'offer': offer, 'Neuton': twice, 'after the reload': back['steps'], 'late': still, 'steps': track()['steps']}
+                and still == ['The other dataset: match-other.json.'] and track()['steps'].get('apply') == 'current'
+                # The review shown before the click was Krisis's other match, and the one opened is the match's own, on your dataset.
+                and (r['review before'] or {}).get('others') == ['match-other-2.json'] and r['review opened'] == {'subjects': ['match-mine.json'], 'others': ['match-other.json']}), \
+            {'review before': r['review before'], 'review opened': r['review opened'], 'offer': offer, 'Neuton': twice, 'after the reload': back['steps'], 'late': still, 'steps': track()['steps']}
     attempt('Match two datasets: the review opened again from the tracker after the check, a place of the other dataset accepted twice said so (never refused), saved, the page reloaded and the review resumed, and the step done', review_and_resume)
 
     def record():
@@ -4625,7 +4639,7 @@ def match_two_checks(pw, url, tmp):
         click('#methodos-use')
         wait_state(page, lambda s: s.get('phase') == 'detected' and [f['name'] for f in s.get('files') or []] == ['match-other.json'], T(30), 'the other chosen')
         run('#check'); step_is('check-other', 'done', 30)
-        click('#methodos-open-review'); until(page, "() => !document.getElementById('review').hidden", 30)
+        open_review('match-other.json')
         goto_place('Newton')
         newton = page.evaluate("() => document.querySelector('#review-place li.candidate')?.dataset.id")
         click(f'#review-place li.candidate[data-id="{newton}"] button[data-act="match"]')
