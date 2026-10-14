@@ -391,6 +391,31 @@ and bumping the version, for non-personal teams only.
 - **Live editing** is phase 7, only once item 4 above is done; snapshots alone give sharing, resume
   and a read-only link.
 
+**As built (plan #34, item A1, 14 October 2026).** WHG did items 1 to 3 and 5 (Bearer and CORS for
+pelagios.org on the Workbench's views, uncharged to the daily allowance and with a budget of 120 a minute
+of their own; an opaque `plato` doc_type; a 2 MiB body cap) and turned live editing off for the type. The
+toolbox uses it as DEVELOPERS.md, "Projects in WHG's Workbench", describes, under Stephen's decisions of
+14 October, which change some of the above:
+
+- **The snapshot is the project file** (docs/project-file.md, "Stored in WHG"), in a small envelope, base64
+  with its size and SHA-256, not the record and its work files as JSON: WHG's `jsonb` reorders keys and
+  refuses `\u0000`, and a project opened from WHG is then read and checked exactly as a file is.
+- **D1, over the cap:** the request body is measured as sent, and files are left out, the user's own first,
+  then the largest of the steps' (never the record or the review), each `why: "too-large"` (format 1.1);
+  said before saving; still too large, refused, with "Save the project" to a file offered.
+- **D2, a stale save:** no merge yet, and no overwrite: "Open the copy on WHG" or "Save mine as a new WHG
+  project". The version and SHA-256 last pushed or pulled are kept from the start, so that a merge of
+  decisions (above) can be added later.
+- **D3, D4:** saved on click only, at a step boundary, with "Not saved to WHG since …" when the workflow has
+  changed since; to the personal team only.
+- **D5, the command line:** only `plato-tools project info <share link>`, with no token.
+- **D6, the share link** is the page's own (`#whg-shared=<token>`), not WHG's page (WHG gives none for an
+  opaque type): read-only in the tracker, with "Make my own copy" and "Download .platoproj".
+- **D7, the link** between a workflow and its project lives only in this browser, beside the record.
+- What leaves the computer is said beside "Share a read-only link" (the names, the decisions, the reviewer's
+  name, any files it holds); the user's own file goes with a save to WHG as with a file, unless the box
+  "Put my own file in it" is unticked or it is too large.
+
 ## 6. Other workflows worth documenting
 
 Each is a guide page and a recipe. The first four exist as sequences of landed tools and could be

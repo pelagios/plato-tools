@@ -133,11 +133,46 @@ the secrets it knows, and refuses to save one that holds any), permission grants
 storage of the browser that saved it. The reviewer's name and ORCID are in it only where a review records
 who decided (the work file's `reviewer`).
 
+## Stored in WHG
+
+WHG's Workbench keeps a project as the JSON "snapshot" of a project of `doc_type: "plato"`, which it
+stores without reading (as PostgreSQL `jsonb`: the order of keys and white space are not kept, and a
+`\u0000` is refused). So the snapshot is not the project's parts but the project file itself, in an
+envelope (`src/engine/workbench.js`, `envelope()` and `unwrap()`):
+
+```json
+{ "plato": 1, "format": "plato-tools-project",
+  "workflow": { "id": "<the record's id>", "name": "<its name>", "created": "<when it was begun>" },
+  "formatVersion": "1.1", "project": "<the .platoproj, base64>", "size": 123456, "sha256": "<64 hex>" }
+```
+
+- `plato` is the envelope's own version (a reader refuses a greater one); `format` is this format's name.
+- `project` is the whole `.platoproj`, in standard base64 with padding; `size` and `sha256` are those of
+  its bytes. A reader decodes it, checks the size and the SHA-256, and then reads it **exactly as a file**,
+  with `readProject()`: nothing else in the envelope is trusted.
+- `workflow` only lets a reader match a project in WHG to a workflow it holds (the same `id` and `created`)
+  without opening it. `formatVersion` says which version of this format the project is, for a person
+  looking at WHG's store.
+- **The cap.** WHG takes a request body of at most 2 MiB (2,097,152 bytes, the whole JSON body). A writer
+  measures the request body it will send; while it is over, it leaves files out, the user's own first,
+  then the largest of the files the steps made, never the record or the review, each listed in the
+  manifest's `left` with `why: "too-large"`, and writes the project again. If the record and the review
+  alone are over, it refuses, and the project is saved to a file instead.
+- **What WHG gives back** is read the same way, whether from the project (`GET projects/<id>/`), a refused
+  stale save (a `409` with WHG's newer snapshot), or a share link (`GET shared/<token>/`, which a reader
+  checks is of `doc_type` `plato` first).
+- **Never in it**: the WHG token (sent in the `Authorization` header only), a share link's token, or the
+  link between a workflow and its project in WHG (which the browser keeps beside the workflow, never in a
+  project).
+
 ## Checking one
 
 ```bash
 plato-tools project info [--json] FILE.platoproj
+plato-tools project info [--json] 'https://pelagios.org/plato-tools/#whg-shared=<token>'
 ```
 
 lists the manifest and checks every part's size and SHA-256, reading by the central directory as the
-page does: exit 0 when it would open, 1 when it is refused, 2 when the file cannot be read.
+page does: exit 0 when it would open, 1 when it is refused, 2 when the file cannot be read. Given a share
+link, it reads the project the link opens from WHG (with no token of the user's), unwraps it, and checks
+it the same way (2 when WHG cannot be reached); it says that the link is now in the shell's history.

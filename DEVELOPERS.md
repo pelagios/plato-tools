@@ -3104,6 +3104,89 @@ one is refused in words ("open it in WHG's Map your Data").
   and opened in a fresh profile with the workbook chosen again, byte for byte. `PROJECT_SHOTS=<dir>` saves
   screenshots at 1440 × 900.
 
+### Projects in WHG's Workbench
+
+A workflow's project can be kept in the World Historical Gazetteer's Workbench, opened from there in
+another browser, and shared read-only (plan #34, item A1; Stephen's decisions of 14 October 2026, D1 to D7;
+WHG's API: "Workbench Projects API" in WHG's documentation). The site is static: WHG keeps the projects, with
+the user's WHG token; nothing is sent until the user asks, and only under the `collaborate:whg` permission.
+
+- **The client** (`src/engine/workbench.js`, pure: the fetch and the token are given, so the command line
+  and the tests use it as the page does): `workbench({ fetch, token, base, userAgent })` with `list()`
+  (`GET projects/?doc_type=plato`), `create()`, `get()`, `push()` (`PUT` with `base_version`), `remove()`,
+  `share()`, `unshare()` and `shared(token)` (no `Authorization` at all). The token goes in the
+  `Authorization: Bearer` header and nowhere else (never `?token=`, a title, an error or a log); with none,
+  nothing is sent (`kind: 'token'`). Only a UUID is put into an address. Requests omit credentials and never
+  follow a redirect. Every refusal is a `WorkbenchError` whose `kind` the page acts on and whose message
+  says why in words (`WORDS`, `whyWords(e, action)`): 401 (the token field is opened), 403 `beta_required`
+  (the account is not enrolled; there is no self-service enrolment, so WHG's development page is linked),
+  403 `origin_not_allowed`, 403 without a code (a viewer saving, an editor deleting), 404 (deleted, or a
+  share link withdrawn: the link here is let go), 409 (WHG's version and snapshot), 413, 429 (`withPause()`
+  waits as long as `Retry-After` says, once, the page counting down, then stops in words), and anything else
+  "Not saved to WHG. Your work is kept in this browser." with the reason.
+- **The envelope** (`envelope()`, `unwrap()`; docs/project-file.md, "Stored in WHG"): the `.platoproj`
+  itself, base64, with its size and SHA-256, because WHG stores snapshots as `jsonb` (keys reordered, white
+  space dropped, `\u0000` refused). Whatever comes back is unwrapped, checked, and read by `readProject()`
+  exactly as a file.
+- **D1, the cap.** `fitProject()` writes the project, measures the request body as it will be sent, and,
+  over 2 MiB, leaves files out, the user's own first, then the largest of the steps', never the record or
+  the review, each marked `why: "too-large"` (format 1.1); a write plainly over is stopped early. The panel
+  says which files will not go before saving (a dry run while the panel is open, once for each state of the
+  workflow); still too large, it refuses and offers "Save the project".
+- **The link** (`src/methodos/store.js` `setLink()`/`linkFor()`, D7): `{ projectId, version, sha256, shared,
+  savedAt, base, title, state }` beside the workflow's record, in IndexedDB `plato-tools-methodos-links`,
+  cleaned on the way in and out, let go with the record (and for the tab only when working data is not
+  kept); never in a project file, and never a share token. `version` and `sha256` are the last pushed or
+  pulled, so that a merge of decisions can be added later; `state` is a digest of the workflow and its review
+  (`stateOf()` in `src/methodos/whg.js`), so that the panel can say "Not saved to WHG since …: the workflow
+  has changed since". A copy made from a share link keeps only `{ origin: { workflowId, version, title } }`:
+  WHG's answer to a share link names no project, and the link itself is a secret.
+- **The page** (`src/methodos/whg.js` for what is done, `src/methodos/page.js` for what is said; the tracker's
+  folded "Save, open or share the project", its part "In the World Historical Gazetteer"): "Save to WHG", on
+  click only and at a step boundary (D3), to the personal team (D4); a workflow with no link first looks in
+  your list for a project holding it (same title, then each opened to compare its envelope's workflow id and
+  `created`) and offers "Save to it" or "Save as a new WHG project". A stale save is never saved over (D2):
+  "Open the copy on WHG" (it may be your own from another browser; opened through the same question as any
+  project, in place of the workflow open) or "Save mine as a new WHG project". "Open from WHG" (also the
+  banner's "one kept in WHG") lists your projects (title, role, when saved, version), each opened through
+  `openProject(blob, name, …)` as a file is, and, yours, deleted after a question asked in the page ("Keep
+  it" focused; never a browser dialogue): WHG's own pages never show `plato` projects, so this list is the
+  only place to see and delete them. "Share a read-only link" shows `<the page's own address>#whg-shared=<token>`
+  (so that a preview build shares links to itself) with what anyone with it can read (the names, the
+  decisions, the reviewer's name, any files in it; always the newest save); "Stop sharing" withdraws it, and
+  sharing again mints a new token. The section has its own token field (`#whgp-token`, `src/lib/token-field.js`,
+  as the lookup panel's), shown while no token is held or WHG refused it, and the "Needs permission" line.
+- **A share link** (D6; `src/app.js`, `openShared()`): on load (or a `hashchange`), `#whg-shared=<token>` is
+  read and removed from the address at once (`history.replaceState`). If `collaborate:whg` is not allowed in
+  this load's policy, the page says what the link is and asks (the policy is written at load, so a reload may
+  be needed: the token is held in `sessionStorage` `plato-tools.whg-shared` across it, and cleared once used,
+  or on "Not now"). The project is read with no `Authorization`, refused unless its `doc_type` is `plato`,
+  checked by `readProject()` without writing anything, and shown in the tracker read-only (`viewShared()`:
+  every action hidden, its steps and where it is shown) with "Make my own copy", "Download .platoproj" and
+  "Close". A copy is opened as a project is, given a new workflow id, and keeps its origin; opening the link
+  again shows WHG's newest save, read-only, never a second copy. The share tokens seen in the tab are among
+  the secrets a project file refuses (`projectSecrets()`).
+- **The command line** (D5): `plato-tools project info [--json] <share link>` reads the shared project with
+  no token and `User-Agent: plato-tools/<version> (+https://pelagios.org/plato-tools/)`, unwraps and checks
+  it as a file, and says once that the link is now in the shell's history; it is the only command that asks
+  WHG for anything. `PLATO_TOOLS_WORKBENCH` points it at another Workbench (https, or http on this computer),
+  for the tests.
+- **Tests.** `test/workbench-fake.js` is a fake of WHG that copies WHG's own code (`workbench/access.py`,
+  `views.py`, `doctypes.py`: CORS for an allow-list only and never with credentials, the order Bearer, origin,
+  budget, beta, then the body cap, the opaque 409, sharing, the HTML 404 off its paths, `jsonb`'s key order
+  and its refusal of `\u0000`), usable in-process (`fake.fetch`) and as a server (`node test/workbench-fake.js
+  serve --port <n> --origin <origin>`, with a control API under `/__fake/`). `test/workbench.test.js` (the
+  envelope through a key-reordering round trip, base64, the token only in the header and nothing sent without
+  it, every refusal with its control, the pause, sharing with no `Authorization`, D1's order),
+  `test/methodos-whg.test.js` (the link store, saving, a stale save, a 404, opening, matching, sharing; the
+  share token in no store), `test/workbench-cli.test.js` (the command against the fake served). In the
+  browser, `whg_checks` in `e2e/app_test.py` drives every path above against the fake served, through
+  Playwright's routing (which answers CORS preflights itself and does not apply CORS to a fulfilled answer, so
+  the answers' CORS headers are read at the route instead); `A1_SHOTS=<dir>` saves screenshots.
+  `test/workbench-live.test.js` makes the round trip against the real WHG (create, read back, push, a stale
+  push refused, share, the shared read with no token, a preflight from pelagios.org, unshare, delete), by hand
+  only, with `WHG_TOKEN`; without it, it is skipped.
+
 ## Permissions
 
 Nothing goes to another site unless the user allows it, in one panel for the whole toolbox: the
@@ -3114,7 +3197,9 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
 - **A permission is (category, subject)**, categories by what the site learns: `basemap` (a provider
   of the `REGISTRY`, `openfreemap`, `osm` or `carto`, each declaring every site it asks, or a pasted
   basemap's site), `iiif` (a historical map's host), `allmaps` (the service), `gazetteer` (`whg`, or
-  another service's site), `linked` (a host). Its state is Allowed, Never, or Not decided (nothing
+  another service's site), `linked` (a host), `collaborate` (`whg`: WHG's Workbench, which keeps the
+  projects saved to it, whole, and lets whoever has a share link read them; a service only, apart from
+  `gazetteer:whg`, though both are on whgazetteer.org). Its state is Allowed, Never, or Not decided (nothing
   recorded, the default). Not decided, a feature shows one line, "Needs permission: <name> —
   Permissions…", which opens the panel at that entry, where it can also be allowed for this tab only;
   Never, the feature does without, and says nothing. Never beats allowing for the tab. Everything
