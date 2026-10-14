@@ -29,11 +29,15 @@ export function relateProblem(work, { exported = true } = {}) {
   if (!keys.length) return 'The review has no regions, so there is no region to record a place in: identify the regions first (the step before).';
   const bare = keys.filter((k) => !isIri(k));
   if (bare.length) return `${bare.length} of the ${keys.length} regions have no web address of their own (the table was converted without a base address), so nothing can be recorded about them: convert the table again with a base address in Options, and identify its regions.`;
-  if (exported) {
-    const unnamed = work.candidates.filter((c) => c.decision && c.decision.kind !== 'not-this' && !c.iri).length;
-    if (unnamed) return `${unnamed} ${unnamed === 1 ? 'decision does' : 'decisions do'} not name the candidate ${unnamed === 1 ? 'it answers' : 'they answer'} yet: export the suggestions first ("Export the suggestions as a candidate set", under the review), so that each identity records it (promotedFrom).`;
-  }
-  return null;
+  return exported ? unexported(work) : null;
+}
+/**
+ * Words for a review whose decisions do not all name the candidate they answer yet (its suggestions not
+ * exported as a candidate set), or null: what a workflow that publishes asks before its Finish counts.
+ */
+export function unexported(work) {
+  const unnamed = work.candidates.filter((c) => c.decision && c.decision.kind !== 'not-this' && !c.iri).length;
+  return unnamed ? `${unnamed} ${unnamed === 1 ? 'decision does' : 'decisions do'} not name the candidate ${unnamed === 1 ? 'it answers' : 'they answer'} yet: export the suggestions first ("Export the suggestions as a candidate set", under the review), so that each identity records it (promotedFrom).` : null;
 }
 /** A base address as a dataset's own address: with its trailing slash, or null if it is not a web address. */
 export function datasetAddress(base) {

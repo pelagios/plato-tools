@@ -195,7 +195,8 @@ function start(action, earlier) {
   if (action !== 'apply') { $('review').hidden = true; lockColumns(); }
   // Methodos: the run is told, as the operation a workflow's step names, with the files it runs on.
   runOp = action === 'publish' ? `publish.${$('part').value}` : action;
-  methodos.began({ op: runOp, files });
+  // A match, with the other dataset (a workflow may choose it at this step); a Finish, with what it makes ('dataset' or 'attestations').
+  methodos.began({ op: runOp, files, ...(action === 'match' ? { others: [...earlier] } : action === 'apply' ? { output: earlier } : {}) });
   // The version check: the files chosen are the later version, and `earlier` the one it is compared with.
   if (action === 'compare') worker.postMessage({ cmd: 'compare', earlier, later: files, options: { base } });
   else if (action === 'publish') onlyKeys().then(
@@ -1160,6 +1161,7 @@ const methodos = mountMethodos({
     output: async (name) => (await (await (await navigator.storage.getDirectory()).getDirectoryHandle('outputs')).getFileHandle(name)).getFile(),
     mapping: () => (isTable(input) && columns && !columns.error ? columnOptions() : null),
     review: () => (work ? { text: serialiseWork(work), name: workName } : null),
+    reviewShown: () => !!work && !$('review').hidden,
     openWork: (f) => resume(f),
     pickWork: () => $('workfile').click(),
     forgetKept: () => kept.forget(),   // "Clear them" lets the kept file go too

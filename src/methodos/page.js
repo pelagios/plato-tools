@@ -15,7 +15,7 @@ import { writeProject, readProject, projectName, ProjectError, blobSource, newer
 import { fmtBytes } from '../engine/words.js';
 import { outputStore } from './outputs.js';
 import { stepAt, currentInput, startFiles, keptBy, keptWords, distinct, projectWords } from './seams.js';
-import { regionsSettled, notReviewed, relateProblem, writesItself } from '../engine/methodos/containment.js';
+import { regionsSettled, notReviewed, relateProblem, unexported, writesItself } from '../engine/methodos/containment.js';
 import { stepMark, whereWords, lower } from './layout.js';
 import { whyWords, shareLink, ENROL, WorkbenchError, capWords } from '../engine/workbench.js';
 import { stateOf, fromSnapshot } from './whg.js';
@@ -101,7 +101,7 @@ function stepList(list, steps, at, done, notes = []) {
  *   pick()           open step 1's file picker;           output(name)   a File the last run wrote;
  *   ready()          a promise, settled when the engine is ready for a file;
  *   mapping()        the matching of columns shown, or null;
- *   review()         the review open, as { text, name }, or null;
+ *   review()         the review open, as { text, name }, or null;   reviewShown()  whether it is on the page;
  *   openWork(file)   open a Krisis work file, as "Resume a review" does;  pickWork()  choose one;
  *   ownTarget()      the format of the files chosen, as a conversion's target key, or null;
  *   base()           the base address in Options;  setBase(v)  write one there (the one store of it);
@@ -146,13 +146,15 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     for (const n of [...more.children]) if (n.tagName !== 'LEGEND') n.remove();
     const qs = questionsFor(choice);
     more.hidden = !qs.length;
-    for (const { key, question } of qs) {
+    for (const { key, question, answers, default: dflt } of qs) {
       const fs = el('fieldset', { className: 'yes-no' }, el('legend', { textContent: question }));
       fs.dataset.ask = key;
       const box = el('div', { className: 'choices' });
-      for (const [v, w] of [['yes', 'Yes'], ['no', 'No']]) {
+      // A question whose two answers are two ways of doing a thing says them in its own words, and has the one it defaults to chosen.
+      for (const [v, w] of [['yes', answers?.[0] ?? 'Yes'], ['no', answers?.[1] ?? 'No']]) {
         const input = el('input', { type: 'radio', name: `methodos-ask-${key}`, value: v });
-        if (typeof yesNo[key] === 'boolean') input.checked = yesNo[key] === (v === 'yes');
+        const given = typeof yesNo[key] === 'boolean' ? yesNo[key] : dflt;
+        if (typeof given === 'boolean') input.checked = given === (v === 'yes');
         box.append(el('label', {}, input, ' ', w));
       }
       fs.append(box); more.append(fs);
@@ -317,7 +319,27 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   const downloadB = q(tracker, '#methodos-download');
   const choraB = q(tracker, '#methodos-chora');   // Chora's step: "Open Chora" (#chora), in the tracker as under the centre's title
   const cannotEl = q(tracker, '#methodos-cannot');
+  // The files the workflow chooses at a step (the other dataset of a match), named below the steps until they are chosen, and after.
+  const lateEl = el('div', { id: 'methodos-late', hidden: true });
+  tList.after(lateEl);
+  lateEl.addEventListener('click', (e) => {
+    const b = e.target.closest('button.methodos-forget');
+    if (!b) return;
+    chain(async () => {
+      if (!wf || changed) return;
+      const key = b.dataset.late, was = wf.files[key];
+      wf = runner.forget(wf, recipeOf(wf), key);
+      const still = new Set(startFiles(wf).map((r) => r.sha256));
+      await outs.drop((was || []).filter((r) => !still.has(r.sha256)));   // not the table, were it the same file
+      say(`${names(was || [])} is forgotten: match with the other dataset you want, and it is recorded with the workflow.`);
+      await keep(); render(false);
+    });
+  });
   const useB = q(tracker, '#methodos-use'), reopenB = q(tracker, '#methodos-reopen'), restartB = q(tracker, '#methodos-restart');
+  // The review a step waits for, opened again from the work file the step before made, once another run has put it away
+  // (the check of a match's other dataset, between the match and its review), on the dataset it was made of.
+  const reviewB = el('button', { type: 'button', id: 'methodos-open-review', hidden: true });
+  reopenB.after(' ', reviewB);
   let wf = null;            // the runner's state, as a record ({ id, name, created, saved, ...state })
   let wfScope = null;       // the workflow's Scope (Issue #33), kept beside the runner's state and written with it (keep())
   let changed = null;       // a record the version rule would not carry on: { record, words } (reconcile's 'changed' or 'refuse')
@@ -365,9 +387,38 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       const s = atStep();
       if (!s || runOf(s.op) !== run.op || OPERATIONS[s.op].kind !== 'automatic') return;
       let w = ['stopped', 'failed', 'cancelled'].includes(s.state) ? runner.invalidate(wf, s.id) : wf;
+      // The files chosen at this step (the other dataset of a match, chosen in Krisis's "Match with another
+      // dataset…"): recorded with the workflow the first time, and from then on a run on others is not the step's,
+      // as a run on another table is not (by size and SHA-256). Kept in this browser once the run is the step's.
+      const late = [];
+      for (const [slot, key] of lateOf(w, s)) {
+        const given = [...(run[slot] || [])], words = lower(recipeOf(w).files[key].words);
+        if (!given.length) { say(`This run is not counted as the step “${s.title}”: it was not given ${words}.`, true); render(false); return; }
+        const refs = await refsOf(given, 'files');
+        const was = w.files[key];
+        if (was && !sameRefs(was, refs)) {
+          say(`This run is not counted as the step “${s.title}”: ${names(refs)} is not ${names(was)}, ${words} this workflow recorded (the size or SHA-256 differs). Match with ${names(was)} as it was${runner.forgettable(w, key) ? `, or forget it (“Forget ${names(was)}”, below the steps) to match with another` : ''}.`, true); render(false); return;
+        }
+        w = runner.supply(w, recipeOf(w), key, refs);
+        late.push(...refs.map((r, i) => [r, given[i]]));
+      }
       const main = mainInput(w, s);
       const differ = main ? await refsDiffer(main, [...(run.files || [])]) : [];
       if (differ.length) { say(notTheFiles(s, main, differ), true); render(false); return; }
+      // A Finish counts as recording the decisions only if it makes what the workflow keeps them in, and, when the
+      // workflow publishes, on a review whose suggestions are exported (each answer then names its candidate).
+      if (s.op === 'apply' && s.options && 'intoDataset' in s.options) {
+        const want = s.options.intoDataset === false ? 'attestations' : 'dataset';
+        if (run.output && run.output !== want) {
+          say(`This run is not counted as the step “${s.title}”: this workflow ${want === 'dataset' ? 'adds the decisions to your dataset' : 'keeps the decisions in a file of their own'}, so choose “${want === 'dataset' ? 'Your dataset with the new attestations added' : 'A PLATO file of only the new attestations'}” under Finish, and finish again.`, true); render(false); return;
+        }
+        if (s.options.exportCandidates === true) {
+          const r = page.review();
+          let why;
+          try { why = r ? unexported(JSON.parse(r.text)) : 'There is no review open.'; } catch { why = 'The review open cannot be read.'; }
+          if (why) { say(`This run is not counted as the step “${s.title}”: ${why}`, true); render(false); return; }
+        }
+      }
       // Finish counts as recording the regions only on a review that can be recorded so (PLATO #23, option B).
       if (s.op === 'relate.containment') {
         const r = page.review();
@@ -378,6 +429,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       w = w.status === 'waiting' && w.current === s.id ? runner.resume(w, s.id) : runner.next(w);
       if (w.current !== s.id) return;
       wf = w; active = { id: s.id, op: run.op };
+      for (const [r, f] of late) { outs.hold(r, f); await outs.keepOwn(r, f); }
       say(null); render(false);
     });
   }
@@ -393,7 +445,10 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       else if (run.error) wf = runner.fail(wf, id, run.error, partial);
       else {
         const problem = problemOf(run);
-        if (problem) wf = runner.stop(wf, id, problem);
+        // A step whose problems do not stop the workflow (the check of a match's other dataset): done, with a report; one that could not read its file stops.
+        if (problem && s.options?.problems === 'report' && !run.incomplete) {
+          try { wf = runner.complete(wf, id, await outputsOf(s.op, run), { findings: problem }); } catch (e) { wf = runner.fail(wf, id, e); }
+        } else if (problem) wf = runner.stop(wf, id, problem);
         else {
           try { wf = runner.complete(wf, id, await outputsOf(s.op, run)); } catch (e) { wf = runner.fail(wf, id, e); }
         }
@@ -462,8 +517,9 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
    * page chooses them again by itself after a reload, in any browser.
    */
   async function keepOwn(files) {
-    const start = startFiles(wf);
-    if (!wf || !start.length || !sameRefs(start, chosenRefs)) return;
+    // The files chosen as one of the workflow's own (the table it began with; the other dataset, chosen at the match).
+    const start = wf ? Object.values(wf.files).find((refs) => sameRefs(refs, chosenRefs)) || [] : [];
+    if (!start.length) return;
     // What could not be kept (no room, or the browser would not) is said in the tracker, by name.
     const missed = [];
     for (const r of start) {
@@ -655,6 +711,25 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     const files = main?.map(heldFor);
     if (files?.length && files.every(Boolean)) page.choose(files);
   });
+  /** The work file the review step at hand takes, kept in this browser, or null. */
+  function reviewInput(s = wf && !changed ? atStep() : null) {
+    if (!s || s.op !== 'review' || !['pending', 'waiting'].includes(s.state)) return null;
+    let ref;
+    try { [ref] = runner.inputsOf(wf, s.id).work; } catch { return null; }
+    return ref && heldFor(ref) ? ref : null;
+  }
+  reviewB.addEventListener('click', () => chain(async () => {
+    const ref = reviewInput();
+    if (!ref) return;
+    const f = heldFor(ref);
+    let made = [];
+    try { made = JSON.parse(await f.text()).subjects?.files || []; } catch { /* opened as it is: Krisis says what is wrong */ }
+    const subjects = made.map((r) => heldFor(r)).filter(Boolean);
+    const all = subjects.length === made.length ? subjects : [];
+    if (all.length && !sameRefs(chosenRefs, made)) page.choose(all);
+    await page.openReview?.(f, all);
+    say(`${f.name} is open again${all.length ? `, on ${names(made)}` : ''}: decide on the candidates, and say when the step is done.`); render(false);
+  }));
   reopenB.addEventListener('click', () => {
     const s = atStep();
     const [ref] = s?.partial ? Object.values(s.partial).flat() : [];
@@ -730,12 +805,14 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       steps = followed(shown); at = own ? null : atStep(shown);
       rows = shown.steps.filter((s) => s.state !== 'skipped' || s.unavailable).map((s) => {
         const op = OPERATIONS[s.op];
-        return { id: s.id, tool: op.tool, title: s.title, available: s.unavailable || true,
+        return { id: s.id, tool: op.tool, title: s.title, available: s.unavailable || true, findings: s.findings || null,
           st: s.unavailable ? 'unavailable' : s.state === 'done' ? 'done' : at && s.id === at.id ? 'current' : 'todo', run: at && s.id === at.id ? s : null };
       });
       tracker.dataset.status = viewing ? 'shared' : own ? 'changed' : shown.status;
     }
     trackList(tList, rows, pendingNotes(shown));
+    lateEl.replaceChildren(...lateRows(shown, pending));
+    lateEl.hidden = !lateEl.childNodes.length;
     // What the workflow cannot carry from its files, folded below the buttons; hidden for a recipe that names nothing.
     const cannot = (shown ? recipeOf(shown) : RECIPES[pending.key])?.cannot || [];
     cannotEl.hidden = !cannot.length;
@@ -785,6 +862,9 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     useB.hidden = !usable || needStart; if (usable) useB.textContent = `Use ${names(usable)}${fromWhere(wf, s, usable)}`;
     const partial = (s?.state === 'failed' || s?.state === 'cancelled') && s.partial ? Object.values(s.partial).flat()[0] : null;
     reopenB.hidden = !partial;
+    const toReview = !partial && reviewInput(s) && !page.reviewShown?.() ? reviewInput(s) : null;
+    reviewB.hidden = !toReview;
+    if (toReview) reviewB.textContent = `Open the review (${toReview.name})`;
     if (partial) reopenB.textContent = heldFor(partial) ? `Reopen ${partial.name}` : `Choose ${partial.name} again`;
     if (s && !changed && !viewing) {
       const p = wf ? { title: recipeOf(wf)?.title } : plan(pending.key, pending.answers);
@@ -809,6 +889,32 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     if (focus) show(strip.offsetParent ? strip : q(tracker, 'h2'));
   }
   const sameRefs = (a, b) => !!a && !!b && a.length === b.length && a.every((r) => b.some((x) => x.sha256 === r.sha256 && x.size === r.size));
+  // The files a step takes that are chosen at it (a recipe's `late` files, by its slot and the files' key): [[slot, key]].
+  const lateOf = (state, s) => Object.entries(s.from).map(([slot, ref]) => [slot, ref.startsWith('$') ? ref.slice(1) : null])
+    .filter(([, key]) => key && recipeOf(state)?.files?.[key]?.late);
+  /**
+   * The files a workflow chooses at a step, said from the start: "The other dataset: not yet chosen…", or by
+   * name once chosen, with a way to forget them while no step has been done with them (runner.forget).
+   */
+  function lateRows(state, pend) {
+    const recipe = state ? recipeOf(state) : pend ? RECIPES[pend.key] : null;
+    if (!recipe) return [];
+    return Object.entries(recipe.files || {}).filter(([, f]) => f.late).map(([key, f]) => {
+      const at = recipe.steps.find((s) => Object.values(s.from || {}).includes(`$${key}`));
+      const got = state?.files?.[key];
+      const p = el('p', { className: 'track-late', textContent: got ? `${f.words}: ${names(got)}.`
+        : `${f.words}: not yet chosen. It is chosen at the step “${at?.title || OPERATIONS[at?.op]?.title}”${at?.op === 'match' ? ", with Krisis's “Match with another dataset…”" : ''}.` });
+      p.dataset.late = key; p.dataset.chosen = String(!!got);
+      if (got && wf && !changed && runner.forgettable(state, key)) {
+        const b = el('button', { type: 'button', className: 'link methodos-forget', textContent: `Forget ${names(got)}` });
+        b.dataset.late = key;
+        p.append(' ', b);
+      }
+      return p;
+    });
+  }
+  /** What a step done with a report found (runner.complete's findings). */
+  const findingsWords = (f) => `Done, with a report: ${f.words}${f.errors ? ` (${f.errors} ${f.errors === 1 ? 'problem' : 'problems'})` : ''} This does not stop the workflow.`;
   const pendingNotes = (state) => (state ? (!RECIPES[state.recipe.key] ? [] : state.steps.filter((s) => s.unavailable).map((s) => plan(state.recipe.key, state.answers).notes[plan(state.recipe.key, state.answers).unavailable.indexOf(s.id)]).filter(Boolean))
     : plan(pending.key, pending.answers).notes);
 
@@ -822,6 +928,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
         el('span', { className: 'track-act', textContent: s.title }),
         s.st === 'unavailable' ? el('span', { className: 'track-why', textContent: s.available }) : null,
         words ? el('span', { className: `track-run${['stopped', 'failed'].includes(s.run.state) ? ' warn' : ''}`, textContent: words }) : null,
+        s.findings ? el('span', { className: 'track-findings warn', textContent: findingsWords(s.findings) }) : null,
         n === rows.length - 1 && notes.length ? el('span', { className: 'track-end', textContent: notes.join(' ') }) : null);
       if (s.run && s.run.state !== 'pending') li.dataset.run = s.run.state;
       list.append(li);

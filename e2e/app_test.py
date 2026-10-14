@@ -2917,6 +2917,7 @@ def main():
             chora_adopt_checks(pw, url, tmp)
             map_your_data_checks(pw, url, tmp)
             recipes_checks(pw, url, tmp)
+            match_two_checks(pw, url, tmp)
             project_checks(pw, url, tmp)
             whg_checks(pw, url, tmp)
             scope_checks(pw, url, tmp)
@@ -4325,6 +4326,243 @@ def recipes_checks(pw, url, tmp):
         'complete': lambda e: (e['places'] == 13 and all(a.startswith('http://www.wikidata.org/entity/Q') for a in e['addresses']) and e['placed'] == 7 and e['georef cited'] == 7
                                and e['stub'] == 9 and e['cites WHG'] is True)})
     try: browser.close()
+    except Exception: pass
+
+# ---- Match two datasets (src/engine/methodos/recipes/match-two-datasets.js; Stephen's decisions of 14 October 2026) --
+# The workflow followed as a visitor follows it, on two small constructed files: the table (test/fixtures/methodos/
+# match-mine.csv) read as Map your data reads it, the other dataset (match-other.json, with one timespan that is not a
+# list, which its check finds) chosen at the match in Krisis, refused when another is given there, checked with its
+# problem reported but not stopping the workflow, the review opened again after that check, saved, the page reloaded
+# and the review resumed, the decisions recorded in the dataset (a Finish of the attestations alone refused), checked
+# again, compared and downloaded. Nothing goes to WHG or any other site. Each absence is read beside a presence.
+MATCH_CSV = ROOT / 'test/fixtures/methodos/match-mine.csv'
+MATCH_BASE = 'https://w3id.org/match-test/'
+def match_two_files(tmp):
+    """The other dataset as the browser gets it: Kingsbury's link made to the table's Kingsbury under MATCH_BASE, and the
+    first place's timespan not a list (the check's one problem); and another file of it, Newton left out."""
+    d = json.loads((ROOT / 'test/fixtures/methodos/match-other.json').read_text().replace('https://example.org/mine/', MATCH_BASE))
+    d['spatialEntities'][0]['attestations'][0]['timespans'] = 'never'
+    b = tmp / 'match-other.json'; b.write_text(json.dumps(d))
+    d2 = {**d, 'spatialEntities': d['spatialEntities'][1:]}
+    b2 = tmp / 'match-other-2.json'; b2.write_text(json.dumps(d2))
+    return b, b2
+
+def match_two_checks(pw, url, tmp):
+    import re
+    base = url.rstrip('/') + '/'
+    origin = re.match(r'^https?://[^/]+', base).group(0)
+    out = tmp / 'match-two'; out.mkdir(exist_ok=True)
+    B, B2 = match_two_files(out)
+    browser = pw.chromium.launch(headless=True, args=GL)
+    ctx = browser.new_context(accept_downloads=True, viewport={'width': 1440, 'height': 900}, reduced_motion='reduce')
+    ctx.add_init_script('window.__plato_forceDownload = true;')
+    asked, consoled, whg = [], [], []
+    # WHG is never asked by this workflow: anything sent there is answered with nothing, and counted.
+    ctx.route(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'), lambda route: (whg.append(route.request.url), route.fulfill(status=404, body='{}')))
+    ctx.on('request', lambda r: asked.append(r.url))
+    page = ctx.new_page()
+    page.on('console', lambda m: consoled.append(m.text))
+    r = {}
+    track = lambda: page.evaluate(JOIN_STATE)
+    late = lambda: page.evaluate("() => { const e = document.getElementById('methodos-late'); return e && !e.hidden ? [...e.querySelectorAll('p.track-late')].map((p) => p.textContent) : []; }")
+    def step_is(step, state, timeout=60):
+        until(page, f"() => document.querySelector('#methodos-track li[data-step=\"{step}\"]')?.dataset.state === '{state}'", timeout)
+    def choose(fs):
+        page.set_input_files('#picker', [])
+        page.set_input_files('#picker', [str(f) for f in fs])
+        s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection')
+        if s.get('phase') != 'detected': raise RuntimeError(f'not detected: {s.get("phase")}')
+        return s
+    def run(button, timeout=180):
+        page.click(button)
+        return wait_state(page, lambda s: s.get('phase') in ('done', 'error'), T(timeout), 'run')
+    def saved(s, ending):
+        n = next((o['name'] for o in (s.get('outputs') or []) if o['name'].endswith(ending)), None)
+        if not n: raise RuntimeError(f'no output ending {ending}: {[o["name"] for o in s.get("outputs") or []]}')
+        return download(page, n, out / n)
+    def need(*keys):
+        missing = [k for k in keys if not r.get(k)]
+        if missing: raise RuntimeError(f'an earlier step did not finish ({", ".join(missing)})')
+    def matched(others):
+        page.set_input_files('#others', [str(others)])
+        return wait_state(page, lambda s: s.get('phase') in ('reviewing', 'error') or (s.get('action') == 'match' and s.get('phase') == 'done'), T(120), 'matching')
+    def goto_place(label):
+        for _ in range(8):
+            if page.inner_text('#review-subject').strip() == label: return True
+            page.click('#review-next'); page.wait_for_timeout(100)
+        return page.inner_text('#review-subject').strip() == label
+    steps = ['columns', 'check', 'dataset', 'match', 'check-other', 'review', 'apply', 'again', 'compare', 'out']
+
+    def begin():
+        page.goto(NOTOOLS if PROVE else base)
+        page.evaluate("() => { localStorage.setItem('plato-tools.reviewer', JSON.stringify({ name: 'Match Reviewer' })); }")
+        page.goto(NOTOOLS if PROVE else base)
+        wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+        page.evaluate("() => { const b = document.getElementById('base'); b.value = %s; b.dispatchEvent(new Event('change')); const v = document.getElementById('reviewer'); v.value = 'Match Reviewer'; v.dispatchEvent(new Event('change')); }" % json.dumps(MATCH_BASE))
+        page.click('#methodos-ask'); until(page, "!document.getElementById('methodos').hidden", 5)
+        page.check('input[name="methodos-have"][value="table"]'); page.check('input[name="methodos-want"][value="match"]')
+        asked_now = page.eval_on_selector_all('#mq-more fieldset[data-ask]', 'fs => fs.map((f) => f.dataset.ask)')
+        # The question of where the decisions go: in its own words, the dataset chosen until another is.
+        into = page.evaluate("""() => { const f = document.querySelector('#mq-more fieldset[data-ask="into-dataset"]'); return f ? { legend: f.querySelector('legend').textContent,
+          labels: [...f.querySelectorAll('label')].map((l) => l.textContent.trim()), checked: f.querySelector('input:checked')?.value || null } : null; }""")
+        before = page.evaluate("() => document.getElementById('methodos-start').hidden")   # publishing not yet answered: no plan
+        page.check('input[name="methodos-ask-will-publish"][value="no"]')
+        planned = page.eval_on_selector_all('#methodos-plan li.track-step', 'ls => ls.map((l) => l.dataset.step)')
+        page.click('#methodos-start'); until(page, "['pending', 'idle'].includes(document.getElementById('methodos-tracker').dataset.status)", 10)
+        pending = late()
+        choose([MATCH_CSV])
+        until(page, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+        until(page, "() => window.__plato?.columns?.headers && !document.getElementById('methodos-done').hidden", 30)
+        t = track(); r['begun'] = t; begun = late()
+        ok = (asked_now == ['into-dataset', 'will-publish'] and into == {'legend': 'Add the decisions to your dataset, or keep them in a file of their own about it?',
+              'labels': ['Add them to my dataset', 'Keep them in a file of their own'], 'checked': 'yes'} and before is True and planned == steps
+              and list(t['steps']) == steps and t['steps'].get('columns') == 'current'
+              and len(pending) == 1 and pending[0].startswith('The other dataset: not yet chosen. It is chosen at the step') and "Krisis's “Match with another dataset…”" in pending[0]
+              and begun == pending)
+        return ok, {'asked': asked_now, 'into': into, 'plan hidden before': before, 'planned': planned, 'late before the file': pending, 'late begun': begun, 'steps': t['steps']}
+    attempt('Match two datasets: the interview (a table, a match of two datasets) asks where the decisions go, in its own words, the dataset chosen, and publishing; plans its ten steps; and the tracker names the other dataset, not yet chosen, from the start', begin)
+
+    def through_convert():
+        need('begun')
+        page.click('#methodos-done'); step_is('columns', 'done', 15)
+        r['check'] = run('#check').get('phase'); step_is('check', 'done')
+        page.select_option('#target', 'plato-json')
+        s = run('#convert'); step_is('dataset', 'done')
+        r['converted'] = saved(s, '.json')
+        t = track()
+        return (r['check'] == 'done' and t['steps'].get('match') == 'current'), {'check': r['check'], 'steps': t['steps']}
+    attempt('Match two datasets: the table\'s columns matched, checked and made a PLATO dataset under the base address, each step done by its run; the workflow is then at the match', through_convert)
+
+    def match_step():
+        need('converted')
+        choose([r['converted']])
+        s = matched(B)
+        step_is('match', 'done', 30)
+        t = track(); chosen = late()
+        work = (wait_state(page, lambda s: True, 5).get('work') or {})
+        pairs = sorted([c['candidate_source'].rsplit('/', 1)[1], c['candidate_candidate'].rsplit('/', 1)[1]] for c in work.get('candidates') or [])
+        # In the review: Windermere's town before its lake (a lake for a village is ranked down, and says so).
+        at = goto_place('Windermere')
+        cands = page.evaluate("""() => [...document.querySelectorAll('#review-place li.candidate')].map((li) => ({ iri: li.querySelector('.iri')?.textContent || '',
+          kind: li.querySelector('.kind-why')?.textContent || null }))""")
+        r['matched'] = True
+        order = [c['iri'].rsplit('/', 1)[1] for c in cands]
+        return (s.get('phase') in ('reviewing', 'done') and t['steps'].get('check-other') == 'current' and chosen == ['The other dataset: match-other.json.']
+                and pairs == [['neuton', 'newton'], ['newton', 'newton'], ['windermere', 'windermere'], ['windermere', 'windermere-lake']]
+                and at and order == ['windermere', 'windermere-lake'] and cands[0]['kind'] is None and (cands[1]['kind'] or '').startswith('Ranked down: lake, where yours is village')), \
+            {'phase': s.get('phase'), 'late': chosen, 'pairs': pairs, 'Windermere': cands, 'steps': t['steps']}
+    attempt('Match two datasets: matched in Krisis with the other dataset, chosen there and named in the tracker; Kingsbury, which the other already links, not suggested; the lake ranked after the town of Windermere, and marked', match_step)
+
+    def refuse_other():
+        need('matched')
+        page.click('#methodos-back'); step_is('match', 'current', 15)
+        forget = page.evaluate("() => { const b = document.querySelector('#methodos-late button.methodos-forget'); return b && !b.closest('[hidden]') ? b.textContent : null; }")
+        matched(B2)
+        soon(page, "() => /This run is not counted as the step/.test(document.getElementById('methodos-message').textContent)", 20)
+        refused = track()
+        matched(B)
+        step_is('match', 'done', 30)
+        again = track()
+        return (forget == 'Forget match-other.json' and refused['steps'].get('match') == 'current'
+                and 'match-other-2.json is not match-other.json, the other dataset this workflow recorded' in refused['message'] and late() == ['The other dataset: match-other.json.']
+                and again['steps'].get('check-other') == 'current'), {'forget': forget, 'refused': refused['message'][:300], 'steps then': refused['steps'], 'steps after': again['steps']}
+    attempt('Match two datasets: back at the match, a match with another file than the other dataset recorded is not counted, and said so (a way to forget it shown); with the same file again it is', refuse_other)
+
+    def check_other():
+        need('matched')
+        t0 = track()
+        page.click('#methodos-use')
+        wait_state(page, lambda s: s.get('phase') == 'detected' and [f['name'] for f in s.get('files') or []] == ['match-other.json'], T(30), 'the other chosen')
+        s = run('#check')
+        step_is('check-other', 'done', 30)
+        row = page.evaluate("() => document.querySelector('#methodos-track li[data-step=\"check-other\"] .track-findings')?.textContent || null")
+        t = track()
+        r['checked other'] = True
+        return (t0['use'] == 'Use match-other.json' and (s.get('report') or {}).get('errors') == 1 and t['steps'].get('review') == 'current'
+                and (row or '').startswith('Done, with a report:') and 'timespans must be array' in row and '(1 problem)' in row and 'does not stop the workflow' in row), \
+            {'use': t0['use'], 'errors': (s.get('report') or {}).get('errors'), 'row': row, 'steps': t['steps']}
+    attempt('Match two datasets: the other dataset, chosen again from the tracker, checked: its problem shown with the step, done with a report, and the workflow goes on to the review', check_other)
+
+    def review_and_resume():
+        need('checked other')
+        offer = page.evaluate("() => { const b = document.getElementById('methodos-open-review'); return b && !b.hidden ? b.textContent : null; }")
+        page.click('#methodos-open-review')
+        until(page, "() => !document.getElementById('review').hidden", 30)
+        goto_place('Newton')
+        newton = page.evaluate("() => document.querySelector('#review-place li.candidate')?.dataset.id")
+        page.click(f'#review-place li.candidate[data-id="{newton}"] button[data-act="match"]')
+        wait_state(page, lambda s: any((c.get('decision') or {}).get('kind') == 'match' for c in (s.get('work') or {}).get('candidates', [])), T(10), 'decided')
+        page.select_option('#review-filter', 'all')
+        goto_place('Neuton')
+        twice = page.evaluate("() => document.querySelector('#review-place li.candidate .accepted-for')?.textContent || null")
+        goto_place('Windermere')
+        town = page.evaluate("() => document.querySelector('#review-place li.candidate')?.dataset.id")
+        page.click(f'#review-place li.candidate[data-id="{town}"] button[data-act="match"]')
+        wait_state(page, lambda s: sum(1 for c in (s.get('work') or {}).get('candidates', []) if (c.get('decision') or {}).get('kind') == 'match') == 2, T(10), 'decided')
+        with page.expect_download(timeout=T(30) * 1000) as d: page.click('#save-review')
+        r['review file'] = out / d.value.suggested_filename; d.value.save_as(r['review file'])
+        # Reloaded mid-review: the workflow is taken up at the review; the review saved is resumed on the dataset, its decisions with it.
+        page.reload()
+        wait_state(page, lambda s: s.get('phase') in ('ready', 'detected'), T(30), 'ready')
+        until(page, "() => document.querySelector('#methodos-track li[data-step=\"review\"]')?.dataset.state === 'current'", 30)
+        back = track(); still = late()
+        choose([r['converted']])
+        page.set_input_files('#workfile', [str(r['review file'])])
+        until(page, "() => !document.getElementById('review').hidden", 30)
+        n = wait_state(page, lambda s: sum(1 for c in (s.get('work') or {}).get('candidates', []) if (c.get('decision') or {}).get('kind') == 'match') == 2, T(15), 'resumed')
+        page.click('#methodos-done'); step_is('review', 'done', 15)
+        r['reviewed'] = True
+        return (offer == f'Open the review (match-mine.krisis.json)' and twice == 'Already accepted for Newton.' and back['steps'].get('review') == 'current'
+                and still == ['The other dataset: match-other.json.'] and track()['steps'].get('apply') == 'current'), \
+            {'offer': offer, 'Neuton': twice, 'after the reload': back['steps'], 'late': still, 'steps': track()['steps']}
+    attempt('Match two datasets: the review opened again from the tracker after the check, a place of the other dataset accepted twice said so (never refused), saved, the page reloaded and the review resumed, and the step done', review_and_resume)
+
+    def record():
+        need('reviewed')
+        page.check('input[name="review-output"][value="attestations"]')
+        run('#finish')
+        soon(page, "() => /This run is not counted as the step/.test(document.getElementById('methodos-message').textContent)", 20)
+        refused = track()
+        page.check('input[name="review-output"][value="dataset"]')
+        s = run('#finish'); step_is('apply', 'done', 30)
+        r['applied'] = saved(s, '.krisis-dataset.json')
+        return (refused['steps'].get('apply') == 'current' and 'this workflow adds the decisions to your dataset' in refused['message']
+                and track()['steps'].get('again') == 'current'), {'refused': refused['message'][:300], 'steps': track()['steps']}
+    attempt('Match two datasets: a Finish of the attestations alone is not counted (the workflow adds them to the dataset), and said so; the Finish into the dataset is the step', record)
+
+    def to_the_end():
+        need('applied', 'converted')
+        choose([r['applied']])
+        r['again'] = run('#check').get('phase'); step_is('again', 'done')
+        page.set_input_files('#earlier', [str(r['converted'])])
+        s = wait_state(page, lambda s: s.get('action') == 'compare' and s.get('phase') in ('done', 'error'), T(120), 'compare')
+        counts = (s.get('report') or {}).get('counts') or {}
+        step_is('compare', 'done')
+        until(page, "() => !document.getElementById('methodos-download').hidden", 30)
+        with page.expect_download(timeout=T(30) * 1000) as d: page.click('#methodos-download')
+        r['final'] = out / ('final-' + d.value.suggested_filename); d.value.save_as(r['final'])
+        step_is('out', 'done', 15)
+        doc = json.loads(r['final'].read_text()); r['doc'] = doc
+        ids = sorted([i['subject'].rsplit('/', 1)[1], i['object'].rsplit('/', 1)[1]] for e in doc['spatialEntities'] for a in e.get('attestations') or [] for i in a.get('identities') or [])
+        r['ids'] = ids
+        return (r['again'] == 'done' and [counts.get(k) for k in ('changed', 'lost', 'added')] == [0, 0, 2] and ids == [['newton', 'newton'], ['windermere', 'windermere']]
+                and all(v.startswith('done') for v in track()['steps'].values())), {'again': r['again'], 'compare': counts, 'identities': ids, 'steps': track()['steps']}
+    attempt('Match two datasets: checked again, compared with the dataset made from the table (only added to: two answers), and downloaded as it is, every step done; Newton and Windermere (the town) identified with the other dataset\'s', to_the_end)
+
+    def can_fail():
+        need('doc')
+        stripped = [i for e in r['doc']['spatialEntities'] for a in e.get('attestations') or [] for i in {k: v for k, v in a.items() if k != 'identities'}.get('identities') or []]
+        return bool(r['ids']) and stripped == [], {'as written': r['ids'], 'without identities': stripped}
+    attempt('Match two datasets: the end check fails on the same file with its identities left out, as a step that skipped them would leave it (and passes as written)', can_fail)
+
+    def only_here():
+        need('final')
+        other = sorted({re.match(r'^[a-z]+:(//[^/]*)?', u).group(0) for u in asked if not (u.startswith(origin + '/') or u.startswith('data:') or u.startswith('blob:'))})
+        refused = [m for m in consoled if 'Refused to connect' in m]
+        mine = [u for u in asked if u.startswith(origin + '/')]
+        return (not other and not refused and not whg and len(mine) > 0), {'other sites': other, 'refused': refused[:3], 'to WHG': whg[:3], 'to this site': len(mine)}
+    attempt('Match two datasets: every request the page made went to this site (the presence: it did), none to WHG or another site, nor any stopped by the policy', only_here)
+    try: ctx.close(); browser.close()
     except Exception: pass
 
 # ---- The project file (plan #34, item A2; src/engine/methodos/project.js) ------------------------------------
@@ -8603,7 +8841,7 @@ def methodos_page_checks(browser, url):
 
     def predicted():
         out = {}
-        for p in METHODOS_PREDICTED:
+        for i, p in enumerate(METHODOS_PREDICTED):
             ctx, page = fresh()
             try:
                 answer(page, p['have'], p['want'], p['yes'])
@@ -8611,7 +8849,8 @@ def methodos_page_checks(browser, url):
                 plan = [x['id'] for x in s['plan']]
                 ok = (s['recipe'] == p['recipe'] and plan == p['steps'] and all(x['state'] == 'todo' and x['words'] == 'To come' for x in s['plan'])
                       and s['follow'] and s['blocked'] is None and str(len(p['steps'])) in s['verdict'])
-                out[f"{p['have']}+{p['want']}"] = (ok, {'recipe': s['recipe'], 'plan': plan, 'verdict': s['verdict'], 'follow': s['follow']})
+                # Keyed by the row: two rows may share their first two answers (Match two datasets, into the dataset or not).
+                out[f"{i}: {p['have']}+{p['want']}"] = (ok,{'recipe': s['recipe'], 'plan': plan, 'verdict': s['verdict'], 'follow': s['follow']})
             finally: ctx.close()
         return len(out) == len(METHODOS_PREDICTED) and all(v[0] for v in out.values()), {k: v[1] for k, v in out.items()}
     attempt("Methodos: the interview's answers give the recipe and the steps test/methodos-predicted.json predicts, for each of its rows", predicted)

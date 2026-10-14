@@ -74,29 +74,51 @@ export function start(recipe, answers = {}, files = {}, { unavailable = 'skip' }
     ...(Object.keys(late).length ? { late } : {}), status: 'idle', current: null, steps };
 }
 
-/** The steps that take the files `key` (a step's input from '$key'). */
+/** The steps that take the files `key` (a step's input from '$key'), in order: the first is the one they are chosen at. */
 const takers = (state, key) => state.steps.filter((s) => Object.values(s.from).some((ref) => alternatives(ref).includes(`$${key}`)));
+/** The first step that takes the files `key` and has been done, or is under way, with them; or undefined. */
+const usedBy = (state, key) => takers(state, key).find((s) => ['done', 'running', 'waiting'].includes(s.state));
+const lateFiles = (recipe, state, key) => {
+  const f = recipe?.files?.[key];
+  if (!f || !f.late) no(`"${recipe?.title ?? state.recipe.key}" does not take files called "${key}" at a step: ${f ? 'they are chosen at the start' : 'it has none of that name'}.`);
+  if (recipe.key !== state.recipe.key) no(`This workflow follows "${state.recipe.key}", not "${recipe.title}".`);
+  return f;
+};
 
 /**
  * Files chosen late, at the step that takes them (the recipe's files with `late`: the other dataset of a
  * match, chosen in Krisis at the match): recorded as references, as the files chosen at the start are,
- * and checked by them from then on. The same files again change nothing. Others are refused, in words,
- * once a step that takes them has been done, is running or waits: that step is done again first
- * (invalidate()), so that no step's result is of other files than the record names.
+ * and checked by them from then on, so that a run on other files is not the step's. The same files again
+ * change nothing; others are refused, in words, until the ones recorded are forgotten (forget()).
  */
 export function supply(state, recipe, key, refs) {
-  const f = recipe?.files?.[key];
-  if (!f || !f.late) no(`"${recipe?.title ?? state.recipe.key}" does not take files called "${key}" at a step: ${f ? 'they are chosen at the start' : 'it has none of that name'}.`);
-  if (recipe.key !== state.recipe.key) no(`This workflow follows "${state.recipe.key}", not "${recipe.title}".`);
+  const f = lateFiles(recipe, state, key);
   const checked = checkHandoff(refs, f.types, `"${recipe.title}" (${f.words.toLowerCase()})`).map((r) => ({ ...r }));
   const out = clone(state);
   const was = out.files[key];
   if (was && was.length === checked.length && was.every((r) => checked.some((x) => x.sha256 === r.sha256 && x.size === r.size))) return out;
-  const used = takers(out, key).find((s) => ['done', 'running', 'waiting'].includes(s.state));
-  if (was && used) no(`${upperFirst(f.words)} ${was.length === 1 ? 'is' : 'are'} already chosen (${was.map((r) => r.name).join(', ')}), and the step ${titleOf(used)} ${used.state === 'done' ? 'was done with' : 'is under way on'} ${was.length === 1 ? 'it' : 'them'}: do that step again to choose another.`);
+  if (was) no(`${upperFirst(f.words)} ${was.length === 1 ? 'is' : 'are'} already chosen for this workflow (${was.map((r) => r.name).join(', ')}), so ${checked.map((r) => r.name).join(', ')} ${checked.length === 1 ? 'is' : 'are'} not taken: forget ${was.length === 1 ? 'it' : 'them'} first to choose another.`);
   out.files[key] = checked;
   return out;
 }
+
+/**
+ * The files chosen late forgotten, so that others may be chosen (supply()): only while no step has been
+ * done with them, or is under way on them. Once one has, that step is done again first (invalidate(),
+ * which takes the other steps that take them with it).
+ */
+export function forget(state, recipe, key) {
+  const f = lateFiles(recipe, state, key);
+  const out = clone(state);
+  const was = out.files[key];
+  if (!was) return out;
+  const used = usedBy(out, key);
+  if (used) no(`${upperFirst(f.words)} (${was.map((r) => r.name).join(', ')}) cannot be forgotten: the step ${titleOf(used)} ${used.state === 'done' ? 'was done with' : 'is under way on'} ${was.length === 1 ? 'it' : 'them'}. Do that step again first.`);
+  delete out.files[key];
+  return out;
+}
+/** Whether the files chosen late can be forgotten now: chosen, and no step done or under way with them. */
+export const forgettable = (state, key) => !!state.files?.[key] && !usedBy(state, key);
 const upperFirst = (w) => w.charAt(0).toUpperCase() + w.slice(1);
 const lowerFirst = (w) => w.charAt(0).toLowerCase() + w.slice(1);
 
@@ -277,14 +299,16 @@ export function invalidate(state, stepId) {
   const cur = out.current ? stepOf(out, out.current) : null;
   if (cur && (cur.state === 'running' || cur.id !== stepId)) no(`The step ${titleOf(s)} cannot be done again while ${titleOf(cur)} is ${cur.state}.`);
   const reset = new Set([stepId]);
-  // Done again, a step that takes files chosen late takes the other steps that take them with it, so that
-  // other files may be chosen for it (supply()), and no step stays done with the files it replaces.
-  const late = Object.keys(out.late || {}).filter((k) => takers(out, k).some((x) => x.id === stepId));
-  for (const k of late) for (const x of takers(out, k)) reset.add(x.id);
-  for (const x of out.steps) {
+  const cascade = () => { for (const x of out.steps) {
     if (['stopped', 'failed', 'cancelled'].includes(x.state)) reset.add(x.id);
     if (Object.values(x.from).some((ref) => alternatives(ref).some((a) => reset.has(a.split('.')[0])))) reset.add(x.id);
-  }
+  } };
+  cascade();
+  // Done again, the step that files chosen late are chosen at (the first that takes them) takes the other
+  // steps that take them with it, so that they may be forgotten and others chosen (forget(), supply()),
+  // and no step stays done with the files they replace.
+  const late = Object.keys(out.late || {}).filter((k) => reset.has(takers(out, k)[0]?.id));
+  if (late.length) { for (const k of late) for (const x of takers(out, k)) reset.add(x.id); cascade(); }
   for (const x of out.steps) {
     if (!reset.has(x.id) || x.state === 'skipped') continue;
     const partial = x.id === stepId && (x.state === 'cancelled' || x.state === 'failed') ? x.partial : undefined;

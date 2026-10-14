@@ -180,22 +180,35 @@ test('the other dataset is chosen at the match: the workflow begins without it, 
   assert.throws(() => runner.supply(s, M, 'files', others), /are chosen at the start/);
   assert.throws(() => runner.supply(s, M, 'elsewhere', others), /has none of that name/);
   assert.throws(() => runner.supply(s, M, 'others', [{ ...others[0], type: 'dataset' }]), /is a file of places the tools wrote/);
-  // Before any step has taken it, another may be chosen in its place; the same again changes nothing.
-  assert.deepEqual(runner.supply(s, M, 'others', changed).files.others, changed);
+  // Recorded, it is the one: the same again changes nothing, another is refused until it is forgotten, which it can be
+  // while no step has been done with it.
   assert.deepEqual(runner.supply(s, M, 'others', others), s);
-  // Once the match is done with it, another is refused, in words; the same is not. Done again, the match takes another,
-  // and the check of the other dataset is to do again with it.
+  assert.throws(() => runner.supply(s, M, 'others', changed), /^TransitionError: The other dataset is already chosen for this workflow \(match-other\.json\), so match-other\.json is not taken: forget it first to choose another\.$/);
+  assert.equal(runner.forgettable(s, 'others'), true);
+  const forgot = runner.forget(s, M, 'others');
+  assert.equal(forgot.files.others, undefined);
+  assert.throws(() => runner.inputsOf(forgot, 'check-other'), /the other dataset is not chosen/);
+  assert.deepEqual(runner.supply(forgot, M, 'others', changed).files.others, changed);
+  assert.throws(() => runner.forget(s, M, 'files'), /are chosen at the start/);
+  // Once the match is done with it, it is neither replaced nor forgotten; done again, the match takes the steps that
+  // take it with it (the check of the other dataset), and it may be forgotten and another chosen.
   const at = (st, id) => { let w = st; while (w.current !== id) { w = runner.next(w); if (w.current !== id) w = runner.complete(w, w.current, Object.fromEntries(Object.entries(OPERATIONS[w.steps.find((x) => x.id === w.current).op].gives).map(([k, t]) => [k, [{ type: t, name: `${k}.json`, size: 1, sha256: 'a'.repeat(64) }]]))); } return w; };
   let m = at(s, 'check-other');
   assert.equal(m.steps.find((x) => x.id === 'match').state, 'done');
   assert.deepEqual(runner.inputsOf(m, 'match').others, others);
-  assert.throws(() => runner.supply(m, M, 'others', changed), /The other dataset is already chosen \(match-other\.json\), and the step "Find the places of yours.*" was done with it: do that step again to choose another\./);
-  assert.deepEqual(runner.supply(m, M, 'others', others).files.others, others);
+  assert.throws(() => runner.supply(m, M, 'others', changed), /already chosen for this workflow/);
+  assert.equal(runner.forgettable(m, 'others'), false);
+  assert.throws(() => runner.forget(m, M, 'others'), /^TransitionError: The other dataset \(match-other\.json\) cannot be forgotten: the step "Find the places of yours.*" was done with it\. Do that step again first\.$/);
   m = runner.complete(m, 'check-other', {});
+  // Done again, the check of the other dataset alone leaves the match done (it is not the step it is chosen at).
+  const recheck = runner.invalidate(m, 'check-other');
+  assert.deepEqual(['match', 'check-other', 'review'].map((id) => recheck.steps.find((x) => x.id === id).state), ['done', 'pending', 'pending']);
+  assert.equal(runner.forgettable(recheck, 'others'), false);
   const again = runner.invalidate(m, 'match');
   assert.deepEqual(['match', 'check-other', 'review'].map((id) => again.steps.find((x) => x.id === id).state), ['pending', 'pending', 'pending']);
   assert.equal(again.steps.find((x) => x.id === 'dataset').state, 'done', 'the steps before it stay done');
-  assert.deepEqual(runner.supply(again, M, 'others', changed).files.others, changed);
+  assert.equal(runner.forgettable(again, 'others'), true);
+  assert.deepEqual(runner.supply(runner.forget(again, M, 'others'), M, 'others', changed).files.others, changed);
   // The record keeps it, and resuming checks it as it checks the table: the other dataset as it was passes, another does not.
   const rec = importRecord(exportRecord(recordOf(m, { name: 'match' })));
   assert.deepEqual(rec.files.others, others);
@@ -376,4 +389,32 @@ test('in the review, a place of the other dataset already accepted for another o
   decide(work, neuton.id, 'match', { identityType: 'closeMatch', at: AT });
   assert.equal(work.candidates.find((c) => c.id === neuton.id).decision.kind, 'match');
   assert.deepEqual(acceptedFor(work, newton), [`${MINE}neuton`]);
+});
+
+// ---- the project file: both of the user's own files, the table and the other dataset ----------------------------
+test('saved as a project and opened again, the workflow keeps both of your files, the table and the other dataset, each marked your own, by its hash', async () => {
+  const { writeProject, readProject, blobSource } = await import('../src/engine/methodos/project.js');
+  const { startFiles, keptBy } = await import('../src/methodos/seams.js');
+  const a = await begun();
+  const record = recordOf({ ...a.state, id: 'match-two-datasets-test' }, { name: 'Match', now: new Date('2026-10-14T10:00:00Z') });
+  // The user's own files are the two chosen: the table at the start, the other dataset at the match.
+  assert.deepEqual(startFiles(record).map((r) => r.name), ['match-mine.csv', 'match-other.json']);
+  const files = keptBy(record).map((ref) => ({ ref, blob: a.host.store.get(ref.name) }));
+  assert.ok(files.every((f) => f.blob), 'every file the record names is at hand');
+  const chunks = [];
+  const { manifest } = await writeProject({ record, files, tools: { version: 'test', commit: null } }, async (c) => { chunks.push(c); });
+  assert.deepEqual(manifest.parts.filter((x) => x.own).map((x) => x.name).sort(), ['match-mine.csv', 'match-other.json']);
+  assert.ok(manifest.parts.some((x) => x.role === 'file' && !x.own), 'the files the steps made are in it too, not as your own');
+  const bytes = new Uint8Array(await new Blob(chunks).arrayBuffer());
+  const sink = async () => { const got = []; return { write: (c) => { got.push(c); }, close: async () => new Blob(got), abort: async () => {} }; };
+  const r = await readProject(blobSource(bytes), { sink, name: 'match.platoproj' });
+  assert.deepEqual(r.record.files, record.files);
+  assert.deepEqual(r.record.late, { others: 'The other dataset' });
+  const back = r.files.find((f) => f.part.name === 'match-other.json');
+  assert.equal(await back.result.text(), await a.host.store.get('match-other.json').text());
+  // The other dataset forgotten (the match done again), it is no longer the workflow's, and is refused for its project (the presence: kept above).
+  const bare = recordOf({ ...runner.forget(runner.invalidate(runner.cancel(a.state, 'review'), 'match'), M, 'others'), id: 'match-two-datasets-test' }, { name: 'Match' });
+  assert.deepEqual(startFiles(bare).map((x) => x.name), ['match-mine.csv']);
+  await assert.rejects(() => writeProject({ record: bare, files: files.filter((f) => f.ref.name === 'match-other.json'), tools: { version: 'test', commit: null } }, async () => {}),
+    /match-other\.json is not one the workflow names/);
 });
