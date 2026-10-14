@@ -633,6 +633,23 @@ code.code-chip { font-family: var(--font-mono); font-size: .85em; padding: 0 .3e
 .track-project .track-message button { margin: .35rem .35rem 0 0; }
 .methodos-banner button.link { font-size: inherit; }
 .methodos-project-said { margin: .5rem 0 0; font-size: .9rem; }
+/* The project in WHG (src/methodos/page.js): its own small heading in the folded part; the list of your projects there; the
+   read-only link, and a workflow shared from WHG, shown read-only at the head of the tracker. */
+.track-whg { margin: .8rem 0 0; padding-top: .6rem; border-top: 1px solid var(--line); color: var(--fg); }
+.track-whg .track-sub { margin: 0; font-size: .95rem; }
+.track-whg .whg-choice-buttons button, .whg-list button { margin: .35rem .35rem 0 0; }
+.track-whg #whg-link-url { width: 100%; max-width: 100%; box-sizing: border-box; margin: .3rem 0; font-family: ui-monospace, monospace; font-size: .85rem; }
+.whg-shared-ask p { margin: .3rem 0 0; }
+.whg-projects { margin: .8rem 0 0; padding: .85rem 1rem; border: 1px solid var(--line); border-radius: 6px; background: var(--card); }
+.whg-projects h2 { margin: 0 0 .3rem; font-size: 1.05rem; }
+.whg-list { list-style: none; padding: 0; margin: .5rem 0 0; }
+.whg-list li { padding: .45rem 0; border-top: 1px solid var(--line); }
+.whg-list .whg-title { font-weight: 700; }
+.whg-list .whg-about { display: block; color: var(--muted); font-size: .9rem; }
+.whg-list .whg-confirm { display: block; margin-top: .3rem; color: var(--warn); }
+.track-shared { padding: .5rem .6rem; border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--card)); }
+.track-shared p { margin: 0; }
+.track-shared .methodos-buttons { margin-top: .4rem; }
 /* Which step a result was of, once the workflow has gone on (src/app.js). */
 .result-of { margin: -.35rem 0 .6rem; color: var(--muted); font-weight: 700; }
 .workflow-step { color: var(--fg); }
@@ -752,7 +769,7 @@ body[data-workflow] #action:not([hidden]) + #progress:not([hidden]):has(+ #resul
   .workflow-rail { display: contents; }
   .methodos-tracker { position: sticky; top: 0; z-index: 3; box-shadow: 0 2px 8px rgb(0 0 0 / .14); }
   .methodos-tracker:not(.open) { padding-top: .35rem; padding-bottom: .35rem; }
-  .methodos-tracker:not(.open) > :not(.track-strip, #methodos-said, .track-message.warn) { display: none; }
+  .methodos-tracker:not(.open) > :not(.track-strip, #methodos-said, .track-message.warn, .track-shared:not([hidden])) { display: none; }
   .methodos-tracker.open { max-height: 85vh; overflow-y: auto; }
   .methodos-tracker .track-where { display: none; }   /* the strip says it */
   .track-strip { display: flex; width: 100%; align-items: baseline; gap: .5rem; padding: .35rem 0; border: 0; background: none; color: var(--fg); text-align: left; font-weight: 700; }

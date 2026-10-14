@@ -67,8 +67,9 @@ test('a link is kept beside the record, cleaned, and let go with it; with workin
   assert.deepEqual(await idbKeys(idb, LINKS), []);
   // Cleaned: what is not a link is not kept (the control: a link is).
   assert.equal(cleanLink({ projectId: 'not-a-uuid', version: 1 }), null);
-  assert.equal(cleanLink({ origin: { projectId: pid, version: 'x' } }), null);
-  assert.deepEqual(cleanLink({ origin: { projectId: pid, version: 2, token: 'x' } }), { origin: { projectId: pid, version: 2 } });
+  assert.equal(cleanLink({ origin: { workflowId: 'map-your-data-x', version: 'x' } }), null);
+  assert.equal(cleanLink({ origin: { workflowId: '../x', version: 2 } }), null);
+  assert.deepEqual(cleanLink({ origin: { workflowId: 'map-your-data-x', version: 2, title: 'P', token: 'x' } }), { origin: { workflowId: 'map-your-data-x', version: 2, title: 'P' } });
   // Working data not kept: for the tab (its sessionStorage), and nothing in IndexedDB.
   let keep = true;
   const tabStore = workflowStore({ indexedDB: idb, session, keep: () => keep });
@@ -120,11 +121,11 @@ test('a project deleted in WHG (404) lets the link go; a copy\'s origin stays', 
   const { fake, store, whg } = setup();
   const { record, project } = await workflow();
   const { link } = await whg.save({ project });
-  await store.setLink(record.id, { ...link, origin: { projectId: '0f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b', version: 4 } });
+  await store.setLink(record.id, { ...link, origin: { workflowId: 'map-your-data-orig', version: 4 } });
   assert.ok((await store.linkFor(record.id)).projectId);
   fake.projects.delete(link.projectId);
   await assert.rejects(whg.save({ project, to: link }), (e) => e.kind === 'gone');
-  assert.deepEqual(await store.linkFor(record.id), { origin: { projectId: '0f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b', version: 4 } });
+  assert.deepEqual(await store.linkFor(record.id), { origin: { workflowId: 'map-your-data-orig', version: 4 } });
 });
 
 test('open from WHG: the list (title, role, updated), a project opened as a file readProject reads, and the link kept at its version', async () => {

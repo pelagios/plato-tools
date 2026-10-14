@@ -47,12 +47,23 @@
   <!-- The workflow rail: beside the steps from 60rem (src/styles.css), sticky, it holds the one line that opens Methodos's
        interview while no workflow is followed, and the tracker while one is; below 60rem its contents flow with the page. -->
   <div id="workflow-rail" class="workflow-rail">
-    <p id="methodos-banner" class="methodos-banner"><a href="#methodos" id="methodos-ask">Not sure where to start? Answer three questions</a><span class="banner-or">, or <button type="button" id="methodos-open-banner" class="link">open a project</button> saved before.</span></p>
+    <p id="methodos-banner" class="methodos-banner"><a href="#methodos" id="methodos-ask">Not sure where to start? Answer three questions</a><span class="banner-or">, or <button type="button" id="methodos-open-banner" class="link">open a project</button> saved before, or <button type="button" id="whg-open-banner" class="link">one kept in WHG</button>.</span></p>
     <!-- A project (.platoproj, src/engine/methodos/project.js) chosen here or in the tracker; what came of it is said here while no workflow is shown. -->
     <input type="file" id="methodos-project-file" accept=".platoproj" hidden>
     <p id="methodos-project-said" class="methodos-project-said" role="status" hidden></p>
+    <!-- A share link (#whg-shared=<token>) opened while the page may not ask WHG: what it is, and the permission it needs (src/app.js). -->
+    <div id="whg-shared-ask" class="methodos-project-said whg-shared-ask" role="status" hidden><p id="whg-shared-ask-words"></p><p id="whg-shared-needs"></p><p><button type="button" id="whg-shared-not-now" class="link">Not now</button></p></div>
+    <!-- Your projects kept in WHG ("Open from WHG"), listed here, whether a workflow is open or not (src/methodos/page.js). -->
+    <section id="whg-projects" class="whg-projects" aria-labelledby="whg-projects-h" hidden>
+      <h2 id="whg-projects-h" tabindex="-1">Your projects in WHG</h2>
+      <p id="whg-projects-said" class="track-message" role="status"></p>
+      <ul id="whg-projects-list" class="whg-list" role="list"></ul>
+      <p class="methodos-buttons"><button type="button" id="whg-projects-close">Close</button></p>
+    </section>
     <section id="methodos-tracker" class="methodos-tracker" aria-labelledby="methodos-tracker-h" hidden>
       <h2 id="methodos-tracker-h" tabindex="-1">Your workflow: <span id="methodos-tracker-title"></span></h2>
+      <!-- A workflow shared from WHG, shown read-only (src/methodos/page.js, viewShared): what it is, and the only things to do with it. -->
+      <div id="methodos-shared" class="track-message track-shared" hidden><p id="methodos-shared-words"></p><p class="methodos-buttons"><button type="button" id="methodos-shared-copy" class="primary">Make my own copy</button> <button type="button" id="methodos-shared-download">Download .platoproj</button> <button type="button" id="methodos-shared-close">Close</button></p></div>
       <!-- Below 60rem, the tracker is a strip at the top of the window, "Step n of N: Tool, what it does", which opens to the whole tracker (src/methodos/page.js). -->
       <button type="button" id="methodos-strip" class="track-strip" aria-expanded="false" aria-controls="methodos-track"><span class="strip-where"></span> <span class="strip-mark" aria-hidden="true">▾</span></button>
       <p id="methodos-tracker-where" class="track-where"></p>
@@ -67,13 +78,30 @@
       <details id="methodos-cannot" class="track-about" hidden><summary>What this workflow cannot carry</summary><ul class="track-note track-cannot"></ul></details>
       <!-- The project file (src/engine/methodos/project.js): the whole workflow in one .platoproj, to carry on elsewhere or hand on.
            Folded, so that the steps and the buttons stay in view; what goes into it is said beside its button. -->
-      <details id="methodos-project" class="track-about track-project"><summary>Save or open the project</summary>
+      <details id="methodos-project" class="track-about track-project"><summary>Save, open or share the project</summary>
         <div id="methodos-project-save">
           <p id="methodos-project-what" class="track-note"></p>
           <label class="track-own"><input type="checkbox" id="methodos-project-own" checked> <span id="methodos-project-own-words"></span></label>
         </div>
         <p class="methodos-buttons"><button type="button" id="methodos-save-project">Save the project</button> <button type="button" id="methodos-open-project">Open a project</button></p>
         <p id="methodos-replace" class="track-message warn" hidden><span id="methodos-replace-words"></span> <button type="button" id="methodos-replace-yes">Open it in its place</button> <button type="button" id="methodos-replace-no">Keep this workflow</button></p>
+        <!-- The project kept in WHG's Workbench (src/methodos/whg.js; plan #34, item A1): saved only when asked, opened from
+             your list there, shared read-only. What leaves this computer, and what will not fit, is said before saving. -->
+        <div id="whg-project" class="track-whg">
+          <h3 class="track-sub">In the World Historical Gazetteer</h3>
+          <p id="whg-needs"></p>
+          <div id="whgp-token-box" class="lookup-token whg-token" hidden>
+            <label for="whgp-token">Your WHG token</label>
+            <span class="token-row"><input id="whgp-token" type="password" autocomplete="new-password" spellcheck="false" aria-describedby="whgp-token-state whgp-token-help"> <button type="button" id="whgp-token-remember">Remember my token</button> <button type="button" id="whgp-token-forget" hidden>Forget the token</button> <span id="whgp-token-state" class="token-state" role="status"></span></span>
+            <small id="whgp-token-help" class="token-help"></small>
+          </div>
+          <p id="whg-state" class="track-note"></p>
+          <p id="whg-leaves" class="track-note" hidden></p>
+          <p class="methodos-buttons"><button type="button" id="whg-save">Save to WHG</button> <button type="button" id="whg-open">Open from WHG</button> <button type="button" id="whg-share">Share a read-only link</button> <button type="button" id="whg-unshare" hidden>Stop sharing</button></p>
+          <div id="whg-choice" class="track-message warn" hidden><p id="whg-choice-words"></p><p class="whg-choice-buttons"></p></div>
+          <div id="whg-link" class="track-message" hidden><label for="whg-link-url">The read-only link</label> <input type="text" id="whg-link-url" readonly spellcheck="false"> <button type="button" id="whg-copy">Copy</button><p id="whg-link-words" class="track-note"></p></div>
+          <p id="whg-said" class="track-message" role="status" hidden></p>
+        </div>
       </details>
       <!-- How Methodos follows the tools: below the buttons and folded, so that the step list, the message and the buttons stay in view in the rail. -->
       <details class="track-about"><summary>How Methodos follows the tools</summary><p class="track-note">Methodos keeps your place and sees what the tools do: a step is done when its tool's run on the right file finishes, and a step that stops or fails says why. Only a step that is yours to do (matching columns, reviewing candidates, drawing in Chora) waits for you to say it is done.</p></details>

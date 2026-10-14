@@ -41,6 +41,8 @@ import { version as TOOLS_VERSION } from '../package.json';
 import { mountScope, aatLabels, BUNDLED_AAT_LABELS } from './scope-page.js';
 import { kindFit, candidateTypes } from './engine/krisis/kinds.js';
 import { workflowStore } from './methodos/store.js';
+import { whgProjects } from './methodos/whg.js';
+import { workbench, sharedToken, isId } from './engine/workbench.js';
 import { chosenWords, wentOn, resultLabel } from './methodos/layout.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
@@ -1008,6 +1010,7 @@ $('toolbox').addEventListener('click', (e) => {
   chooseTool(a.dataset.tool); setHash(a.dataset.tool); focusStep1();
 });
 window.addEventListener('hashchange', () => {
+  if (/whg-shared=/.test(location.hash)) { openShared(sharedFromAddress()); return; }   // a share link pasted into the address bar
   if (choraInHash()) { openChora(); return; }
   if (choraShown()) leaveChora();
   chooseTool(toolFromHash()); if (location.hash === '#methodos') methodos.open();
@@ -1120,7 +1123,8 @@ function projectTarget(name) {
  * The project refuses anything 8 characters or longer, so short values (z, x, y) are not searched for.
  */
 function projectSecrets() {
-  const out = [permissions.token.get(), import.meta.env?.VITE_CARTO_API_KEY];
+  // The share links' tokens seen in this tab, made here or opened (a share link is a capability: src/methodos/page.js).
+  const out = [permissions.token.get(), import.meta.env?.VITE_CARTO_API_KEY, ...(methodos?.shareTokens?.() || []), sharedHeld];
   try {
     const pasted = JSON.parse(localStorage.getItem('chora-basemaps') || '[]');
     for (const b of Array.isArray(pasted) ? pasted : []) {
@@ -1141,6 +1145,10 @@ function detectionSettled() {
 // Opened from its card (or an address ending #methodos); until then the page is as it was. Each step
 // the workflow comes to chooses that step's tool, as its card would, and is said in #for-tool.
 const methodosStore = workflowStore();
+// Methodos's projects kept in WHG's Workbench (src/engine/workbench.js, src/methodos/whg.js; plan #34, item A1):
+// every request through permissions.fetch under collaborate:whg, the token from its one keeper, sent in the
+// Authorization header and nowhere else.
+const whgWorkbench = workbench({ fetch: (url, init) => permissions.fetch(url, { cat: 'collaborate', subj: 'whg', ...init }), token: () => permissions.token.get() });
 let scopeUi = null;   // Scope (Issue #33; src/scope-page.js), mounted below, once Methodos is
 const methodos = mountMethodos({
   banner: $('methodos-banner'), interview: $('methodos'), tracker: $('methodos-tracker'), tools: $('toolbox'), store: methodosStore,
@@ -1164,6 +1172,11 @@ const methodos = mountMethodos({
     // The project file (src/engine/methodos/project.js): where it is saved, asked at the click; what it must never hold; a review read from it.
     saveTarget: projectTarget,
     secrets: projectSecrets,
+    // The project in WHG: whether the token is held; its own token field shown, the focus in it; the permission's line; the page's address, for a share link.
+    hasToken: () => permissions.token.get() !== null,
+    askToken: () => { showWhgToken(); $('whgp-token').focus(); },
+    collaborate: (el) => permissions.needs(el, 'collaborate', 'whg'),
+    shareBase: () => location.href,
     openReview: async (f, list) => {
       if (list.length && !files.length && await whenReady !== false) { const dt = new DataTransfer(); for (const x of list) dt.items.add(x); $('picker').files = dt.files; choose(list); }
       await detectionSettled();
@@ -1174,6 +1187,7 @@ const methodos = mountMethodos({
   },
   build: { version: TOOLS_VERSION, commit: BUILD.commit || null },
   projectFile: $('methodos-project-file'), projectSaid: $('methodos-project-said'),
+  whg: whgProjects({ client: whgWorkbench, store: methodosStore }),
   // The workflow's Scope is shown again whenever the tracker is drawn (begun, taken up, left).
   onScope: () => scopeUi?.show(),
   onStep(step) {
@@ -1281,6 +1295,47 @@ for (const id of ['methodos-card', 'methodos-ask']) $(id).addEventListener('clic
   e.preventDefault(); leaveChora(); methodos.open();   // the interview is in the centre, where the map is while it is shown
 });
 if (location.hash === '#methodos') methodos.open();
+// ---- A share link (#whg-shared=<token>; src/methodos/page.js viewShared) ------------------------------
+// The token is a capability: whoever has it reads the project. It is taken out of the address at once
+// (replaceState: in no later entry of the history, and not in a bookmark or a link copied from this page),
+// never logged, and held in sessionStorage only across the reload the permission may need (the page's
+// policy is written at load), then cleared. WHG is asked with no token of the user's.
+const SHARED_HELD = 'plato-tools.whg-shared';
+let sharedHeld = null;
+/** The share token in the address, which is removed from it; null when there is none. */
+function sharedFromAddress() {
+  const t = sharedToken(location.hash);
+  if (/whg-shared=/.test(location.hash)) { try { history.replaceState(history.state, '', location.pathname + location.search); } catch { /* kept as it was */ } }
+  return t;
+}
+/** Read the shared workflow once the page may ask WHG; until then, say what it is, and ask for the permission. */
+function openShared(t) {
+  if (t) sharedHeld = t;
+  if (!sharedHeld) return;
+  if (permissions.allowed('collaborate', 'whg')) {
+    const go = sharedHeld;
+    sharedHeld = null;
+    try { sessionStorage.removeItem(SHARED_HELD); } catch { /* none kept */ }
+    $('whg-shared-ask').hidden = true; permissions.unneed($('whg-shared-needs'));
+    methodos.viewShared(go);
+    return;
+  }
+  try { sessionStorage.setItem(SHARED_HELD, sharedHeld); } catch { /* for this load only */ }
+  const st = permissions.needs($('whg-shared-needs'), 'collaborate', 'whg');
+  $('whg-shared-ask-words').textContent = `This address opens a workflow someone shared with you through the World Historical Gazetteer, to read. To read it, this page asks WHG for it, which needs your permission: nothing of yours is sent, not even your token.${st === 'never' ? ' The World Historical Gazetteer Workbench is set to Never in Permissions: change it there to read it.' : ''}`;
+  $('whg-shared-ask').hidden = false;
+}
+$('whg-shared-not-now').onclick = () => {
+  sharedHeld = null;
+  try { sessionStorage.removeItem(SHARED_HELD); } catch { /* none kept */ }
+  $('whg-shared-ask').hidden = true; permissions.unneed($('whg-shared-needs'));
+};
+{
+  let held = null;
+  try { held = sessionStorage.getItem(SHARED_HELD); } catch { held = null; }
+  openShared(sharedFromAddress() || (isId(held) ? held : null));
+}
+permissions.onChange(() => { if (sharedHeld && permissions.allowed('collaborate', 'whg')) openShared(); });
 // "Keep working data" turned off in the Permissions panel: Methodos's records go at once, not at its next save.
 let keptBefore = permissions.keepWorkingData();
 permissions.onChange(() => { const now = permissions.keepWorkingData(); if (now !== keptBefore) { keptBefore = now; methodos.keepChanged(now); if (!now) { kept.forget(); keptOffer(null); } } });
@@ -2150,6 +2205,18 @@ permissions.onChange(() => {
 // The token field's words, from the one place Chora's are from too.
 document.querySelector('label[for="whg-token"]').textContent = TOKEN_FIELD.label;
 $('whg-remember').textContent = TOKEN_FIELD.remember; $('whg-forget').textContent = TOKEN_FIELD.forget; $('whg-token-help').textContent = TOKEN_FIELD.help;
+// The project in WHG's own token field (index.html #whgp-token, in the tracker's "Save, open or share the project"), as the
+// lookup panel's: only what is typed or pasted is taken, Enter gives it for the tab, and it is never put back.
+function showWhgToken() { return showTokenView(token, { field: $('whgp-token'), remember: $('whgp-token-remember'), forget: $('whgp-token-forget'), state: $('whgp-token-state') }); }
+document.querySelector('label[for="whgp-token"]').textContent = TOKEN_FIELD.label;
+$('whgp-token-remember').textContent = TOKEN_FIELD.remember; $('whgp-token-forget').textContent = TOKEN_FIELD.forget; $('whgp-token-help').textContent = TOKEN_FIELD.help;
+$('whgp-token').addEventListener('input', noteInput);
+$('whgp-token').addEventListener('change', () => giveToken(token, $('whgp-token')));
+$('whgp-token').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); giveToken(token, $('whgp-token')); } });
+$('whgp-token-remember').onclick = () => { rememberToken(token, $('whgp-token')); $('whgp-token').focus(); };
+$('whgp-token-forget').onclick = () => { forgetToken(token, whgLookup(), $('whgp-token')); $('whgp-token').focus(); };
+token.onChange(() => { showWhgToken(); methodos.tokenGiven(); });
+showWhgToken();
 showTokenState();
 showTokenBox();
 passToken();

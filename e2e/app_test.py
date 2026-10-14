@@ -2918,6 +2918,7 @@ def main():
             map_your_data_checks(pw, url, tmp)
             recipes_checks(pw, url, tmp)
             project_checks(pw, url, tmp)
+            whg_checks(pw, url, tmp)
             scope_checks(pw, url, tmp)
             quality_checks(pw, url, tmp)
             chora_seams_checks(pw, url, tmp)
@@ -4584,6 +4585,477 @@ def project_checks(pw, url, tmp):
     attempt('Project file: a workflow begun with a workbook (.xlsx, itself a zip) is saved with the workbook whole in it, and opened in a fresh profile at the columns step with the workbook kept and chosen again', workbook)
     try: browser.close()
     except Exception: pass
+
+# ---- The project in WHG's Workbench (plan #34, item A1; src/methodos/whg.js, src/engine/workbench.js) ------------------
+# Against the fake of WHG (test/workbench-fake.js, which copies WHG's own code: CORS for an allow-list, the token in the
+# Authorization header only, its budget, its beta, its 2 MiB cap, an opaque 409, sharing), run as a server and reached
+# through Playwright's routing: never the real WHG. Each check reads what the fake RECEIVED and holds, never only what
+# the page says. Each absence beside its presence: nothing sent without a token (beside what is sent once it is given),
+# the token in no address (beside the token in every request's header), no share token kept (beside the origin kept).
+# A1_SHOTS=<dir> saves screenshots of the panel and of the read-only view, at 1440 x 900 and 600 px, light and dark.
+WHG_E2E_TOKEN = 'e2e-SECRET-workbench-token-5b2d91'
+WHG_E2E_OTHER = 'e2e-SECRET-not-enrolled-token-77a1'
+WHG_LINKS_JS = '''async () => { const db = await new Promise((res, rej) => { const r = indexedDB.open('plato-tools-methodos-links', 1); r.onupgradeneeded = () => r.result.createObjectStore('workflows'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+  try { return await new Promise((res) => { const t = db.transaction('workflows'), s = t.objectStore('workflows'), out = {}; const q = s.openCursor(); q.onsuccess = () => { const c = q.result; if (c) { out[c.key] = c.value; c.continue(); } else res(out); }; }); } finally { db.close(); } }'''
+WHG_STORAGE_JS = '''async () => { const all = []; for (const name of ['plato-tools-methodos', 'plato-tools-methodos-links']) { const db = await new Promise((res) => { const r = indexedDB.open(name, 1); r.onupgradeneeded = () => r.result.createObjectStore('workflows'); r.onsuccess = () => res(r.result); });
+  try { all.push(JSON.stringify(await new Promise((res) => { const q = db.transaction('workflows').objectStore('workflows').getAll(); q.onsuccess = () => res(q.result); }))); } finally { db.close(); } }
+  const own = (o) => Object.fromEntries(Object.entries(o).filter(([k]) => k !== 'plato-tools.whg-token'));   // the token's one keeper holds it, by design
+  return all.join('\\n') + '\\n' + JSON.stringify(own({ ...localStorage })) + '\\n' + JSON.stringify(own({ ...sessionStorage })); }'''
+WHG_VIEW = '''() => { const v = (e) => !!e && !e.hidden && !e.closest('[hidden]') && !!e.getClientRects().length, $ = (id) => document.getElementById(id), t = (id) => $(id)?.textContent || '';
+  return { status: $('methodos-tracker').dataset.status || null, tracker: v($('methodos-tracker')), state: t('whg-state'), said: v($('whg-said')) ? t('whg-said') : '', leaves: v($('whg-leaves')) ? t('whg-leaves') : '',
+    needs: v($('whg-needs')) ? t('whg-needs') : '', token: v($('whgp-token-box')), focus: document.activeElement?.id || '', choice: v($('whg-choice')) ? t('whg-choice-words') : '',
+    choices: [...document.querySelectorAll('#whg-choice button')].filter(v).map((b) => b.textContent), link: v($('whg-link')) ? $('whg-link-url').value : '', linkWords: t('whg-link-words'),
+    message: t('methodos-message'), projectSaid: v($('methodos-project-said')) ? t('methodos-project-said') : '', unshare: v($('whg-unshare')),
+    shared: v($('methodos-shared')) ? t('methodos-shared-words') : '', sharedButtons: [...document.querySelectorAll('#methodos-shared button')].filter(v).map((b) => b.textContent),
+    buttons: [...document.querySelectorAll('#methodos-tracker .methodos-buttons button, #methodos-tracker a.button')].filter((b) => v(b) && !b.closest('#methodos-shared')).map((b) => b.textContent),
+    project: v($('methodos-project')), ask: v($('whg-shared-ask')) ? t('whg-shared-ask') : '', list: v($('whg-projects')) ? [...document.querySelectorAll('#whg-projects-list li')].map((li) => li.textContent) : null,
+    listSaid: t('whg-projects-said'), hash: location.hash, href: location.href, replace: v($('methodos-replace')) ? t('methodos-replace-words') : '' }; }'''
+
+def whg_checks(pw, url, tmp):
+    import base64, io, re, zipfile, urllib.request, urllib.error, urllib.parse
+    base = url.rstrip('/') + '/'
+    origin = re.match(r'^(https?://[^/]+)', base).group(1)
+    shots = os.environ.get('A1_SHOTS')
+    if shots: pathlib.Path(shots).mkdir(parents=True, exist_ok=True)
+    out = tmp / 'whg'; out.mkdir(exist_ok=True)
+    port = free_port()
+    srv = subprocess.Popen(['node', str(ROOT / 'test/workbench-fake.js'), 'serve', '--port', str(port), '--origin', origin], cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True)
+    srv.stdout.readline()   # "listening <port>"
+    FAKE = f'http://127.0.0.1:{port}'
+    def fake(what, body=None):
+        req = urllib.request.Request(f'{FAKE}/__fake/{what}', data=json.dumps(body or {}).encode(), method='POST', headers={'Content-Type': 'application/json'})
+        with urllib.request.urlopen(req, timeout=10) as r: return json.loads(r.read())
+    def forward(route):
+        req = route.request
+        u = urllib.parse.urlsplit(req.url)
+        if not u.path.startswith('/reconciliation/'): return route.fulfill(status=404, body='not the Workbench')
+        heads = {k: v for k, v in req.all_headers().items() if not k.startswith(':') and k.lower() not in ('host', 'content-length', 'accept-encoding', 'connection')}
+        fr = urllib.request.Request(FAKE + u.path + (('?' + u.query) if u.query else ''), data=req.post_data_buffer, method=req.method, headers=heads)
+        try:
+            with urllib.request.urlopen(fr, timeout=20) as r: status, rh, body = r.status, dict(r.headers), r.read()
+        except urllib.error.HTTPError as e: status, rh, body = e.code, dict(e.headers), e.read()
+        answered.append({'method': req.method, 'status': status, 'headers': {k.lower(): v for k, v in rh.items()}, 'origin': req.headers.get('origin')})
+        route.fulfill(status=status, headers={k: v for k, v in rh.items() if k.lower() not in ('content-length', 'transfer-encoding', 'connection', 'keep-alive', 'date')}, body=body)
+    answered = []   # every answer the fake gave a page, with its headers (CORS)
+    fake('user', {'token': WHG_E2E_TOKEN, 'name': 'e2e'})
+    fake('user', {'token': WHG_E2E_OTHER, 'beta': False})
+    browser = pw.chromium.launch(headless=True)
+    seen = []   # every address any page of these checks asked, for the token in none of them
+    dialogs = []
+    def context(grant=True, token=None, viewport=None, scheme='light'):
+        ctx = browser.new_context(accept_downloads=True, viewport=viewport or {'width': 1440, 'height': 900}, reduced_motion='reduce', color_scheme=scheme)
+        ctx.add_init_script('window.__plato_forceDownload = true;')
+        ctx.route(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'), forward)
+        ctx.on('request', lambda r: seen.append(r.url))
+        ctx.on('page', lambda p: p.on('dialog', lambda d: (dialogs.append(d.message), d.dismiss())))
+        p = ctx.new_page()
+        p.goto(NOTOOLS if PROVE else base)
+        js = []
+        if grant: js.append("localStorage.setItem('plato-tools.permissions', JSON.stringify({ version: 1, grants: { 'collaborate:whg': { state: 'allowed', at: '2026-10-14T10:00:00Z' } } }));")
+        if token: js.append(f"sessionStorage.setItem('plato-tools.whg-token', {json.dumps(token)});")
+        if js: p.evaluate('() => { ' + ' '.join(js) + ' }')
+        p.goto(NOTOOLS if PROVE else base)
+        wait_state(p, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+        return p
+    view = lambda p: p.evaluate(WHG_VIEW)
+    def shot(p, name):
+        if shots and not PROVE:
+            try: p.screenshot(path=str(pathlib.Path(shots) / name), full_page=False)
+            except Exception: pass
+    def begin(p, csv=MYDATA_CSV):
+        """Table to map, no regions, no drawing, no publishing: begun with the table, at its columns step (a step boundary)."""
+        p.click('#methodos-ask'); until(p, "!document.getElementById('methodos').hidden", 5)
+        p.check('input[name="methodos-have"][value="table"]'); p.check('input[name="methodos-want"][value="map"]')
+        for k, v in (('has-regions', 'no'), ('will-draw', 'no'), ('will-publish', 'no')): p.check(f'input[name="methodos-ask-{k}"][value="{v}"]')
+        p.click('#methodos-start'); until(p, "['pending', 'idle'].includes(document.getElementById('methodos-tracker').dataset.status)", 10)
+        p.set_input_files('#picker', [str(csv)])
+        wait_state(p, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection')
+        until(p, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+    def panel(p):
+        if not p.evaluate("() => document.getElementById('methodos-project').open"): p.click('#methodos-project > summary')
+        until(p, "() => document.getElementById('methodos-project').open && !!document.getElementById('whg-state').textContent", 10)
+    def log(clear=False): return fake('log', {'clear': clear})
+    def projects(): return fake('projects')
+    def unzip_snapshot(snap):
+        z = zipfile.ZipFile(io.BytesIO(base64.b64decode(snap['project'])))
+        return z, json.loads(z.read('manifest.json'))
+    def said(p, js, timeout=20):
+        try: until(p, js, timeout)
+        except Exception as e:
+            v = view(p)
+            raise RuntimeError(f"{str(e)[:120]} | WHG part said: {v['said'][:200]!r} | message: {v['message'][:200]!r} | under the banner: {v['projectSaid'][:160]!r}")
+    def saved(p, version, timeout=30):
+        said(p, f"() => /^Saved to WHG.*\\(version {version},/.test(document.getElementById('whg-said').textContent)", timeout)
+    def wid(p): return p.evaluate("async () => (await new Promise((res) => { const r = indexedDB.open('plato-tools-methodos', 1); r.onupgradeneeded = () => r.result.createObjectStore('workflows'); r.onsuccess = () => { const q = r.result.transaction('workflows').objectStore('workflows').getAllKeys(); q.onsuccess = () => { res(q.result.filter((k) => !String(k).startsWith('pending:'))); r.result.close(); }; }; }))")
+    r = {}
+    def need(*keys):
+        missing = [k for k in keys if not r.get(k)]
+        if missing: raise RuntimeError(f'an earlier step did not finish ({", ".join(missing)})')
+
+    a = None
+    def no_token_then_token():
+        nonlocal a
+        log(clear=True)
+        a = context(grant=True)
+        begin(a)
+        panel(a)
+        before = view(a)
+        shot(a, 'whg-panel-no-token-1440-light.png')
+        a.click('#whg-save')
+        until(a, "() => /Your WHG token is needed first/.test(document.getElementById('whg-said').textContent)", 10)
+        none = view(a); sent_none = log()
+        # The presence: the same button, the token typed in the section's own field, sends.
+        a.fill('#whgp-token', WHG_E2E_TOKEN); a.press('#whgp-token', 'Enter')
+        a.click('#whg-save')
+        saved(a, 1)
+        sent = log()
+        after = view(a)
+        r['a'] = True
+        posts = [e for e in sent if e['method'] == 'POST' and e['path'] == '/reconciliation/projects/']
+        return (before['token'] and before['needs'] == '' and none['focus'] == 'whgp-token' and 'Nothing was sent' in none['said'] and sent_none == []
+                and len(posts) == 1 and all(e['headers'].get('authorization') == f'Bearer {WHG_E2E_TOKEN}' for e in sent) and all('cookie' not in e['headers'] for e in sent)
+                and all(e['headers'].get('origin') == origin for e in sent) and 'as a new project in your workbench' in after['said']), \
+            {'before': {k: before[k] for k in ('token', 'needs', 'state')}, 'no token': none['said'][:120], 'focus': none['focus'], 'sent without': len(sent_none), 'sent': [(e['method'], e['path'], e['status']) for e in sent], 'after': after['said'][:160]}
+    attempt('WHG: with no token, "Save to WHG" sends nothing, says so and opens the section\'s token field; the token typed there, the same button creates the project in WHG, the token in the Authorization header of every request, no cookie, from the page\'s origin', no_token_then_token)
+
+    def what_is_kept():
+        need('a')
+        [p] = [x for x in projects() if x['doc_type'] == 'plato']
+        z, m = unzip_snapshot(p['snapshot'])
+        links = a.evaluate(WHG_LINKS_JS)
+        ids = wid(a)
+        link = links.get(ids[0], {}) if ids else {}
+        r['pid'] = p['id']; r['wid'] = ids[0] if ids else None
+        own = [x for x in m['parts'] if x.get('own')]
+        state = view(a)['state']
+        stored = a.evaluate(WHG_STORAGE_JS)
+        return p['title'] == 'parishes.csv' and p['version'] == 1 and m['workflow']['id'] == r['wid'] and m['minor'] == 1 and len(own) == 1 and own[0]['name'] == 'parishes.csv' \
+            and set(p['snapshot']) == {'plato', 'format', 'workflow', 'formatVersion', 'project', 'size', 'sha256'} and p['snapshot']['workflow']['id'] == r['wid'] \
+            and link.get('projectId') == p['id'] and link.get('version') == 1 and link.get('sha256') == p['snapshot']['sha256'] and WHG_E2E_TOKEN not in stored and p['id'] in stored \
+            and 'Saved to WHG on' in state and 'as version 1' in state, \
+            {'title': p['title'], 'version': p['version'], 'manifest': (m['workflow'], m['minor']), 'own': own, 'link': link, 'state': state}
+    attempt('WHG: the project kept there is the workflow\'s project file in its envelope (format 1.1, the user\'s own file in it), titled as the workflow; the link beside the record holds its id, version and SHA-256 and no token; the panel says it is saved, as version 1', what_is_kept)
+
+    def push_again():
+        need('pid')
+        log(clear=True)
+        a.click('#whg-save'); saved(a, 2)
+        sent = log()
+        puts = [e for e in sent if e['method'] == 'PUT' and e['path'] == f"/reconciliation/projects/{r['pid']}/"]
+        p = next(x for x in projects() if x['id'] == r['pid'])
+        r['v2'] = p['version'] == 2
+        # A PUT on the version WHG holds is the only one it takes (a stale one is a 409: the next check): 200 is the proof of base_version 1.
+        return (len(puts) == 1 and not [e for e in sent if e['method'] == 'POST'] and puts[0]['status'] == 200
+                and p['version'] == 2 and len(projects()) == 1 and 'as version 2' in view(a)['state']), {'sent': [(e['method'], e['path'], e['status']) for e in sent], 'version': p['version'], 'state': view(a)['state'][:120]}
+    attempt('WHG: saved again, it is an update of the same project on the version last saved (PUT, base_version 1), now version 2; no second project', push_again)
+
+    def conflict_then_new():
+        need('v2')
+        p = next(x for x in projects() if x['id'] == r['pid'])
+        fake('push', {'id': r['pid'], 'snapshot': p['snapshot']})   # another browser's save: version 3
+        log(clear=True)
+        a.click('#whg-save')
+        until(a, "() => !document.getElementById('whg-choice').hidden", 20)
+        v = view(a); shot(a, 'whg-conflict-1440-light.png')
+        held = next(x for x in projects() if x['id'] == r['pid'])
+        a.click('#whg-choice button[data-choice="1"]')   # Save mine as a new WHG project
+        saved(a, 1)
+        after = projects()
+        links = a.evaluate(WHG_LINKS_JS)
+        new = [x for x in after if x['id'] != r['pid']]
+        r['second'] = new[0]['id'] if new else None
+        return ('newer save of this workflow (version 3)' in v['choice'] and v['choices'] == ['Open the copy on WHG', 'Save mine as a new WHG project'] and not any('overwrite' in c.lower() or 'replace' in c.lower() for c in v['choices'])
+                and held['version'] == 3 and [e['status'] for e in log() if e['method'] == 'PUT'][:1] == [409] and len(after) == 2 and links.get(r['wid'], {}).get('projectId') == r['second']), \
+            {'choice': v['choice'][:200], 'choices': v['choices'], 'held': held['version'], 'projects': len(after), 'link': links.get(r['wid'])}
+    attempt('WHG: a newer save in WHG (another browser\'s) is never saved over: the page offers "Open the copy on WHG" or "Save mine as a new WHG project", no overwrite; WHG still holds version 3; saved as new, there are two, and the workflow is linked to the new one', conflict_then_new)
+
+    def open_the_copy():
+        need('second')
+        p = next(x for x in projects() if x['id'] == r['second'])
+        fake('push', {'id': r['second'], 'snapshot': p['snapshot']})   # version 2 there, from elsewhere
+        a.click('#whg-save')
+        until(a, "() => !document.getElementById('whg-choice').hidden", 20)
+        a.click('#whg-choice button[data-choice="0"]')   # Open the copy on WHG
+        until(a, "() => !document.getElementById('methodos-replace').hidden", 15)
+        asked = view(a)
+        a.click('#methodos-replace-yes')
+        until(a, "() => /from WHG \\(version 2\\)/.test(document.getElementById('methodos-message').textContent)", 30)
+        links = a.evaluate(WHG_LINKS_JS)
+        ids = wid(a)
+        return ("WHG's copy (version 2)" in asked['replace'] and ids == [r['wid']] and links.get(r['wid'], {}).get('version') == 2 and links.get(r['wid'], {}).get('projectId') == r['second']
+                and view(a)['status'] == 'idle'), {'asked': asked['replace'][:160], 'ids': ids, 'link': links.get(r['wid']), 'message': view(a)['message'][:200]}
+    attempt('WHG: "Open the copy on WHG" asks first (the workflow open would be let go), then opens WHG\'s newer save in its place, linked at its version', open_the_copy)
+
+    b = None
+    def fresh_browser_open_and_delete():
+        nonlocal b
+        need('second')
+        b = context(grant=True, token=WHG_E2E_TOKEN)
+        empty = {'banner': b.is_visible('#whg-open-banner'), 'ids': wid(b)}
+        b.click('#whg-open-banner')
+        until(b, "() => document.querySelectorAll('#whg-projects-list li').length === 2", 20)
+        listed = view(b)
+        shot(b, 'whg-list-1440-light.png')
+        # Delete, asked in the page (no browser dialogue); "Keep it" keeps it.
+        b.click(f'#whg-projects-list li[data-project="{r["pid"]}"] .whg-delete')
+        until(b, "() => !!document.querySelector('#whg-projects-list .whg-confirm')", 5)
+        focus = b.evaluate("() => document.activeElement?.className")
+        b.click('#whg-projects-list .whg-delete-no')
+        kept = len(projects())
+        b.click(f'#whg-projects-list li[data-project="{r["pid"]}"] .whg-delete')
+        b.click('#whg-projects-list .whg-delete-yes')
+        until(b, "() => /^Deleted/.test(document.getElementById('whg-projects-said').textContent)", 15)
+        gone = [x['id'] for x in projects()]
+        b.click(f'#whg-projects-list li[data-project="{r["second"]}"] .whg-open-one')
+        until(b, "() => /from WHG \\(version 2\\)/.test(document.getElementById('methodos-message').textContent)", 30)
+        opened = view(b)
+        links = b.evaluate(WHG_LINKS_JS)
+        r['b'] = True
+        return (empty['banner'] and empty['ids'] == [] and len(listed['list']) == 2 and all('Yours' in x for x in listed['list']) and focus == 'whg-delete-no' and kept == 2
+                and gone == [r['second']] and dialogs == [] and opened['status'] == 'idle' and wid(b) == [r['wid']] and links.get(r['wid'], {}).get('projectId') == r['second']), \
+            {'empty': empty, 'list': listed['list'], 'focus': focus, 'kept': kept, 'after delete': gone, 'dialogs': dialogs, 'opened': opened['message'][:160], 'link': links.get(r['wid'])}
+    attempt('WHG: in a fresh browser, "one kept in WHG" lists the projects there (title, role, when saved); Delete asks in the page, "Keep it" focused, keeps it, then deletes it; another opens as the same workflow, linked at its version', fresh_browser_open_and_delete)
+
+    def matched():
+        need('b', 'second')
+        # The workflow as a project file from the first browser, opened in a third: no link there, but WHG holds it.
+        panel(a)
+        with a.expect_download(timeout=T(60) * 1000) as d: a.click('#methodos-save-project')
+        f = out / d.value.suggested_filename; d.value.save_as(f)
+        c = context(grant=True, token=WHG_E2E_TOKEN)
+        c.set_input_files('#methodos-project-file', str(f))
+        until(c, "() => /Opened the project/.test(document.getElementById('methodos-message').textContent)", 30)
+        panel(c)
+        before = c.evaluate(WHG_LINKS_JS)
+        n = len(projects()); log(clear=True)
+        c.click('#whg-save')
+        until(c, "() => !document.getElementById('whg-choice').hidden", 20)
+        v = view(c)
+        c.click('#whg-choice button[data-choice="0"]')   # Save to it
+        until(c, "() => /^Saved to WHG \\(version 3,/.test(document.getElementById('whg-said').textContent)", 20)
+        sent = [(e['method'], e['path']) for e in log()]
+        c.context.close()
+        return (before == {} and 'hold this workflow already' in v['choice'] and v['choices'] == ['Save to it', 'Save as a new WHG project'] and len(projects()) == n
+                and ('PUT', f"/reconciliation/projects/{r['second']}/") in sent and not [s for s in sent if s[0] == 'POST']), {'before': before, 'choice': v['choice'][:160], 'sent': sent}
+    attempt('WHG: a workflow with no link here that WHG already holds (opened from its file in a third browser) is offered "Save to it" or as new; "Save to it" updates that project, no second one', matched)
+
+    def share_and_stop():
+        need('a', 'second')
+        panel(a)
+        log(clear=True)
+        a.click('#whg-share')
+        until(a, "() => !document.getElementById('whg-link').hidden", 20)
+        v = view(a)
+        held = next(x for x in projects() if x['id'] == r['second'])
+        shot(a, 'whg-shared-1440-light.png')
+        for w, h, scheme, name in ((600, 900, 'light', 'whg-shared-600-light.png'), (600, 900, 'dark', 'whg-shared-600-dark.png'), (1440, 900, 'dark', 'whg-shared-1440-dark.png')):
+            if shots and not PROVE:
+                a.set_viewport_size({'width': w, 'height': h}); a.emulate_media(color_scheme=scheme)
+                if w < 960 and not a.evaluate("() => document.getElementById('methodos-tracker').classList.contains('open')"): a.click('#methodos-strip')
+                a.evaluate("() => document.getElementById('whg-link').scrollIntoView({ block: 'center' })")
+                shot(a, name)
+                if w < 960: a.click('#methodos-strip')
+        a.set_viewport_size({'width': 1440, 'height': 900}); a.emulate_media(color_scheme='light')
+        token = held.get('token') or ''
+        r['token'] = token
+        ok_link = v['link'] == f"{base}#whg-shared={token}" and len(token) == 36
+        a.click('#whg-unshare')
+        until(a, "() => /Sharing stopped/.test(document.getElementById('whg-said').textContent)", 15)
+        stopped = next(x for x in projects() if x['id'] == r['second'])
+        a.click('#whg-share'); until(a, "() => !document.getElementById('whg-link').hidden", 20)
+        again = next(x for x in projects() if x['id'] == r['second'])
+        r['token'] = again.get('token')
+        r['shared'] = True
+        return (ok_link and 'Anyone with this link can read' in v['linkWords'] and "reviewer’s name" in v['linkWords'] and 'newest save' in v['linkWords'] and v['unshare']
+                and stopped['token'] is None and again['token'] and again['token'] != token and view(a)['link'].endswith(again['token'])), \
+            {'link': v['link'], 'token': token, 'words': v['linkWords'][:200], 'stopped': stopped['token'], 'again': again['token']}
+    attempt('WHG: "Share a read-only link" gives the page\'s own address with #whg-shared=<the token WHG minted>, and says who can read what (the reviewer\'s name, the newest save); "Stop sharing" withdraws it in WHG; shared again, a new token', share_and_stop)
+
+    rc = None
+    def recipient_asked():
+        nonlocal rc
+        need('shared')
+        log(clear=True)
+        ctx = browser.new_context(accept_downloads=True, viewport={'width': 1440, 'height': 900}, reduced_motion='reduce')
+        ctx.route(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'), forward)
+        ctx.on('request', lambda q: seen.append(q.url))
+        rc = ctx.new_page()
+        rc.goto(NOTOOLS if PROVE else f"{base}#whg-shared={r['token']}")
+        until(rc, "() => !document.getElementById('whg-shared-ask').hidden", 20)
+        v = view(rc)
+        held = rc.evaluate("() => sessionStorage.getItem('plato-tools.whg-shared')")
+        shot(rc, 'whg-recipient-asked-1440-light.png')
+        asked = log()
+        # Allowed (as the line's Permissions… would), and the page reloaded, as the line then offers: the token held across it.
+        rc.evaluate("() => localStorage.setItem('plato-tools.permissions', JSON.stringify({ version: 1, grants: { 'collaborate:whg': { state: 'allowed', at: '2026-10-14T10:00:00Z' } } }))")
+        rc.reload()
+        until(rc, "() => document.getElementById('methodos-tracker').dataset.status === 'shared'", 30)
+        after = view(rc)
+        sent = log()
+        gets = [e for e in sent if e['path'] == f"/reconciliation/shared/{r['token']}/"]
+        r['viewed'] = True
+        return (v['hash'] == '' and r['token'] not in v['href'] and 'shared with you through the World Historical Gazetteer' in v['ask'] and 'Needs permission: World Historical Gazetteer Workbench' in v['ask']
+                and held == r['token'] and asked == [] and len(gets) == 1 and 'authorization' not in gets[0]['headers'] and gets[0]['method'] == 'GET'
+                and rc.evaluate("() => sessionStorage.getItem('plato-tools.whg-shared')") is None and r['token'] not in rc.url), \
+            {'hash': v['hash'], 'ask': v['ask'][:200], 'held': held == r['token'], 'asked before': len(asked), 'gets': [(e['method'], e['path'], sorted(e['headers'])) for e in gets], 'url': rc.url}
+    attempt('WHG, a share link opened: the token leaves the address at once; with the permission not given, the page says what the link is and asks, sending nothing; allowed and reloaded, the token held for the reload only, the shared project is read with no Authorization header', recipient_asked)
+
+    def recipient_view():
+        need('viewed')
+        v = view(rc)
+        shot(rc, 'whg-recipient-1440-light.png')
+        for w, scheme, name in ((600, 'light', 'whg-recipient-600-light.png'), (600, 'dark', 'whg-recipient-600-dark.png'), (1440, 'dark', 'whg-recipient-1440-dark.png')):
+            if shots and not PROVE:
+                rc.set_viewport_size({'width': w, 'height': 900}); rc.emulate_media(color_scheme=scheme); rc.evaluate('() => window.scrollTo(0, 0)'); shot(rc, name)
+        rc.set_viewport_size({'width': 1440, 'height': 900}); rc.emulate_media(color_scheme='light')
+        with rc.expect_download(timeout=T(30) * 1000) as d: rc.click('#methodos-shared-download')
+        f = out / ('shared-' + d.value.suggested_filename); d.value.save_as(f)
+        with zipfile.ZipFile(f) as z: m = json.loads(z.read('manifest.json'))
+        steps = rc.evaluate(JOIN_STATE)['steps']
+        return ('Read-only' in v['shared'] and v['sharedButtons'] == ['Make my own copy', 'Download .platoproj', 'Close'] and v['buttons'] == [] and not v['project']
+                and steps.get('columns') == 'current' and m['workflow']['id'] == r['wid'] and wid(rc) == []), \
+            {'shared': v['shared'][:200], 'buttons': v['buttons'], 'shared buttons': v['sharedButtons'], 'project panel': v['project'], 'steps': steps, 'manifest': m['workflow'], 'kept': wid(rc)}
+    attempt('WHG, a share link: the workflow is shown read-only (its steps, where it is), every action off but "Make my own copy", "Download .platoproj" and "Close"; the download is the project; nothing is kept in this browser', recipient_view)
+
+    def recipient_copy():
+        need('viewed')
+        rc.click('#methodos-shared-copy')
+        until(rc, "() => /Your own copy of/.test(document.getElementById('methodos-message').textContent)", 30)
+        until(rc, WHG_LINKS_JS.replace('async () => {', 'async () => { const got = await (async () => {', 1) + ")(); return Object.values(got).some((l) => !!l.origin); }", 15)
+        v = view(rc)
+        ids = wid(rc)
+        links = rc.evaluate(WHG_LINKS_JS)
+        stored = rc.evaluate(WHG_STORAGE_JS)
+        link = links.get(ids[0], {}) if ids else {}
+        # Visited again: the newest save, read-only, and no second copy.
+        rc.goto(NOTOOLS if PROVE else f"{base}#whg-shared={r['token']}")
+        until(rc, "() => document.getElementById('methodos-tracker').dataset.status === 'shared'", 30)
+        again = wid(rc)
+        return (v['status'] == 'idle' and len(ids) == 1 and ids[0] != r['wid'] and link.get('origin', {}).get('workflowId') == r['wid'] and isinstance(link.get('origin', {}).get('version'), int)
+                and 'projectId' not in link and r['token'] not in stored and r['wid'] in stored and again == ids), \
+            {'status': v['status'], 'ids': ids, 'original': r['wid'], 'link': link, 'token stored': r['token'] in stored, 'again': again}
+    attempt('WHG, a share link: "Make my own copy" makes a workflow of this browser with an id of its own, not linked to WHG, its origin (the workflow and the version) kept and never the share token; the link opened again shows the newest save read-only, not a second copy', recipient_copy)
+
+    def recipient_refused():
+        need('viewed')
+        # Another kind of project (Map your data's), shared: refused in words; a link withdrawn: refused in words.
+        other = fake('create', {'token': WHG_E2E_TOKEN, 'title': 'MyD', 'snapshot': {'rows': []}, 'doc_type': 'reconciliation'})
+        t = fake('share', {'id': other['id']})['token']
+        rc.goto(NOTOOLS if PROVE else f"{base}#whg-shared={t}")
+        until(rc, "() => /another kind/.test(document.getElementById('methodos-message').textContent + document.getElementById('methodos-project-said').textContent)", 20)
+        wrong = view(rc)
+        fake('unshare', {'id': other['id']})
+        rc.goto(NOTOOLS if PROVE else f"{base}#whg-shared={t}")
+        until(rc, "() => /no longer opens anything/.test(document.getElementById('methodos-message').textContent + document.getElementById('methodos-project-said').textContent)", 20)
+        gone = view(rc)
+        return wrong['status'] != 'shared' and gone['status'] != 'shared', {'wrong': (wrong['message'] + wrong['projectSaid'])[:200], 'gone': (gone['message'] + gone['projectSaid'])[:200]}
+    attempt('WHG, a share link: one to another kind of WHG project is refused in words, and one withdrawn says it opens nothing; neither is shown', recipient_refused)
+
+    def refusals():
+        need('a')
+        out_ = {}
+        # 403 beta_required: an account not enrolled; WHG's page named, nothing to join here.
+        e = context(grant=True, token=WHG_E2E_OTHER)
+        begin(e); panel(e); e.click('#whg-save')
+        until(e, "() => /not enrolled/.test(document.getElementById('whg-said').textContent)", 20)
+        out_['beta'] = e.evaluate("() => [document.getElementById('whg-said').textContent, document.querySelector('#whg-said a')?.href]")
+        # 401: a token WHG does not know: the token field opened, focused.
+        e.evaluate("() => sessionStorage.setItem('plato-tools.whg-token', 'e2e-SECRET-unknown-token-0000')")
+        e.reload(); wait_state(e, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+        until(e, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+        panel(e); e.click('#whg-save')
+        until(e, "() => /did not accept your token/.test(document.getElementById('whg-said').textContent)", 20)
+        out_['401'] = view(e)
+        e.context.close()
+        # 429 twice: waited once, counted down, then stopped in words.
+        fake('config', {'rate': 1, 'retryAfter': 2}); fake('newMinute')
+        fake('create', {'token': WHG_E2E_TOKEN, 'title': 'spends the minute', 'snapshot': {'plato': 1}})   # the minute's one request spent elsewhere
+        log(clear=True)
+        panel(a); a.click('#whg-save')
+        until(a, "() => /trying again in/.test(document.getElementById('whg-said').textContent)", 20)
+        out_['countdown'] = view(a)['said']
+        until(a, "() => /still asking for a pause/.test(document.getElementById('whg-said').textContent)", 20)
+        out_['429'] = view(a)['said']
+        fake('config', {'rate': 120, 'retryAfter': None}); fake('newMinute')
+        # 413 from WHG (a lower cap than these tools fit to): said, nothing lost.
+        fake('config', {'bodyMax': 1000})
+        a.click('#whg-save')
+        until(a, "() => /Too large for WHG/.test(document.getElementById('whg-said').textContent)", 20)
+        out_['413'] = view(a)['said']
+        fake('config', {'bodyMax': 2 * 1024 * 1024})
+        # 404: the project deleted elsewhere: said, and the link let go.
+        linked = a.evaluate(WHG_LINKS_JS).get(r['wid'], {}).get('projectId')
+        fake('remove', {'id': linked})
+        a.click('#whg-save')
+        until(a, "() => /no longer has this project/.test(document.getElementById('whg-said').textContent)", 20)
+        out_['404'] = view(a)['said']; out_['link after 404'] = a.evaluate(WHG_LINKS_JS).get(r['wid'])
+        # An origin WHG does not allow: refused by WHG itself (403 origin_not_allowed, its second line of defence after the
+        # browser's CORS check, which Playwright's routing does not apply to a fulfilled answer: see whg_cors below).
+        fake('config', {'origins': ['https://pelagios.org']})
+        try:
+            a.click('#whg-save')
+            said(a, "() => /only from the tools at pelagios\\.org/.test(document.getElementById('whg-said').textContent)", 20)
+            out_['origin'] = view(a)['said']
+        finally: fake('config', {'origins': [origin]})
+        ok = ('not enrolled' in out_['beta'][0] and (out_['beta'][1] or '').startswith('https://whgazetteer.org/development')
+              and out_['401']['token'] and out_['401']['focus'] == 'whgp-token'
+              and re.search(r'trying again in \d seconds?', out_['countdown']) and out_['429'].startswith('Not saved to WHG. Your work is kept in this browser. WHG is still asking for a pause')
+              and 'Too large for WHG: the request came to' in out_['413'] and 'no longer linked here' in out_['404'] and out_['link after 404'] is None and 'WHG does not accept projects from this copy' in out_['origin'])
+        return ok, {k: (v if not isinstance(v, dict) else {'said': v['said'][:120], 'token': v['token'], 'focus': v['focus']}) for k, v in out_.items()}
+    def refusals_restored():
+        try: return refusals()
+        finally: fake('config', {'origins': [origin], 'rate': 120, 'retryAfter': None, 'bodyMax': 2 * 1024 * 1024}); fake('newMinute')
+    attempt('WHG: each refusal said in words, nothing lost: not enrolled (WHG\'s page linked), a token refused (the field opened and focused), a pause asked twice (counted down, then stopped), too large for WHG (413), deleted there (404, unlinked), and an origin WHG does not allow (403)', refusals_restored)
+
+    def too_large():
+        need('a')
+        # The user's own file over WHG's cap with everything else (random text, which DEFLATE cannot make much smaller).
+        import secrets
+        big = out / 'big-parishes.csv'
+        big.write_text('id,name,parish,county\n' + ''.join(f'{i},{secrets.token_urlsafe(48)},Newton,Cheshire\n' for i in range(40000)))
+        g = context(grant=True, token=WHG_E2E_TOKEN)
+        begin(g, big)
+        panel(g)
+        until(g, "() => !document.getElementById('whg-leaves').hidden", 60)
+        said = view(g)['leaves']
+        shot(g, 'whg-too-large-1440-light.png')
+        log(clear=True)
+        g.click('#whg-save'); saved(g, 1, 90)
+        done = view(g)['said']
+        sent = [e for e in log() if e['method'] == 'POST']
+        p = [x for x in projects() if x['doc_type'] == 'plato' and x['snapshot'].get('workflow', {}).get('id') in wid(g)]
+        _, m = unzip_snapshot(p[0]['snapshot']) if p else (None, {})
+        g.context.close()
+        return ('big-parishes.csv will not go to WHG' in said and 'Not in it, as too large for WHG: big-parishes.csv' in done and len(sent) == 1 and sent[0]['size'] <= 2 * 1024 * 1024
+                and [x['why'] for x in m.get('left', [])] == ['too-large'] and not any(x.get('own') for x in m.get('parts', []))), \
+            {'said before': said[:200], 'said after': done[:200], 'size': [e['size'] for e in sent], 'left': m.get('left')}
+    attempt('WHG: a project over WHG\'s 2 MB is said before saving to leave the user\'s own file out; saved, the request is under the cap, and the file is listed in the project as left out, too large', too_large)
+
+    def token_nowhere():
+        need('a')
+        # The share token is in one kind of address by WHG's design (shared/<token>/, the capability), and in the page's own
+        # address only as the fragment, which no request carries: anywhere else it is a leak.
+        hits = [u for u in seen if WHG_E2E_TOKEN in u or WHG_E2E_OTHER in u or 'unknown-token' in u]
+        shared = [u for u in seen if r.get('token') and r['token'] in u and '/reconciliation/shared/' not in u]
+        whg = [u for u in seen if 'whgazetteer.org' in u]
+        return (len(whg) >= 10 and hits == [] and shared == []), {'requests to WHG': len(whg), 'with a token in the address': hits[:3], 'share token elsewhere': shared[:3]}
+    attempt('WHG: of every request these checks\' pages made (the presence: many to WHG), none has the WHG token or a share token in its address', token_nowhere)
+
+    def whg_cors():
+        # What the page relies on of WHG's CORS, as the fake answered it. Playwright's routing does not make the browser
+        # apply CORS to a fulfilled answer, and answers the preflights itself (none reached the route, measured 14 October
+        # 2026), so the answers' headers are read here; the preflight is test/workbench.test.js's, and the live test's.
+        mine = [x for x in answered if x['origin'] == origin and x['method'] != 'OPTIONS' and x['status'] != 403]
+        cred = [x for x in answered if 'access-control-allow-credentials' in x['headers']]
+        return (len(mine) >= 10 and all(x['headers'].get('access-control-allow-origin') == origin for x in mine) and cred == []
+                and all('Retry-After' in x['headers'].get('access-control-expose-headers', '') for x in mine)), \
+            {'answers': len(mine), 'with credentials': len(cred), 'odd': [x['headers'].get('access-control-allow-origin') for x in mine if x['headers'].get('access-control-allow-origin') != origin][:3]}
+    attempt('WHG: every answer the page read named its origin in Access-Control-Allow-Origin and exposed Retry-After, and none allowed credentials', whg_cors)
+
+    try: browser.close()
+    except Exception: pass
+    try: os.killpg(srv.pid, signal.SIGTERM)
+    except ProcessLookupError: pass
 
 # ---- Scope (Issue #33, points 2 and 8; src/scope-page.js, src/engine/krisis/scope.js) ---------------------------
 # What every WHG lookup is confined to. Against a stub of WHG (never the real one), which answers the reconciliation

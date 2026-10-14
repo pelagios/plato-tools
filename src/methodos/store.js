@@ -25,7 +25,8 @@ const PENDING = 'pending:';
 // The link of a workflow to its project in WHG's Workbench (plan #34, item A1; src/methodos/whg.js):
 // { projectId, version, sha256, shared, savedAt, base, title, state } as last saved to WHG or opened from it
 // (`state`: the digest of the workflow and its review then, to say whether it has changed since), or,
-// for a copy made from a share link, only { origin: { projectId, version } }. Kept beside the record, in a
+// for a copy made from a share link, only { origin: { workflowId, version, title } }: the workflow it was
+// copied from and the version WHG had (a share link's answer names no project, and the link itself is not kept). Kept beside the record, in a
 // database of its own keyed by the record's id, and let go with it; with working data not kept, for the tab
 // (sessionStorage, 'plato-tools.methodos-link.<id>'). Never in a project file, and never a token: a share
 // link's token is not kept at all, only that the project is shared.
@@ -47,7 +48,7 @@ export function cleanLink(v) {
     if (/^[0-9a-f]{64}$/.test(v.state || '')) out.state = v.state;
   }
   const o = v.origin;
-  if (o && typeof o === 'object' && UUID.test(o.projectId || '') && Number.isSafeInteger(o.version)) out.origin = { projectId: o.projectId, version: o.version };
+  if (o && typeof o === 'object' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(o.workflowId || '') && Number.isSafeInteger(o.version)) out.origin = { workflowId: o.workflowId, version: o.version, ...(typeof o.title === 'string' ? { title: o.title.slice(0, 300) } : {}) };
   return Object.keys(out).length ? out : null;
 }
 

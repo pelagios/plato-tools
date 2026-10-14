@@ -17,6 +17,8 @@ import { outputStore } from './outputs.js';
 import { stepAt, currentInput, startFiles, keptBy, keptWords, distinct, projectWords } from './seams.js';
 import { regionsSettled, notReviewed, relateProblem, writesItself } from '../engine/methodos/containment.js';
 import { stepMark, whereWords, lower } from './layout.js';
+import { whyWords, shareLink, ENROL, WorkbenchError } from '../engine/workbench.js';
+import { stateOf, fromSnapshot } from './whg.js';
 
 // The input of each automatic operation that the page's run takes from the files chosen in step 1: a
 // run is the step's only if those files are the ones the step takes (by size and SHA-256).
@@ -111,14 +113,18 @@ function stepList(list, steps, at, done, notes = []) {
  *                    close(), abort() }, or of null when the user closed the save dialogue;
  *   secrets()        what a project must never hold (the WHG token), to refuse a part that does;
  *   openReview(file, files)  open a review read from a project, on `files` (chosen first, if none is).
+ *   hasToken()       whether the WHG token is held;   askToken()  show the WHG section's token field, the focus in it;
+ *   collaborate(el)  the "Needs permission" line for collaborate:whg, in `el`;   shareBase()  the page's own address.
+ * `whg` is the page's dealings with WHG's Workbench (src/methodos/whg.js, whgProjects()), or null.
  * `build` is { version, commit } of these tools, written into a project; `projectFile` the input that chooses a project to
  * open, and `projectSaid` where what came of it is said while the tracker is not shown.
- * Returns { open(), chosen(files), placed(files), began(run), ended(run), keepChanged(on), id(), following() }:
+ * Returns { open(), chosen(files), placed(files), began(run), ended(run), keepChanged(on), id(), following(), viewShared(token),
+ * openFromWhg(), shareTokens() }:
  * the host tells it the files chosen, the dataset a save in Chora wrote (placed), and each run of a tool as
  * it begins ({ op, files }) and ends ({ op, report, outputs, incomplete } or { op, error, partial } or
  * { op, waiting } or { op, cancelled }).
  */
-export function mountMethodos({ banner, interview, tracker, store, onStep, onScope, tools, page, outputs = null, build = null, projectFile = null, projectSaid = null }) {
+export function mountMethodos({ banner, interview, tracker, store, onStep, onScope, tools, page, outputs = null, build = null, projectFile = null, projectSaid = null, whg = null }) {
   const q = (root, sel) => root.querySelector(sel);
   const have = q(interview, '#mq-have'), want = q(interview, '#mq-want'), more = q(interview, '#mq-more');
   const verdict = q(interview, '#methodos-verdict'), planEl = q(interview, '#methodos-plan');
@@ -576,7 +582,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       if (n !== keptAsked) return;
       const keeping = outs.keeping ? outs.keeping() : true;
       const words = keptWords({ files, own: startFiles(wf || changed?.record), keeping, workflow: !!(wf || changed || pending), missed: wf ? ownMissed : [] });
-      keptEl.hidden = !words || tracker.hidden;
+      keptEl.hidden = !words || tracker.hidden || !!viewing;
       keptEl.firstChild.textContent = words;
       clearB.hidden = !keeping;
       tracker.dataset.keptOwn = String(keeping && files.some((f) => startFiles(wf || changed?.record).some((r) => r.sha256 === f.sha256)));
@@ -616,6 +622,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     if (wf || changed) await handOver(wf || changed.record);
     await outs.drop(keptBy(wf || changed?.record));
     wf = null; wfScope = null; pending = null; changed = null; active = null; note = null; handle = handleFile = keptHandle = null; asIs = null; ownMissed = [];
+    whgLink = null; whgLinkFor = null; whgReset();
     if (id) await store.remove(id);
     if (was) await store.dropPending(was);
     render(false); backTo();
@@ -675,6 +682,9 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       if (wf && atBoundary(wf)) await keep();
       else if (!on) await store.forgetKept();
       if (pending) await store.savePending(pending);
+      // The link to WHG, held here, is kept again where the record now is (turned off, for the tab).
+      const linked = wf || changed?.record;
+      if (whg && linked && whgLinkFor === linked.id && whgLink) await whg.setLink(linked.id, whgLink);
       // Turned on: the user's own file, held for the tab, is kept from now as the steps' files are.
       if (on && wf) {
         const missed = [];
@@ -702,8 +712,10 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   function render(focus) {
     bannerNow();
     onScope?.();   // the Scope shown in the rail is the workflow's, or none (src/scope-page.js)
-    const shown = wf || changed?.record;
-    if (!pending && !shown) { tracker.hidden = true; delete tracker.dataset.status; closeStrip(); stripAt = null; onStep(null); return; }
+    // A workflow shared from WHG (viewShared) is shown in place of this browser's own, read-only, until closed or copied.
+    const shown = viewing ? viewing.read.record : wf || changed?.record;
+    const own = viewing ? null : changed;   // what the version rule said of this browser's own workflow, if it is shown
+    if (!pending && !shown) { tracker.hidden = true; delete tracker.dataset.status; closeStrip(); stripAt = null; onStep(null); sharedEl.hidden = true; return; }
     tracker.hidden = false;
     let steps, at, rows;
     if (!shown) {
@@ -715,13 +727,13 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     } else {
       const recipe = recipeOf(shown);
       tracker.dataset.recipe = shown.recipe.key; tTitle.textContent = recipe?.title || shown.recipe.key;
-      steps = followed(shown); at = changed ? null : atStep(shown);
+      steps = followed(shown); at = own ? null : atStep(shown);
       rows = shown.steps.filter((s) => s.state !== 'skipped' || s.unavailable).map((s) => {
         const op = OPERATIONS[s.op];
         return { id: s.id, tool: op.tool, title: s.title, available: s.unavailable || true,
           st: s.unavailable ? 'unavailable' : s.state === 'done' ? 'done' : at && s.id === at.id ? 'current' : 'todo', run: at && s.id === at.id ? s : null };
       });
-      tracker.dataset.status = changed ? 'changed' : shown.status;
+      tracker.dataset.status = viewing ? 'shared' : own ? 'changed' : shown.status;
     }
     trackList(tList, rows, pendingNotes(shown));
     // What the workflow cannot carry from its files, folded below the buttons; hidden for a recipe that names nothing.
@@ -732,7 +744,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     const s = i >= 0 ? steps[i] : null;
     const title = s ? whereWords(i, steps.length, OPERATIONS[s.op].tool, s.title) : null;   // also the centre's title, and the strip's words
     const where = s ? `${title}.`
-      : changed ? changed.words : `Every one of the ${steps.length} steps is done.${pendingNotes(shown).length ? ` ${pendingNotes(shown).join(' ')}` : ''}`;
+      : own ? own.words : `Every one of the ${steps.length} steps is done.${pendingNotes(shown).length ? ` ${pendingNotes(shown).join(' ')}` : ''}`;
     tWhere.textContent = where;
     strip.querySelector('.strip-where').textContent = title || where.replace(/\.$/, '');
     if ((s?.id ?? null) !== stripAt) { closeStrip(); stripAt = s?.id ?? null; }
@@ -740,13 +752,14 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     // The file: chosen through the tracker (its handle kept, where the browser gives one) before the
     // workflow starts, or after a reload when a step takes the file the workflow began with.
     let main = null;
-    try { main = s && wf ? mainInput(wf, s) || (s.op === 'read.columns' ? runner.inputsOf(wf, s.id).files : null) : null; } catch { main = null; }
+    try { main = s && wf && !viewing ? mainInput(wf, s) || (s.op === 'read.columns' ? runner.inputsOf(wf, s.id).files : null) : null; } catch { main = null; }
     // Written out in the format it already has: ready to download as it is, and done once downloaded.
     const ready = !!(s && wf && !changed && !run && writesItself(s, page.ownTarget?.()) && main && sameRefs(main, chosenRefs));
     // What the tracker says now: what is to be done next, in words, then any word about the last thing done.
     const op = s && OPERATIONS[s.op];
     let next = '';
-    if (!shown) next = `Not started. Choose ${lower(RECIPES[pending.key].files[fileKey(RECIPES[pending.key])].words)} in step 1 to begin: Methodos starts when it is chosen. Or discard it.`;
+    if (viewing) next = '';
+    else if (!shown) next = `Not started. Choose ${lower(RECIPES[pending.key].files[fileKey(RECIPES[pending.key])].words)} in step 1 to begin: Methodos starts when it is chosen. Or discard it.`;
     else if (s && op.kind === 'interactive') next = `This step is yours: it waits for ${op.waitsFor}. Say when it is done.`;
     else if (ready) next = `Ready to download: ${names(main)} is already in the format this workflow writes, so it is not converted into itself. Download it, and the step is done.`;
     else if (s && !run) next = `Run ${OPERATIONS[s.op].tool ? `${OPERATIONS[s.op].tool}'s` : 'its'} ${lower(OPERATIONS[s.op].title)}; the step is done when the run finishes.`;
@@ -773,7 +786,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     const partial = (s?.state === 'failed' || s?.state === 'cancelled') && s.partial ? Object.values(s.partial).flat()[0] : null;
     reopenB.hidden = !partial;
     if (partial) reopenB.textContent = heldFor(partial) ? `Reopen ${partial.name}` : `Choose ${partial.name} again`;
-    if (s && !changed) {
+    if (s && !changed && !viewing) {
       const p = wf ? { title: recipeOf(wf)?.title } : plan(pending.key, pending.answers);
       onStep({ id: s.id, n: i, title, tool: PAGE_TOOL[s.op] ?? null, text: `Methodos, ${p.title}.${op.kind === 'interactive' && op.waitsFor ? ` This step is yours: it waits for ${op.waitsFor}.` : ''}`,
         link: s.op === 'place' ? { href: '#chora', words: 'Open Chora' } : null });
@@ -783,6 +796,13 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     const parked = page.parked?.();
     const row = parked && tList.querySelector(`li[data-step="${CSS.escape(parked.step)}"][data-state="done"]`);
     if (row) row.append(el('span', { className: 'track-result' }, `${parked.words} `, el('button', { type: 'button', className: 'link track-reopen', textContent: 'Show its result' })));
+    // Read-only: nothing of it can be done here; only copied, downloaded, or closed.
+    sharedEl.hidden = !viewing;
+    projectEl.hidden = !!viewing; backB.hidden = !!viewing; leaveB.hidden = !!viewing;
+    if (viewing) {
+      for (const b of [doneB, asIsB, pickB, useB, reopenB, restartB, downloadB, choraB]) b.hidden = true;
+      q(sharedEl, '#methodos-shared-words').textContent = `Read-only: “${viewing.title || shown.name || tTitle.textContent}”, shared with you through the World Historical Gazetteer, as it was last saved there (version ${viewing.version}). Nothing in it can be changed or run here: make your own copy to carry on with it, or download it as a project file.`;
+    }
     showKept();
     projectShow();
     // Focus on the tracker's heading, or, at a phone's width, where the heading is not shown, on its strip.
@@ -904,6 +924,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     if (projectSaid && !tracker.hidden) projectSaid.hidden = true;   // what was said under the banner is the tracker's to say now
     // A workflow chosen before any file has nothing to save yet; a project can be opened in its place.
     q(projectEl, '#methodos-project-save').hidden = !st; saveP.hidden = !st;
+    whgShow();
     if (!st) return;
     const own = startFiles(st);
     ownBox.closest('label').hidden = !own.length;
@@ -924,15 +945,9 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       const out = await target;
       if (!out) return;   // the save dialogue was closed
       try {
-        const mine = new Set(startFiles(record).map((r) => r.sha256));
-        const files = [], left = [];
-        for (const ref of distinct(keptBy(record))) {
-          if (!ownBox.checked && mine.has(ref.sha256)) { left.push({ ref, why: 'left-out' }); continue; }
-          const f = await outs.get(ref);
-          if (f) files.push({ ref, blob: f }); else left.push({ ref, why: 'not-kept' });
-        }
-        const r = page.review?.();
-        const { size } = await writeProject({ record, files, left, review: r ? { name: r.name, text: r.text } : null, tools: build, refuse: page.secrets?.() || [] }, (c) => out.write(c));
+        const parts = await projectParts(record);
+        const { files, left } = parts, r = parts.review;
+        const { size } = await writeProject(parts, (c) => out.write(c));
         await out.close();
         const missed = left.filter((x) => x.why === 'not-kept').map((x) => x.ref.name);
         tracker.dataset.project = name;
@@ -944,37 +959,67 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       render(false);
     });
   });
+  /**
+   * What a project of `record` holds, as writeProject() takes it: the files the workflow names that this
+   * browser keeps (the user's own unless the box is unticked), those it does not as `left`, the review
+   * open, these tools, the secrets no part may hold; and `own(ref)`, whether a file is the user's own.
+   */
+  async function projectParts(record) {
+    const mine = new Set(startFiles(record).map((r) => r.sha256));
+    const files = [], left = [];
+    for (const ref of distinct(keptBy(record))) {
+      if (!ownBox.checked && mine.has(ref.sha256)) { left.push({ ref, why: 'left-out' }); continue; }
+      const f = await outs.get(ref);
+      if (f) files.push({ ref, blob: f }); else left.push({ ref, why: 'not-kept' });
+    }
+    const r = page.review?.();
+    return { record, files, left, review: r ? { name: r.name, text: r.text } : null, tools: build, refuse: page.secrets?.() || [], own: (ref) => mine.has(ref.sha256) };
+  }
   const pickProject = () => { if (projectFile) { projectFile.value = ''; projectFile.click(); } };
   openP.addEventListener('click', pickProject);
   openBanner?.addEventListener('click', pickProject);
   projectFile?.addEventListener('change', () => {
     const [f] = projectFile.files || [];
     if (!f) return;
+    openOrAsk(f, f.name);
+  });
+  /**
+   * Open the project `blob` (a file chosen, or one from WHG: `opts`, as openProject takes them); while a
+   * workflow is open, asked first, in words, with the safe choice focused. `opts.what` names it in the question.
+   */
+  function openOrAsk(blob, name, opts = {}) {
     if (wf || pending || changed) {
-      // A workflow is open: asked first, in words, with the safe choice focused.
-      replacing = f;
+      replacing = { blob, name, opts };
       const now = wf || changed?.record;
-      replaceWords.textContent = `“${now ? now.name || recipeOf(now)?.title : RECIPES[pending.key].title}” is open. Open ${f.name} in its place? This workflow, and the files this browser keeps for it, are let go: save it as a project first to keep it.`;
+      replaceWords.textContent = `“${now ? now.name || recipeOf(now)?.title : RECIPES[pending.key].title}” is open. Open ${opts.what || name} in its place? This workflow, and the files this browser keeps for it, are let go: save it as a project first to keep it.`;
       replaceEl.hidden = false; projectEl.open = true;
+      render(false);
       q(replaceEl, '#methodos-replace-no').focus();
       return;
     }
-    chain(() => openProject(f));
-  });
-  q(replaceEl, '#methodos-replace-yes').addEventListener('click', () => { const f = replacing; replacing = null; replaceEl.hidden = true; if (f) chain(() => openProject(f)); });
+    chain(() => openProject(blob, name, opts));
+  }
+  q(replaceEl, '#methodos-replace-yes').addEventListener('click', () => { const r = replacing; replacing = null; replaceEl.hidden = true; if (r) chain(() => openProject(r.blob, r.name, r.opts)); });
   q(replaceEl, '#methodos-replace-no').addEventListener('click', () => { replacing = null; replaceEl.hidden = true; say('The project was not opened: this workflow stays as it was.'); render(false); openP.focus(); });
 
-  /** Open the project `file`: read and checked whole before anything of the workflow open is let go. */
-  async function openProject(file) {
-    tell(`Reading ${file.name}…`);
+  /**
+   * Open the project `blob` (a File, or the project of a WHG project), called `name`: read and checked whole
+   * before anything of the workflow open is let go. `whg`: it came from WHG (whg.js open(), or the copy a
+   * conflict gave), and its link is kept once it is open. `copy`: it is the user's own copy of a workflow
+   * shared from WHG ({ version, title }): it is given an id of its own, and not linked; only where it came
+   * from is kept (never the share link).
+   */
+  async function openProject(blob, name, { whg: got = null, copy = null } = {}) {
+    const file = { name };
+    tell(`Reading ${name}…`);
     const old = wf || changed?.record || null;
     const ours = new Set([...(old ? keptBy(old) : []).map((r) => r.sha256), ...(await outs.kept()).files.map((f) => f.sha256)]);
     // What a refused project may have written into this browser (any file part it names, whole or begun), and was not kept before it, goes again.
     const undo = async (parts) => outs.drop((parts || []).filter((p) => !ours.has(p.sha256)).map((p) => ({ sha256: p.sha256 })));
     let read;
     try {
-      read = await readProject(blobSource(file), {
-        name: file.name,
+      read = await readProject(blobSource(blob), {
+        name,
         // Room for its files before any is written: the browser's own estimate, with a margin (a tenth, and
         // a megabyte); held in memory (working data not kept), at most IN_MEMORY.
         room: async (bytes) => {
@@ -999,6 +1044,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       return;
     }
     const recipe = RECIPES[read.record.recipe.key];
+    const origin = read.record.id;
+    if (copy) read.record = { ...read.record, id: `${read.record.recipe.key}-${Date.now().toString(36)}` };
     const v = reconcile(read.record, recipe);
     if (v.action === 'refuse') { await undo(read.files.map((c) => c.part)); tell(`${file.name} was not opened. ${v.words}`, true); return; }
     // The new record is kept first, and only then the workflow open let go (its user's file handed over as
@@ -1012,7 +1059,17 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     chosenRefs = null;
     if (projectSaid) { projectSaid.hidden = true; projectSaid.textContent = ''; }
     const by = read.manifest.tools.version === build?.version ? '' : ` (saved by PLATO tools ${read.manifest.tools.version})`;
-    const opened = `Opened the project ${file.name}${by}, every part checked.${read.newer ? ` ${newerWords(read.manifest)}` : ''}`;
+    const what = copy ? `Your own copy of “${copy.title || read.record.name}”, shared from WHG (version ${copy.version} there): a new workflow of this browser's, not linked to the one shared, its project${by} read with every part checked.`
+      : got ? `Opened “${got.title || read.record.name}” from WHG (version ${got.version})${by}, every part checked.` : `Opened the project ${file.name}${by}, every part checked.`;
+    const opened = `${what}${read.newer ? ` ${newerWords(read.manifest)}` : ''}${(read.manifest.left || []).some((x) => x.why === 'too-large') ? ` Left out to fit WHG: ${read.manifest.left.filter((x) => x.why === 'too-large').map((x) => x.name).join(', ')}; choose ${read.manifest.left.filter((x) => x.why === 'too-large').length === 1 ? 'it' : 'them'} again where a step needs ${read.manifest.left.filter((x) => x.why === 'too-large').length === 1 ? 'it' : 'them'}.` : ''}`;
+    // What is kept of WHG beside the workflow, once it is open: its link (opened from there), or where a copy came from.
+    const linkUp = async () => {
+      const st = wf || changed?.record;
+      if (!whg || !st) return;
+      if (got) { whgLink = await whg.opened(toSave(), got, page.review?.()?.text ?? null); whgLinkFor = st.id; }
+      else if (copy) { whgLink = { origin: { workflowId: origin, version: copy.version, title: String(copy.title || '').slice(0, 300) } }; whgLinkFor = st.id; await whg.setLink(st.id, whgLink); }
+      projectShow();
+    };
     // The base address the workflow was begun under, into Options if it has none (said; nothing is run with it).
     const base = typeof read.record.answers?.base === 'string' ? read.record.answers.base : '';
     const baseSet = base && !page.base?.() ? (page.setBase?.(base), ` The base address in Options is set to ${base}, the workflow's.`) : '';
@@ -1024,7 +1081,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       changed = { action: v.action, record: read.record, words: v.words };
       await store.save(read.record);
       say(`${opened}${baseSet} ${v.words}`);
-      render(true); return;
+      render(true); await linkUp(); return;
     }
     const took = await takeUp(v, read.record, `${opened}${baseSet}${hb}`);
     if (!took) render(true); else show(strip.offsetParent ? strip : q(tracker, 'h2'));
@@ -1035,7 +1092,273 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       await page.openReview?.(new File([read.review.text], read.review.name, { type: 'application/json' }), held.length === subjects.length ? held : []);
       projectShow();
     }
+    await linkUp();
   }
+  // ---- The project in WHG's Workbench (src/methodos/whg.js; plan #34, item A1) ----------------------
+  // "Save to WHG" keeps the project there as the project file holds it (in its envelope: src/engine/
+  // workbench.js), only when asked and at a step boundary (D3), in the personal team (D4); one too large
+  // for WHG's cap goes without its largest files, which are said before saving (D1). A newer save in WHG is
+  // never saved over (D2): the copy there is offered, or this one as a new project. "Open from WHG" lists
+  // your projects there, opens one as a file is opened, and deletes one, asked in the page. "Share a
+  // read-only link" makes a link anyone can read the project with, said so beside it. Every request goes
+  // through permissions.fetch under collaborate:whg with the token in its header only; a refusal is said in
+  // words (workbench.js WORDS), and nothing kept in this browser is lost by one.
+  const whgEl = q(tracker, '#whg-project'), whgNeeds = q(tracker, '#whg-needs'), whgState = q(tracker, '#whg-state'), whgLeaves = q(tracker, '#whg-leaves');
+  const whgSaveB = q(tracker, '#whg-save'), whgOpenB = q(tracker, '#whg-open'), whgShareB = q(tracker, '#whg-share'), whgUnshareB = q(tracker, '#whg-unshare');
+  const whgChoice = q(tracker, '#whg-choice'), whgLinkEl = q(tracker, '#whg-link'), whgSaid = q(tracker, '#whg-said'), whgTokenBox = q(tracker, '#whgp-token-box');
+  const listBox = document.getElementById('whg-projects'), listUl = document.getElementById('whg-projects-list'), listSaidEl = document.getElementById('whg-projects-said');
+  const sharedEl = q(tracker, '#methodos-shared');
+  const SHARE_WARNING = 'Anyone with this link can read this workflow as it is kept in WHG: the names in it, your decisions, the reviewer’s name and any files it holds. It always shows your newest save to WHG, not the workflow as it is here now. Stop sharing, and the link opens nothing.';
+  const whenWords = (iso) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? 'before' : `on ${d.toLocaleString('en-GB', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}`; };
+  const ROLE_WORDS = { owner: 'Yours', editor: 'You can edit it', viewer: 'You can read it' };
+  let whgLink = null, whgLinkFor = null;   // the link of the workflow shown to its project in WHG (store.js), and that workflow's id
+  let planned = null;                      // what a save to WHG would leave out, for the workflow as it was measured: { key, words }
+  let askedToken = false;                  // WHG refused the token, or none was held: the section's token field is shown
+  const shareTokens = new Set();           // the share links' tokens seen in this tab: secrets that a project file refuses (page.secrets)
+  let viewing = null;                      // a workflow shared from WHG, shown read-only: { read, blob, name, title, version }
+  /** Say `words` in `where` (a warning if `warn`), with `extra` (a link) after them; nothing hides it. */
+  const sayIn = (where) => (words, warn = false, extra = null) => {
+    where.replaceChildren(); where.hidden = !words; where.classList.toggle('warn', !!warn);
+    if (words) where.append(words);
+    if (extra) where.append(' ', extra);
+  };
+  const whgSay = sayIn(whgSaid), listSay = sayIn(listSaidEl);
+  /** While WHG asks for a pause (429): the seconds counted down where the request was asked, then it is made once more. */
+  const pause = (sayIt) => async (secs) => {
+    for (let i = secs; i > 0; i--) { sayIt(`WHG asks for a pause: trying again in ${i} ${i === 1 ? 'second' : 'seconds'}…`); await new Promise((r) => setTimeout(r, 1000)); }
+  };
+  /** A refusal, in words, where it was asked: the token field opened for a token refused or missing, WHG's page named for its beta. */
+  function whgFailed(e, action, sayIt = whgSay) {
+    if (e?.kind === 'token' || e?.kind === 'unauthenticated') { askedToken = true; whgTokenBox.hidden = false; projectEl.open = true; page.askToken?.(); }
+    const link = e?.kind === 'beta' ? el('a', { href: ENROL, target: '_blank', rel: 'noopener noreferrer', textContent: 'WHG’s development page (opens in a new tab)' }) : null;
+    sayIt(whyWords(e, action), true, link);
+  }
+  function whgReset() { whgChoice.hidden = true; whgLinkEl.hidden = true; whgSay(null); planned = null; }
+  /** The WHG part of the folded "Save, open or share the project", drawn with it (projectShow). */
+  function whgShow() {
+    whgEl.hidden = !whg;
+    if (!whg) return;
+    const st = viewing ? null : wf || changed?.record;
+    page.collaborate?.(whgNeeds);
+    whgTokenBox.hidden = !(askedToken || !page.hasToken?.());
+    if (page.hasToken?.() && !askedToken) whgTokenBox.hidden = true;
+    whgSaveB.hidden = !st; whgShareB.hidden = !st;
+    whgSaveB.disabled = !!wf && !atBoundary(wf);
+    if (!st) { whgState.textContent = 'Open a project kept in WHG, or save a workflow there once one is begun.'; whgLeaves.hidden = true; whgUnshareB.hidden = true; return; }
+    if (whgLinkFor !== st.id) {
+      whgLinkFor = st.id; whgLink = null; whgReset();
+      whg.linkFor(st.id).then((l) => { if (whgLinkFor === st.id) { whgLink = l; whgShow(); } }).catch(() => {});
+    }
+    const l = whgLink?.projectId ? whgLink : null;
+    whgUnshareB.hidden = !l?.shared;
+    whgShareB.textContent = l?.shared ? 'Show the read-only link' : 'Share a read-only link';
+    if (!projectEl.open) return;   // what follows is measured only while it is shown
+    const now = stateOf(toSave(), page.review?.()?.text ?? null);
+    whgState.textContent = !l
+      ? `Not saved to WHG.${whgLink?.origin ? ` This is your own copy of “${whgLink.origin.title || 'a workflow'}”, shared from WHG (version ${whgLink.origin.version} there), and is not linked to it.` : ''} Saved there, it is kept in your own workbench, as the project file holds it.`
+      : `${l.state === now ? `Saved to WHG ${whenWords(l.savedAt)}, as version ${l.version}.` : `Not saved to WHG since ${whenWords(l.savedAt)}: the workflow has changed since (WHG has version ${l.version}).`}${l.shared ? ' Shared: anyone with its link can read it.' : ''}`;
+    planLeaves(st);
+  }
+  /** What a save to WHG would leave out now, measured as it would be sent (whg.js fit()), said before saving; once for each state of the workflow. */
+  function planLeaves(st) {
+    if (wf && !atBoundary(wf)) return;
+    const key = `${st.id}|${st.saved}|${ownBox.checked}|${page.review?.()?.name || ''}|${page.review?.()?.text?.length || 0}`;
+    if (planned?.key === key) { whgLeaves.textContent = planned.words || ''; whgLeaves.hidden = !planned.words; return; }
+    planned = { key, words: null };
+    const record = toSave();
+    projectParts(record).then((parts) => whg.fit(parts, whgLink?.projectId ? whgLink : null)).then((f) => {
+      const n = f.tooLarge.length;
+      return n ? `Too large for WHG with every file: ${f.tooLarge.map((r) => r.name).join(', ')} will not go to WHG (it takes at most 2 MB a project). The workflow${page.review?.() ? ' and the review' : ''} will, and ${n === 1 ? 'the file left out is' : 'each file left out is'} listed in it, to be chosen again where a step needs ${n === 1 ? 'it' : 'them'}.` : '';
+    }, (e) => (e instanceof WorkbenchError || e instanceof ProjectError ? e.message : '')).then((words) => {
+      if (planned?.key !== key) return;
+      planned.words = words; whgLeaves.textContent = words; whgLeaves.hidden = !words;
+    });
+  }
+  /** A choice in words, with its buttons ([words, fn], the first focused); each done in its turn. */
+  function whgAsk(words, buttons) {
+    q(whgChoice, '#whg-choice-words').textContent = words;
+    const row = q(whgChoice, '.whg-choice-buttons');
+    row.replaceChildren(...buttons.map(([w, fn], i) => { const b = el('button', { type: 'button', textContent: w }); b.dataset.choice = String(i); b.onclick = () => { whgChoice.hidden = true; chain(fn); }; return b; }));
+    whgChoice.hidden = false; projectEl.open = true;
+    row.querySelector('button')?.focus();
+  }
+  whgSaveB.addEventListener('click', () => {
+    const record = toSave();
+    if (!record || !whg || viewing) return;
+    if (wf && !atBoundary(wf)) { whgSay('A step is running: save to WHG once it has finished.', true); return; }
+    whgChoice.hidden = true;
+    chain(async () => {
+      const link = await whg.linkFor(record.id);
+      if (link?.projectId) { await whgSave(record, link); return; }
+      // No link here: a project in WHG may hold this workflow already (saved from another browser), to save to rather than beside.
+      whgSay('Looking in your projects in WHG for this workflow…');
+      let found;
+      try { found = await whg.matches(record, pause(whgSay)); } catch (e) { whgFailed(e, 'save'); return; }
+      if (!found.length) { await whgSave(record, null); return; }
+      const [m] = found;
+      whgSay(null);
+      whgAsk(`Your projects in WHG hold this workflow already: “${m.title}”, version ${m.version}, saved ${whenWords(m.updated)}. Save to it, or as a new WHG project?`,
+        [['Save to it', () => whgSave(record, { projectId: m.id, version: m.version, title: m.title })], ['Save as a new WHG project', () => whgSave(record, null)]]);
+    });
+  });
+  /** Save `record` to WHG: to `to` (its link, or a match), or as a new project. A newer save in WHG is offered, never saved over. */
+  async function whgSave(record, to) {
+    whgSay(to ? 'Saving to WHG…' : 'Saving to WHG, as a new project in your workbench…');
+    let res;
+    try {
+      const parts = await projectParts(record);
+      res = await whg.save({ project: parts, to, review: parts.review?.text ?? null, shared: !!(to && whgLink?.projectId === to.projectId && whgLink.shared), wait: pause(whgSay) });
+    } catch (e) {
+      if (e instanceof WorkbenchError && e.kind === 'conflict') {
+        whgSay(null);
+        whgAsk(`WHG has a newer save of this workflow (version ${e.version}), perhaps your own from another browser, so this one was not saved over it: nothing was changed, here or there.`, [
+          ['Open the copy on WHG', async () => {
+            let got;
+            try { got = { ...fromSnapshot(e.snapshot, to.title || whgLink?.title || record.name), projectId: to.projectId, version: e.version, shared: !!whgLink?.shared }; } catch (x) { whgFailed(x, 'open'); return; }
+            openOrAsk(got.blob, got.name, { whg: got, what: `WHG's copy (version ${e.version})` });
+          }],
+          ['Save mine as a new WHG project', () => whgSave(record, null)],
+        ]);
+        return;
+      }
+      if (e?.kind === 'gone') { whgLink = await whg.linkFor(record.id); whgLinkFor = record.id; }
+      whgFailed(e, 'save'); render(false); return;
+    }
+    whgLink = res.link; whgLinkFor = record.id; askedToken = false;
+    const left = res.tooLarge.map((r) => r.name), one = left.length === 1;
+    whgSay(`Saved to WHG${res.created ? ', as a new project in your workbench' : ''} (version ${res.link.version}, ${fmtBytes(res.size)}).${left.length ? ` Not in it, as too large for WHG: ${left.join(', ')}; whoever opens it chooses ${one ? 'it' : 'them'} again where a step needs ${one ? 'it' : 'them'}.` : ''}`);
+    render(false);
+  }
+
+  // "Open from WHG": your projects there, each to open or (yours) delete; shown below the tracker, or alone.
+  function openFromWhg() {
+    if (!whg) return;
+    listBox.hidden = false; listUl.replaceChildren(); listSay('Asking WHG for your projects…');
+    show(document.getElementById('whg-projects-h'));
+    chain(async () => {
+      let list;
+      try { list = await whg.list(pause(listSay)); } catch (e) { whgFailed(e, 'list', listSay); return; }
+      listSay(list.length ? `${list.length} ${list.length === 1 ? 'project' : 'projects'} of PLATO tools in your WHG workbench, the newest first.`
+        : 'You have no PLATO tools projects in WHG yet. “Save to WHG”, under a workflow’s “Save, open or share the project”, keeps one there.');
+      listUl.replaceChildren(...list.map(projectItem));
+    });
+  }
+  function projectItem(p) {
+    const li = el('li');
+    li.dataset.project = p.id; li.dataset.role = p.role;
+    const openB = el('button', { type: 'button', className: 'whg-open-one', textContent: 'Open' });
+    openB.addEventListener('click', () => chain(async () => {
+      listSay(`Opening “${p.title}” from WHG…`);
+      let got;
+      try { got = await whg.open(p.id, pause(listSay)); } catch (e) { whgFailed(e, 'open', listSay); return; }
+      listSay(null); listBox.hidden = true;
+      if (viewing) { viewing = null; render(false); }
+      openOrAsk(got.blob, got.name, { whg: got, what: `“${p.title}” from WHG` });
+    }));
+    li.append(el('span', { className: 'whg-title', textContent: p.title || 'Untitled' }),
+      el('span', { className: 'whg-about', textContent: `${ROLE_WORDS[p.role] || 'In a team of yours'}; saved ${whenWords(p.updated)}, version ${p.version}${p.shared ? '; shared' : ''}.` }), openB);
+    if (p.role === 'owner') {
+      const delB = el('button', { type: 'button', className: 'whg-delete', textContent: 'Delete' });
+      delB.addEventListener('click', () => confirmDelete(li, p, delB));
+      li.append(' ', delB);
+    }
+    return li;
+  }
+  /** Delete a project from WHG, asked first in the page (never in a browser's dialogue), "Keep it" focused. */
+  function confirmDelete(li, p, delB) {
+    li.querySelector('.whg-confirm')?.remove();
+    const yes = el('button', { type: 'button', className: 'whg-delete-yes', textContent: 'Delete it' }), no = el('button', { type: 'button', className: 'whg-delete-no', textContent: 'Keep it' });
+    const box = el('span', { className: 'whg-confirm' }, `Delete “${p.title}” from WHG? This cannot be undone${p.shared ? ', and its share link stops working' : ''}; a workflow open in a browser stays there. `, yes, ' ', no);
+    li.append(box); delB.disabled = true; no.focus();
+    no.addEventListener('click', () => { box.remove(); delB.disabled = false; delB.focus(); });
+    yes.addEventListener('click', () => chain(async () => {
+      try { await whg.remove(p.id, pause(listSay)); } catch (e) { whgFailed(e, 'delete', listSay); return; }
+      // A workflow here linked to it is linked no longer.
+      const st = wf || changed?.record;
+      if (st && whgLink?.projectId === p.id) { await whg.forget(st.id); whgLink = await whg.linkFor(st.id); }
+      li.remove();
+      listSay(`Deleted “${p.title}” from WHG.`);
+      if (!listUl.children.length) listSay(`Deleted “${p.title}” from WHG. You have no other PLATO tools projects there.`);
+      document.getElementById('whg-projects-close').focus();
+      render(false);
+    }));
+  }
+  whgOpenB.addEventListener('click', openFromWhg);
+  document.getElementById('whg-open-banner')?.addEventListener('click', openFromWhg);
+  document.getElementById('whg-projects-close').addEventListener('click', () => { listBox.hidden = true; listSay(null); (tracker.hidden ? backTo() : whgOpenB.focus()); });
+
+  // "Share a read-only link": the project as last saved to WHG, readable by anyone with the link.
+  whgShareB.addEventListener('click', () => chain(async () => {
+    const st = wf || changed?.record;
+    if (!st || !whg) return;
+    whgSay('Asking WHG for a read-only link…');
+    let token;
+    try { token = await whg.share(st.id, pause(whgSay)); } catch (e) { whgLink = await whg.linkFor(st.id); whgFailed(e, 'share'); render(false); return; }
+    shareTokens.add(token);
+    whgLink = await whg.linkFor(st.id);
+    const url = q(whgLinkEl, '#whg-link-url');
+    url.value = shareLink(page.shareBase?.() || location.href, token);
+    q(whgLinkEl, '#whg-link-words').textContent = SHARE_WARNING;
+    whgLinkEl.hidden = false; whgSay(null);
+    render(false);
+    url.focus(); url.select();
+  }));
+  q(whgLinkEl, '#whg-copy').addEventListener('click', () => {
+    const url = q(whgLinkEl, '#whg-link-url');
+    const done = () => whgSay('The link is copied.');
+    const by = () => { url.focus(); url.select(); whgSay('Copy it from the box: it is selected.'); };
+    try { navigator.clipboard.writeText(url.value).then(done, by); } catch { by(); }
+  });
+  whgUnshareB.addEventListener('click', () => chain(async () => {
+    const st = wf || changed?.record;
+    if (!st || !whg) return;
+    try { await whg.unshare(st.id, pause(whgSay)); } catch (e) { whgFailed(e, 'share'); return; }
+    whgLink = await whg.linkFor(st.id);
+    whgLinkEl.hidden = true; q(whgLinkEl, '#whg-link-url').value = '';
+    whgSay('Sharing stopped: its link opens nothing now. Sharing it again makes a new link.');
+    render(false); whgShareB.focus();
+  }));
+  // The token given (or forgotten) in the section's field, or anywhere: the field is drawn again.
+  const tokenGiven = () => { if (page.hasToken?.()) askedToken = false; projectShow(); };
+
+  /**
+   * A share link (#whg-shared=<token>, read and removed from the address by the host): the workflow it
+   * opens, read from WHG with no token, checked as a project file is (readProject, nothing written), and
+   * shown read-only in the tracker, every action off but "Make my own copy", "Download .platoproj" and
+   * "Close". Opened again, it shows WHG's newest save, never a second copy.
+   */
+  function viewShared(token) {
+    if (!whg) return;
+    shareTokens.add(token);
+    // After a workflow kept from before is taken up, so that what is said of the shared one is not said over.
+    const go = () => chain(async () => {
+      if (viewing) { viewing = null; render(false); }   // another link: the one shown before is closed, whatever this one opens
+      tell('Reading the shared workflow from WHG…');
+      let got;
+      try { got = await whg.shared(token, pause((w) => tell(w))); } catch (e) { tell(whyWords(e, 'shared'), true); return; }
+      let read;
+      try { read = await readProject(blobSource(got.blob), { name: got.name }); } catch (e) { tell(`The shared workflow was not opened. ${e.message || e}`, true); return; }
+      viewing = { read, blob: got.blob, name: got.name, title: got.title, version: got.version };
+      if (projectSaid) { projectSaid.hidden = true; projectSaid.textContent = ''; }
+      say(null); render(true);
+      q(sharedEl, '#methodos-shared-copy').focus();
+    });
+    takenUp.then(go, go);
+  }
+  q(sharedEl, '#methodos-shared-copy').addEventListener('click', () => {
+    const v = viewing;
+    if (!v) return;
+    viewing = null; render(false);
+    openOrAsk(v.blob, v.name, { copy: { version: v.version, title: v.title }, what: `your own copy of “${v.title || v.read.record.name}”` });
+  });
+  q(sharedEl, '#methodos-shared-download').addEventListener('click', () => {
+    if (!viewing) return;
+    const a = el('a', { href: URL.createObjectURL(viewing.blob), download: viewing.name, rel: 'noopener' });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60_000);
+  });
+  q(sharedEl, '#methodos-shared-close').addEventListener('click', () => { viewing = null; say(null); render(false); if (tracker.hidden) backTo(); else show(q(tracker, 'h2')); });
+
   return { open, chosen, placed, began, ended, dropped, keepChanged, detected, baseChanged, id: () => wf?.id || null, following: () => !!(wf || pending || changed), takenUp: () => takenUp,
-    scope: scopeNow, setScope, scoped: () => !!(wf || pending || changed) };
+    scope: scopeNow, setScope, scoped: () => !!(wf || pending || changed), viewShared, openFromWhg, shareTokens: () => [...shareTokens], tokenGiven };
 }

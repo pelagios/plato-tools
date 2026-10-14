@@ -50,7 +50,7 @@ export function workbenchFake({ origins = ['https://pelagios.org'], self = 'http
   const users = new Map(), tokens = new Map(), teams = new Map(), projects = new Map(), budget = new Map();
   let nextUser = 1, nextTeam = 1;
   const log = [];
-  const cfg = { origins: [...origins], rate, bodyMax };
+  const cfg = { origins: [...origins], rate, bodyMax, retryAfter: null };   // retryAfter: a fixed wait for a 429, for the browser checks (WHG's is the rest of its minute)
 
   function addUser({ token, name = `user${nextUser}`, beta = true, active = true } = {}) {
     const u = { id: nextUser++, name, beta, active };
@@ -218,7 +218,7 @@ export function workbenchFake({ origins = ['https://pelagios.org'], self = 'http
         const used = (budget.get(k) || 0) + 1;
         budget.set(k, used);
         if (used > cfg.rate) {
-          const retry = Math.max(1, Math.floor((window + 1) * 60 - now));
+          const retry = cfg.retryAfter ?? Math.max(1, Math.floor((window + 1) * 60 - now));
           return { ...err(429, `rate limit exceeded: at most ${cfg.rate} Workbench requests per minute per token; retry after ${retry}s`, 'rate_limited', { retry_after: retry }), headers: { 'Content-Type': 'application/json', 'Retry-After': String(retry) } };
         }
       }
@@ -259,13 +259,13 @@ export function workbenchFake({ origins = ['https://pelagios.org'], self = 'http
 
 // ---- As a server, for the browser checks (e2e/app_test.py) -------------------------------------------
 // POST /__fake/<what> (JSON) sets it up and reads it back: user {token, beta?, active?}; config {origins?,
-// rate?, bodyMax?}; log (the requests so far, and clears them if {clear: true}); projects (every project,
+// rate?, bodyMax?, retryAfter?}; log (the requests so far, and clears them if {clear: true}); projects (every project,
 // with its snapshot); push {id, snapshot} (another browser's save); share {id} / unshare {id} as the owner
 // would; create {token, title, snapshot, doc_type} (a project made elsewhere); newMinute.
 export function serve(fake, port, host = '127.0.0.1') {
   const control = {
     user: (b) => ({ id: fake.addUser(b).id }),
-    config: (b) => { for (const k of ['origins', 'rate', 'bodyMax']) if (b[k] !== undefined) fake.cfg[k] = b[k]; return { ...fake.cfg }; },
+    config: (b) => { for (const k of ['origins', 'rate', 'bodyMax', 'retryAfter']) if (b[k] !== undefined) fake.cfg[k] = b[k]; return { ...fake.cfg }; },
     log: (b) => { const out = fake.log.map((x) => ({ ...x, body: x.body.length > 4096 ? `${x.body.slice(0, 4096)}…` : x.body, size: x.body.length })); if (b.clear) fake.log.length = 0; return out; },
     projects: () => [...fake.projects.values()].map((p) => ({ id: p.id, title: p.title, version: p.version, doc_type: p.doc_type, shared: !!p.public_token, token: p.public_token, snapshot: p.snapshot, team: p.team })),
     push: (b) => ({ version: fake.pushAs(b.id, b.snapshot) }),
@@ -273,6 +273,7 @@ export function serve(fake, port, host = '127.0.0.1') {
     share: (b) => { const p = fake.projects.get(b.id); if (!p.public_token) p.public_token = randomUUID(); return { token: p.public_token }; },
     unshare: (b) => { fake.projects.get(b.id).public_token = null; return { ok: true }; },
     newMinute: () => { fake.newMinute(); return { ok: true }; },
+    remove: (b) => { fake.projects.delete(b.id); return { ok: true }; },
   };
   const server = createServer((req, res) => {
     const chunks = [];
