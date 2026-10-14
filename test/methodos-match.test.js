@@ -328,3 +328,52 @@ test('a match on another file than the other dataset chosen is refused: the file
   assert.ok(![...host.store.keys()].some((k) => k.endsWith('.krisis.json')), 'no work file was written');
   assert.equal(asked.length, 1, 'nothing went to the network but the one call made to show the stub throws');
 });
+
+// ---- the review: a candidate of another kind ranked after the others, and one accepted twice said so ------------
+test('in the review, a candidate of the other dataset whose kind of place conflicts with yours (a lake for a village) comes after the others, marked; which candidates are suggested does not change', async () => {
+  const { candidatesOf, kindOfCandidate } = await import('../src/engine/krisis/work.js');
+  const { ALGORITHM } = await import('../src/engine/krisis/match.js');
+  const a = await begun();
+  const work = await workOf(a.host, a.state);
+  const order = (w) => candidatesOf(w, `${MINE}windermere`).map((c) => c.candidate_candidate.slice(OTHER.length));
+  // The match suggests the lake first (nearer, the same name); the review puts the town first, and says why of the lake.
+  assert.deepEqual(work.candidates.filter((c) => c.candidate_source === `${MINE}windermere`).map((c) => c.candidate_candidate.slice(OTHER.length)), ['windermere-lake', 'windermere']);
+  assert.deepEqual(order(work), ['windermere', 'windermere-lake']);
+  const lake = work.candidates.find((c) => c.candidate_candidate === `${OTHER}windermere-lake`), town = work.candidates.find((c) => c.candidate_candidate === `${OTHER}windermere`);
+  assert.deepEqual([kindOfCandidate(work, lake).fit, kindOfCandidate(work, lake).candidate.id, kindOfCandidate(work, lake).place.label], ['conflict', 'lake', 'village']);
+  assert.equal(kindOfCandidate(work, town).fit, 'other', 'a town for a village does not conflict');
+  // The same review with your places saying nothing of their kind keeps the match's order: the check above can fail.
+  const plain = JSON.parse(JSON.stringify(work));
+  for (const p of Object.values(plain.places)) delete p.types;
+  assert.deepEqual(order(plain), ['windermere-lake', 'windermere']);
+  assert.equal(kindOfCandidate(plain, lake).fit, 'unknown');
+  // Nothing about the match changed: its algorithm, and the pairs it suggests (as the walk above has them).
+  assert.equal(ALGORITHM, 'krisis-names 7');
+  assert.equal(work.algorithm_version, ALGORITHM);
+  // A lookup's candidates keep the order the lookup ranked them in (lookup.js), after the other dataset's.
+  const w = JSON.parse(JSON.stringify(work));
+  w.candidates.push({ ...lake, id: 'g1', lookup: 'l1', candidate_candidate: 'https://w3id.org/whg/id/place:gn:1' }, { ...town, id: 'g2', lookup: 'l1', candidate_candidate: 'https://w3id.org/whg/id/place:gn:2' });
+  assert.deepEqual(candidatesOf(w, `${MINE}windermere`).map((c) => c.id).slice(2), ['g1', 'g2']);
+});
+
+test('in the review, a place of the other dataset already accepted for another of yours is said to be, and can still be accepted: never refused', async () => {
+  const { acceptedFor } = await import('../src/engine/krisis/work.js');
+  const { review: W } = await import('../src/engine/words.js');
+  const a = await begun();
+  const work = await workOf(a.host, a.state);
+  const [newton, neuton] = ['newton', 'neuton'].map((p) => work.candidates.find((c) => c.candidate_source === `${MINE}${p}`));
+  assert.equal(neuton.candidate_candidate, newton.candidate_candidate, 'the other Newton is a candidate for both');
+  // Before any decision, nothing is said (the presence follows, on the same candidate).
+  assert.deepEqual(acceptedFor(work, neuton), []);
+  decide(work, newton.id, 'match', { identityType: 'closeMatch', at: AT });
+  assert.deepEqual(acceptedFor(work, neuton), [`${MINE}newton`]);
+  assert.equal(W.acceptedFor(acceptedFor(work, neuton).map((iri) => work.places[iri].label)), 'Already accepted for Newton.');
+  assert.deepEqual(acceptedFor(work, newton), [], 'not of itself');
+  // "Not this one" or "Different places" for the first does not count; and it never blocks the second.
+  const other = JSON.parse(JSON.stringify(work));
+  decide(other, newton.id, 'not-this', { at: AT });
+  assert.deepEqual(acceptedFor(other, neuton), []);
+  decide(work, neuton.id, 'match', { identityType: 'closeMatch', at: AT });
+  assert.equal(work.candidates.find((c) => c.id === neuton.id).decision.kind, 'match');
+  assert.deepEqual(acceptedFor(work, newton), [`${MINE}neuton`]);
+});

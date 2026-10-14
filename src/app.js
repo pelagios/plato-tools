@@ -12,7 +12,7 @@ import { splitMatching } from './engine/hermes/cluster.js';
 import { review as W, POOL_BUSY, POOL_STUCK, PREVIEW_WORDS, CANCEL_RELEASING, CHORA_HANDOVER } from './engine/words.js';
 const REVIEW_WORDS = W;   // the review's words, where W names the words for the columns
 import { readable } from './engine/input.js';
-import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions, flag, noteOn, setRowState } from './engine/krisis/work.js';
+import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions, flag, noteOn, setRowState, kindOfCandidate, acceptedFor } from './engine/krisis/work.js';
 import { QUALIFIER_LISTS } from './engine/krisis/qualifiers.js';
 import { exportCandidates, readCandidateSet, serialiseCandidateSet } from './engine/krisis/candidates.js';
 import { datasetAddress, baseDiffers } from './engine/methodos/containment.js';
@@ -1526,6 +1526,18 @@ function restoreTyped(typed) {
     if (t.focused) { el.focus({ preventScroll: true }); try { el.setSelectionRange(t.start, t.end); } catch {} }
   }
 }
+/**
+ * A candidate of the other dataset: why it was ranked down, when its kind of place conflicts with yours
+ * (work.js kindOfCandidate), and the other places of yours it is already accepted for (acceptedFor). Neither
+ * holds a decision back.
+ */
+function otherHtml(c) {
+  const fit = kindOfCandidate(work, c);
+  const yours = fit.place && (fit.place.label || fit.place.id), theirs = fit.candidate && fit.candidate.id;
+  const also = acceptedFor(work, c).map((iri) => work.places[iri]?.label || iri);
+  return (fit.fit === 'conflict' ? `<p class="kind-why warn" data-fit="conflict">${escapeHtml(W.kindConflict(theirs, yours))}</p>` : '')
+    + (also.length ? `<p class="accepted-for">${escapeHtml(W.acceptedFor(also))}</p>` : '');
+}
 function candidateHtml(c, i) {
   const o = c.other || (Object.hasOwn(work.places, c.candidate_candidate) ? work.places[c.candidate_candidate] : {}), d = c.decision, id = escapeHtml(c.id);
   const btn = (act, text, key) => `<button type="button" data-act="${act}" data-id="${id}" aria-pressed="${d?.kind === act}">${text}${i === current && key ? ` <kbd>${key}</kbd>` : ''}</button>`;
@@ -1533,7 +1545,7 @@ function candidateHtml(c, i) {
     + `<h4><span class="n">${i + 1}</span>${escapeHtml(o.label || c.candidate_candidate)}</h4>`
     + (W.names(o.label, o.names) ? `<p>${escapeHtml(W.names(o.label, o.names))}</p>` : '')
     + `<p class="facts">${escapeHtml(W.facts(c))}; ${escapeHtml(W.point(o.point))}</p>`
-    + (c.lookup ? gazetteerHtml(c) + guardHtml(c) : '')
+    + (c.lookup ? gazetteerHtml(c) + guardHtml(c) : otherHtml(c))
     + `<p class="iri">${escapeHtml(c.candidate_candidate)}</p>`
     + `<p class="decision">${escapeHtml(W.decision(d))}</p>`
     + `<div class="acts">${btn('match', 'Same place', 'a')}${btn('not-this', 'Not this one', 'n')}${btn('distinct', 'Different places', 'd')}`

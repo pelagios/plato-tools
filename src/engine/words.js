@@ -349,6 +349,10 @@ export const review = {
     : d.kind === 'not-this' ? 'Decided: not this one'
     : `Decided: different places, because ${d.basis}`,
   candidates: (n) => (n ? `${n === 1 ? 'One candidate' : `${n} candidates`} in the other dataset:` : 'No candidates in the other dataset.'),
+  /** A place of the other dataset already accepted as the same as another of yours (work.js acceptedFor): said, never refused. */
+  acceptedFor: (labels) => `Already accepted for ${labels.join(', ')}.`,
+  /** A candidate of the other dataset whose kind of place conflicts with yours (work.js kindOfCandidate): ranked after the others, never left out. */
+  kindConflict: (theirs, yours) => `Ranked down: ${theirs}, where yours is ${yours}; after the other candidates. Decide on it yourself.`,
   basisLabel: 'Why are these different places? Say what shows it: this is recorded with the attestation.',
   basisNeeded: 'Say why they are different places before recording it.',
   none: 'No matches were suggested, so there is nothing to review. With a lower threshold for how alike names must be, or a greater distance, there may be some.',

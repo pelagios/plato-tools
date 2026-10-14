@@ -66,6 +66,7 @@ import { REGION_WORDS } from '../words.js';
 import { fileSha256 } from './digest.js';
 import { qualifierIds } from './qualifiers.js';
 import { isWhg, WHG_ENDPOINT } from '../gazetteer/index.js';
+import { kindFit, candidateTypes } from './kinds.js';
 
 /**
  * A reconciliation service's address as the work file records it: any of WHG's (www, a trailing slash)
@@ -390,13 +391,30 @@ export function decide(work, candidateId, kind, { identityType = 'exactMatch', b
 
 /** The subject places under review, in order (the cursor counts along this list). */
 export const reviewPlaces = (work) => Object.keys(work.places);
-/** One subject place's candidates, best first. */
+/**
+ * How a candidate of another dataset stands, by its kind of place, to the place it is a candidate for
+ * (kinds.js kindFit: 'match', 'other', 'unknown' or 'conflict'), from the kinds both datasets give.
+ */
+export const kindOfCandidate = (work, c) => kindFit(work.places[c.candidate_source], candidateTypes(c));
+/**
+ * One subject place's candidates, best first. Of the other dataset's, one whose kind of place conflicts
+ * with the place's own (a lake for a village: kindOfCandidate) comes after the rest, as a lookup's does
+ * (lookup.js rankGazetteer); it is never left out, and which candidates the match suggests is unchanged.
+ */
 export const candidatesOf = (work, iri) => {
   const mine = work.candidates.filter((c) => c.candidate_source === iri);
-  const local = mine.filter((c) => !c.lookup).sort((a, b) => b.similarity_score - a.similarity_score || (a.distance_km ?? Infinity) - (b.distance_km ?? Infinity));
+  const clash = new Map(mine.filter((c) => !c.lookup).map((c) => [c.id, Number(kindOfCandidate(work, c).fit === 'conflict')]));
+  const local = mine.filter((c) => !c.lookup).sort((a, b) => clash.get(a.id) - clash.get(b.id) || b.similarity_score - a.similarity_score || (a.distance_km ?? Infinity) - (b.distance_km ?? Infinity));
   // Krisis: gazetteer lookup. A lookup's candidates keep the order lookup.js ranked them in (distance first), after the local ones.
   return [...local, ...mine.filter((c) => c.lookup)];
 };
+/**
+ * The other places of the review for which the reviewer has accepted this candidate's place as the same
+ * ("Same place"), by address, in the review's order: a place of the other dataset accepted for two of
+ * yours is said, never refused (two of your places may be one).
+ */
+export const acceptedFor = (work, c) => [...new Set(work.candidates.filter((x) => x.id !== c.id && x.candidate_candidate === c.candidate_candidate
+  && x.candidate_source !== c.candidate_source && x.decision?.kind === 'match').map((x) => x.candidate_source))];
 /** A place is reviewed once any of its candidates has a decision. */
 export const isReviewed = (work, iri) => work.candidates.some((c) => c.candidate_source === iri && c.decision);
 export function reviewProgress(work) {
