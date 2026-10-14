@@ -1,0 +1,102 @@
+{
+  "names": [
+    {
+      "toponym": "Fort Du Quesne",
+      "language": "en"
+    }
+  ],
+  "geometries": [
+    {
+      "geojson": {
+        "type": "Point",
+        "coordinates": [
+          -65.4577681,
+          58.6636364
+        ]
+      },
+      "reprPoint": [
+        -65.4577681,
+        58.6636364
+      ],
+      "role": "https://w3id.org/plato#RepresentativePoint",
+      "spatialPrecision": [
+        "approximate"
+      ]
+    },
+    {
+      "geojson": {
+        "type": "Point",
+        "coordinates": [
+          -64.5720568,
+          58.9452475
+        ]
+      },
+      "reprPoint": [
+        -64.5720568,
+        58.9452475
+      ],
+      "role": "https://w3id.org/plato#LabelAnchor"
+    }
+  ],
+  "timespans": [
+    {
+      "startEarliest": "1764",
+      "endLatest": "1764",
+      "sourceLabel": "[ca. 1764]"
+    }
+  ],
+  "types": [
+    {
+      "label": "fort",
+      "identifier": "http://vocab.getty.edu/aat/300006909"
+    }
+  ],
+  "contributor": {
+    "name": "Ada Surveyor"
+  },
+  "created": "2026-10-14T09:00:00Z",
+  "citations": [
+    {
+      "source": {
+        "@id": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/manifest",
+        "title": "A general map of North America; in which is express'd the several new roads, forts, engagements, &c. taken from actual surveys and observations made in the army employ'd there, from the year 1754, to 1761",
+        "authorityType": "source",
+        "licence": "https://creativecommons.org/publicdomain/mark/1.0/",
+        "citation": "Public Domain/No known restrictions on use. Contact host institution to download image. Contact host institution for more information.",
+        "timespan": {
+          "startEarliest": "1764",
+          "endLatest": "1764",
+          "sourceLabel": "[ca. 1764]"
+        }
+      },
+      "locator": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/8623qf00m#xywh=7307,2857,66,66",
+      "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+    },
+    {
+      "source": {
+        "@id": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/manifest",
+        "title": "A general map of North America; in which is express'd the several new roads, forts, engagements, &c. taken from actual surveys and observations made in the army employ'd there, from the year 1754, to 1761",
+        "authorityType": "source",
+        "licence": "https://creativecommons.org/publicdomain/mark/1.0/",
+        "citation": "Public Domain/No known restrictions on use. Contact host institution to download image. Contact host institution for more information.",
+        "timespan": {
+          "startEarliest": "1764",
+          "endLatest": "1764",
+          "sourceLabel": "[ca. 1764]"
+        }
+      },
+      "locator": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/8623qf00m#xywh=7417,2797,66,66",
+      "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+    },
+    {
+      "source": {
+        "@id": "https://annotations.allmaps.org/maps/56425c69f9cd4f1b",
+        "title": "Georeference of A general map of North America; in which is express'd the several new roads, forts, engagements, &c. taken from actual surveys and observations made in the army employ'd there, from the year 1754, to 1761, made in Allmaps",
+        "authorityType": "source",
+        "derivedFrom": "https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/manifest"
+      },
+      "citationFunction": "http://purl.org/spar/cito/usesMethodIn"
+    }
+  ],
+  "notes": "Georeferenced through https://annotations.allmaps.org/maps/56425c69f9cd4f1b (thin plate spline, 22 control points), retrieved 2026-10-14T08:00:00Z. On canvas https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/canvas/8623qf00m of manifest https://ark.digitalcommonwealth.org/ark:/50959/ks65px29g/manifest. Annotation version https://annotations.allmaps.org/maps/56425c69f9cd4f1b@a6d3c486366af594, modified 2025-02-26T13:27:42.116Z. The georeference passes through its control points exactly, so its error elsewhere is not estimated. Traced by hand from a georeferenced historical map at zoom 13 in PLATO tools (Chora)."
+}

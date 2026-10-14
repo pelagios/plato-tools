@@ -344,6 +344,86 @@ export async function admit(resolved, { fetchJson, allowed, enforced }) {
   };
 }
 
+// ---- The picker: one map, from what was pasted to a map admitted ------------------------------------
+// The georeferenced-map picker is one component, for every page that shows a map (Chora's "Historical maps";
+// a later "Make an open map", #37): its form (pickerForm), its one step (pickMap: what was pasted, a map kept, or
+// one chosen from a page of several, to a map admitted, or the offer to look for a georeference or georeference
+// it in the Allmaps Editor), and what it says of the last map asked for (pickerStatus). Permissions, the layer
+// the map goes on and what is kept stay the page's: pickMap throws NeedPermission, NeedChoice and the rest as the
+// steps above throw them, and the page says them.
+
+/** The picker's form: a box for a georeference or an address, and its button; ids under `prefix` (Chora's: 'chora'). */
+export const pickerForm = (prefix = 'chora') => `<form id="${prefix}-map-form">
+        <label for="${prefix}-map-input">A georeference (a IIIF Georeference Annotation), or the address of one (Allmaps), of a IIIF manifest, or of a IIIF image</label>
+        <textarea id="${prefix}-map-input" rows="2" autocomplete="off" spellcheck="false" placeholder="https://annotations.allmaps.org/maps/…"></textarea>
+        <p><button type="submit">Add the map</button></p>
+      </form>`;
+
+/**
+ * One step of the picker. `pending` is what was pasted ({ text, lookup }: lookup when "Look for a georeference"
+ * was pressed), a map kept ({ kept: key }), or one chosen from a georeference of several ({ parsed,
+ * manifestUrl }). Returns { kind: 'admitted', admitted (admit's), keptEntry }; { kind: 'offer', offer } for a map
+ * that came with no georeference ({ services, manifestUrl, title, text, notFound }: notFound once Allmaps was
+ * asked and has none); or { kind: 'gone' } for a map kept that is kept no longer. `onOffer(offer)` is told the
+ * offer as soon as it is known, before Allmaps is asked (a permission it needs is asked with the offer shown).
+ * Throws as resolve, lookup and admit throw; a NeedChoice after a lookup carries the offer's manifestUrl.
+ */
+export async function pickMap(pending, deps, { onOffer = () => {}, keptMaps = kept } = {}) {
+  let r, keptEntry = null, offer = null;
+  if (pending.kept) {
+    keptEntry = (await keptMaps()).find((k) => k.key === pending.kept);
+    if (!keptEntry) return { kind: 'gone' };
+    r = await resolve({ kind: 'annotation', annotation: keptEntry.item, manifest: keptEntry.manifest, fetchedAt: keptEntry.fetchedAt }, deps);
+    r.manifestUrl = keptEntry.manifestUrl || r.manifestUrl;
+  } else if (pending.parsed) {
+    r = await resolve(pending.parsed, deps);
+    r.manifestUrl ||= pending.manifestUrl || null;
+  } else {
+    r = await resolve(parseInput(pending.text), deps);
+    if (r.services) {
+      offer = { ...r, text: pending.text, notFound: false };
+      onOffer(offer);
+      if (!pending.lookup) return { kind: 'offer', offer };
+      const found = await lookup(r.services, deps);
+      if (!found) return { kind: 'offer', offer: { ...offer, notFound: true } };
+      r = await resolve({ kind: 'annotation', annotation: found.annotation, fetchedAt: found.fetchedAt, manifest: r.manifest, url: found.url }, deps);
+      r.manifestUrl ||= offer.manifestUrl || null;
+    }
+  }
+  try { return { kind: 'admitted', admitted: await admit(r, { ...deps, enforced: true }), keptEntry }; }
+  catch (e) { if (e instanceof NeedChoice && offer) e.manifestUrl = offer.manifestUrl || null; throw e; }
+}
+
+const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+/**
+ * What the picker says of the last map asked for, as HTML: the choice among the georeferences of a page of several
+ * (`choice`: { choices, chosen }), the offer for a map with no georeference (`offer`, with the Allmaps Editor's link
+ * unless `editor` is false), and the status line (`status`, "warn:" first for a problem, with `link`, an address
+ * to open in a new tab). Ids under `prefix`, as pickerForm's.
+ */
+export function pickerStatus({ choice = null, offer = null, status = '', link = null, editor = true, prefix = 'chora' } = {}) {
+  let html = '';
+  if (choice) {
+    const one = (c) => `Georeference ${c.index + 1}${c.label ? `: ${escHtml(c.label)}` : ''} <span class="muted">(${c.modified ? `changed ${escHtml(c.modified.slice(0, 10))}` : 'no date given'}, ${c.gcps === null ? 'control points not given' : `${c.gcps} control point${c.gcps === 1 ? '' : 's'}`}${c.id ? `; ${escHtml(c.id)}` : ''})</span>`;
+    html += `<div class="choice" id="${prefix}-map-choice" role="group" aria-labelledby="${prefix}-map-choice-text"><p id="${prefix}-map-choice-text">This holds ${choice.choices.length} georeferences of the map, made separately. Choose the one to show (the most recently changed is chosen):</p>
+      <ul class="choices">${choice.choices.map((c) => `<li><label><input type="radio" name="georef-choice" value="${c.index}"${c.index === choice.chosen ? ' checked' : ''}> ${one(c)}</label></li>`).join('')}</ul>
+      <p><button type="button" class="primary" id="${prefix}-map-choose">Show this one</button> <button type="button" id="${prefix}-map-choose-no">Not now</button></p></div>`;
+  }
+  if (offer) {
+    const name = offer.title ? `“${escHtml(offer.title)}”` : 'This map';
+    // The Editor is linked unless Allmaps is set to Never, saying what following it sends.
+    const ed = editor ? `<a href="${escHtml(editorUrl(offer.manifestUrl, offer.services[0]))}" target="_blank" rel="noopener noreferrer" id="${prefix}-map-editor">${escHtml(EDITOR_LINK_TEXT)}</a>` : '';
+    html += `<div class="offer"><p>${name} came with no georeference${offer.notFound ? ', and Allmaps has none for it' : ''}.</p>
+      ${offer.notFound ? '' : `<p><button type="button" class="primary" id="${prefix}-map-lookup">Look for a georeference</button></p>`}
+      ${ed ? `<p>${offer.notFound ? 'You can' : 'Or'} georeference it in the Allmaps Editor, and paste here the georeference it makes: ${ed}</p>` : `<p>${offer.notFound ? 'You can georeference it elsewhere, and' : 'Or'} paste a georeference of it here.</p>`}</div>`;
+  }
+  if (status) {
+    const warn = status.startsWith('warn:');
+    html += `<p class="${warn ? 'warn' : 'muted'}">${escHtml(status.replace(/^warn:/, ''))}${link ? ` <a href="${escHtml(link)}" target="_blank" rel="noopener noreferrer" id="${prefix}-map-forwards">${escHtml(link)}</a>` : ''}</p>`;
+  }
+  return html;
+}
+
 // ---- Attribution ----------------------------------------------------------------------------------
 
 // The map's credit and licence, and the rights of what is traced from it, are read in one place
@@ -511,7 +591,10 @@ export function loadRenderer() {
  * admitted (nothing is fetched again). `onEvent(type, event)` hears the renderer's events.
  */
 export function createLayerManager(map, { beforeId = 'chora-overview-clusters', layerId = 'chora-historical-maps', onEvent, Layer: given } = {}) {
-  let layer = null, Layer = given || null, attaching = null;
+  let layer = null, Layer = given || null, attaching = null, paused = false;
+  // While the map is not shown (Chora hidden), the renderer is not drawn: drawn into a map of no size it computes
+  // its view from nothing, and the projection library throws ("coordinates must be finite numbers").
+  const visibility = () => { try { if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', paused ? 'none' : 'visible'); } catch { /* no layer yet */ } };
   const entries = [];   // admitted maps: admit()'s result, with key, mapId, opacity, visible
   const EVENTS = ['warpedmapadded', 'imageinfofetcherror', 'tilefetcherror', 'firstmaptileloaded', 'allrequestedtilesloaded', 'maptileloaded', 'error'];
   for (const t of EVENTS) map.on(t, (e) => onEvent?.(t, e));
@@ -540,6 +623,7 @@ export function createLayerManager(map, { beforeId = 'chora-overview-clusters', 
     if (map.getLayer(layerId)) map.removeLayer(layerId);
     layer = new Layer({ layerId });
     map.addLayer(layer, map.getLayer(beforeId) ? beforeId : undefined);
+    visibility();
     for (const e of entries) { try { show(e); } catch (err) { e.error = err.message; } }
   }
   const api = {
@@ -574,6 +658,9 @@ export function createLayerManager(map, { beforeId = 'chora-overview-clusters', 
       if (!layer) return [...entries].reverse();
       return [...entries].sort((a, b) => (layer.getMapZIndex(b.mapId) ?? 0) - (layer.getMapZIndex(a.mapId) ?? 0));
     },
+    /** Not drawn while the map is not shown (`on`), drawn again after; kept so across a new layer (a new basemap). */
+    pause(on) { paused = !!on; visibility(); },
+    get paused() { return paused; },
     /** [[west, south], [east, north]] of a map, for fitting the view to it. */
     bounds(key) {
       const e = entries.find((x) => x.key === key);

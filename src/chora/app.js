@@ -31,7 +31,10 @@ import { DataError } from '../engine/input.js';
 // Adopting a location from a gazetteer match (src/chora/adopt-ui.js; the engine is src/engine/chora/adopt.js).
 import { createAdopt } from './adopt-ui.js';
 import { draftAttestations, consultedParts, isPlaceIri } from '../engine/chora/adopt.js';
-import { CHORA_ADOPT_PAGE, CHORA_HANDOVER } from '../engine/words.js';
+import { CHORA_ADOPT_PAGE, CHORA_HANDOVER, CHORA_TRACE } from '../engine/words.js';
+// Tracing a historical map into a new dataset: the settings kept for each map, its seed, the forms, the new places a save adds.
+import * as traced from './traced.js';
+import { scriptOf, kindType } from '../engine/chora/seed.js';
 // The tools' own version, for the notes of a shape traced with assistance.
 import { version as toolsVersion } from '../../package.json';
 
@@ -47,14 +50,21 @@ const html = () => `<div class="chora-panel" id="chora-panel">
     <section id="chora-maps" aria-labelledby="chora-maps-h">
       <h2 id="chora-maps-h">Historical maps</h2>
       <p class="muted">Lay a georeferenced historical map over the basemap, and trace places from it: what you trace cites the map, and the georeference that places it.</p>
-      <form id="chora-map-form">
-        <label for="chora-map-input">A georeference (a IIIF Georeference Annotation), or the address of one (Allmaps), of a IIIF manifest, or of a IIIF image</label>
-        <textarea id="chora-map-input" rows="2" autocomplete="off" spellcheck="false" placeholder="https://annotations.allmaps.org/maps/…"></textarea>
-        <p><button type="submit">Add the map</button></p>
-      </form>
+      ${ov.pickerForm('chora')}
       <div id="chora-map-needs"></div>
       <div id="chora-map-status" role="status" aria-live="polite"></div>
       <ul id="chora-overlay-list" class="overlays"></ul>
+      <section id="chora-trace" class="chora-trace" aria-labelledby="chora-trace-h">
+        <h3 id="chora-trace-h">Trace into a new dataset</h3>
+        <div id="chora-trace-body"></div>
+      </section>
+    </section>
+
+    <section id="chora-traced" aria-labelledby="chora-traced-h" hidden>
+      <h2 id="chora-traced-h">Traced from the map</h2>
+      <p id="chora-traced-count" class="muted"></p>
+      <ul id="chora-traced-list" class="pending traced"></ul>
+      <p class="pager"><button id="chora-traced-prev" type="button">Previous</button> <button id="chora-traced-next" type="button">Next</button></p>
     </section>
 
     <section id="chora-places" aria-labelledby="chora-places-h" hidden>
@@ -103,6 +113,8 @@ const html = () => `<div class="chora-panel" id="chora-panel">
       <label class="snap-ink" id="chora-snap-ink-label" hidden><input type="checkbox" id="chora-snap-ink" data-tip="A vertex placed within 10 screen pixels of the map's ink goes onto it (hold Alt not to)"> Snap to ink</label>
     </div>
     <div class="ink-panel" id="chora-ink-panel" role="group" aria-label="Tracing from the map's ink" hidden></div>
+    <!-- Naming a place traced into a new dataset (src/chora/traced.js): draw, name, Enter. -->
+    <div class="ink-panel name-panel" id="chora-name-panel" role="group" aria-labelledby="chora-name-what" hidden></div>
     <!-- How well each location of the place chosen is known (src/chora/vague.js): shown with a place. -->
     <details class="map-key" id="chora-map-key" hidden>
       <summary>Key: how well a location is known</summary>
@@ -127,6 +139,11 @@ let starts = [0], nextAfter = null;   // where each page of the list shown so fa
 let offered = null;    // the button that saves the file last written, while the drawings are those it holds
 let handed = null;     // the file the last save wrote, as handed to the page (host.saved): chosen there, and not to be removed while it is
 let drawError = null;  // why the last drawing was not kept, shown in the card
+// Tracing a map into a new dataset (traced.js): what is kept of the tracings; the map the dataset open is traced
+// from (its key), or null; the map whose settings form is open; the name form ({ draftId, editing }); the page of
+// the list of what is traced; the place last named (a drawing may be added to it instead).
+let tracings = null, traceKey = null, traceEditing = null, naming = null, tracedAt = 0, lastNamed = null;
+const TRACED_PAGE = 50;
 
 // ---- The engine ----------------------------------------------------------------------------------
 // One request at a time (queue.js): each waits for the reply of its type (or an error), and progress
@@ -154,7 +171,7 @@ function startWorker() {
 }
 
 // ---- Opening a dataset ---------------------------------------------------------------------------
-async function open(list) {
+async function open(list, { traceKey: carried = null } = {}) {
   if (state.phase === 'in-another-tab') return;
   files = [...list];
   if (!files.length) return;
@@ -180,9 +197,14 @@ async function open(list) {
   $('save').textContent = `Save as ${choraSavedFormat(dataset.input).words}`;
   fp = fingerprint(files);
   drafts = await loadDrafts(fp);
+  // Traced from a map (a dataset made from it, or one it was saved as): the map's key, kept by the files' fingerprint.
+  if (carried) { tracings.open[fp] = carried; keepTracings(); }
+  traceKey = tracings.open[fp] ?? null; tracedAt = 0;
   const ov = await request({ cmd: 'chora-overview' }, 'chora-overview');
   mapApi.setOverview(ov.geojson);
-  mapApi.setPlace(null); mapApi.setContext(null); showDrafts([]); $('map-key').hidden = true;
+  mapApi.setPlace(null); mapApi.setContext(null); showDrafts(visibleDrafts()); $('map-key').hidden = true;
+  if (traceKey) $('draw-tools').hidden = false;
+  renderTrace(); renderTraced();
   if (ov.capped || ov.geojson?.capped) $('dataset').insertAdjacentHTML('beforeend', `<p class="muted">The map shows the first ${n(ov.geojson.features.length)} places; find others by name.</p>`);
   if (dataset.bbox) mapApi.fit(dataset.bbox, 8);
   $('places').hidden = false;
@@ -239,7 +261,7 @@ async function selectPlace(id) {
   state.vague = { marks: vague.features.filter((f) => f.geometry.type === 'Point').length, circles: vague.features.filter((f) => f.geometry.type === 'Polygon').length };
   $('map-key').hidden = false;
   mapApi.setContext(contextFeatures(view, await countries(view), (view.ccodes || []).map((c) => [c, ccodeBoxes?.[c]]).filter(([, b]) => b)));
-  showDrafts(drafts.filter((d) => d.placeId === id));
+  showDrafts(visibleDrafts());
   adopt.placeShown(view);
   const mine = drafts.filter((d) => d.placeId === id && d.geojson).map((d) => d.geojson);
   // The place's own geometries and their circles of uncertainty together, so that a circle is seen
@@ -353,16 +375,19 @@ function onFinish(id, ctx) {
   if (!f) return;
   const existing = drafts.find((d) => d.id === String(id));
   if (!existing && ctx?.action && ctx.action !== 'draw') return;
-  if (!existing && !state.placeId) { mapApi.draw.removeFeatures([id]); return; }
+  // A drawing with no place chosen is let go, unless a map is being traced into a new dataset: it is a new place, named next.
+  const feature = !existing && !state.placeId && !!traceKey;
+  if (!existing && !state.placeId && !feature) { mapApi.draw.removeFeatures([id]); return; }
   // Drawn on a copy of the world, east or west of it, its longitudes run past 180: it is brought back
   // onto the world, whole, and checked as the save will check it. One across the antimeridian cannot
   // be a PLATO geometry as drawn; it is not kept (or, moved there, goes back), and the card says why.
   const geojson = wrapLongitudes(f.geometry);
   try { checkGeoJSON(geojson); } catch (e) {
     if (!(e instanceof DrawError)) throw e;
-    drawError = state.drawError = `${KIND[f.geometry.type] || 'A drawing'} ${existing ? 'moved' : 'drawn'} for ${existing?.placeLabel || view?.label || 'this place'} was not kept. ${e.message}`;
+    drawError = state.drawError = `${KIND[f.geometry.type] || 'A drawing'} ${existing ? 'moved' : 'drawn'} for ${existing?.placeLabel || view?.label || (feature ? 'a new place' : 'this place')} was not kept. ${e.message}`;
     setTimeout(() => { try { if (existing) mapApi.draw?.updateFeatureGeometry(id, existing.geojson); else mapApi.draw?.removeFeatures([id]); } catch {} });
     if (view) renderCard();
+    if (feature || existing?.kind === 'feature') renderTrace();
     return;
   }
   if (geojson !== f.geometry) setTimeout(() => { try { mapApi.draw?.updateFeatureGeometry(id, geojson); } catch {} });
@@ -372,8 +397,9 @@ function onFinish(id, ctx) {
     if (existing.trace) traceDraft(existing, { only: existing.trace.key, reshaped: true });
     return;
   }
-  const d = newDraft(id, geojson);
+  const d = feature ? newFeatureDraft(id, geojson) : newDraft(id, geojson);
   if (layers?.entries.length) traceDraft(d);
+  if (feature) attachOrOpen(d.id);
 }
 /** A drawing made now (by hand, or accepted from a trace), for the place chosen: kept, and listed. */
 function newDraft(id, geojson, extra = {}) {
@@ -406,7 +432,7 @@ function dropTrace(d, note) {
   d.trace = null; d.traceNote = joinNotes(d, note);
   if (d.role === 'LabelAnchor') d.role = '';
   // The defaults were for a point traced from a map: drawn on the basemap, it says nothing of itself.
-  if (d.defaulted) { d.role = ''; d.precision = ''; d.defaulted = false; }
+  if (d.defaulted && d.kind !== 'feature') { d.role = ''; d.precision = ''; d.defaulted = false; }
 }
 async function traceDraft(d, { only = null, reshaped = false } = {}) {
   const ticket = {}; traceTickets.set(d.id, ticket);
@@ -462,18 +488,32 @@ async function traceDraft(d, { only = null, reshaped = false } = {}) {
   state.lastTrace = { draftId: d.id, key: d.trace?.key || null, partial: !!d.trace?.partial, note: d.traceNote || null, options: (d.traceOptions || []).map((o) => o.key), role: d.role || null, precision: d.precision || null };
   keepDrafts();
   if (view) renderCard();
+  if (d.kind === 'feature') renderTraced();
 }
 // Adoptions are not drawings: they are not given to the drawing tool (adopt-ui.js shows them).
-function showDrafts(list) { showing = true; try { mapApi.showDrafts(list.filter((d) => d.kind !== 'adoption')); } finally { showing = false; } }
+function showDrafts(list) {
+  showing = true;
+  const t0 = performance.now();
+  try { mapApi.showDrafts(list.filter((d) => d.kind !== 'adoption')); } finally { showing = false; }
+  // How long the drawings took to be given to the drawing tool, and how many: for the measurements of scale (DEVELOPERS.md, Limits).
+  state.lastShow = { count: list.length, ms: Math.round(performance.now() - t0) };
+}
+/** The drawings shown: the place chosen's, and every feature traced into the dataset, all at once. */
+const visibleDrafts = () => drafts.filter((d) => d.kind !== 'adoption' && (d.kind === 'feature' || (state.placeId && d.placeId === state.placeId)));
 let consultArmed = null;   // { placeId, record, name, … }: the next drawing of that place cites the record as consulted
 /** An adoption, kept with the drawings until saved (one draft: its attestations go, and are removed, together). */
 function addAdoption(d) { drafts.push(d); keepDrafts(); renderCard(); }
 function removeDraft(id) {
   const wasAdoption = drafts.some((d) => d.id === id && d.kind === 'adoption');
+  const was = drafts.find((d) => d.id === id);
   drafts = drafts.filter((d) => d.id !== id);
   if (!wasAdoption) try { mapApi.draw?.removeFeatures([id]); } catch {}
+  // A place traced goes with its first drawing: what was added to it goes too.
+  if (was?.kind === 'feature' && was.placeId && !was.part) for (const p of drafts.filter((d) => d.kind === 'feature' && d.part && d.placeId === was.placeId)) { drafts = drafts.filter((d) => d !== p); try { mapApi.draw?.removeFeatures([p.id]); } catch {} }
+  if (naming?.draftId === id) closeNaming();
   keepDrafts();
-  renderCard();
+  if (view) renderCard();
+  if (was?.kind === 'feature') { renderTraced(); renderTrace(); }
   if (wasAdoption) adopt.showAdopted();
 }
 function keepDrafts() {
@@ -484,7 +524,12 @@ function keepDrafts() {
   }
   state.pendingCount = drafts.length;
   // Written in turn, asynchronously (drafts.js): draftWrites counts those not yet on disk, for tests to wait on.
-  if (fp) { state.draftWrites = (state.draftWrites || 0) + 1; saveDrafts(fp, drafts).finally(() => { state.draftWrites--; }); }
+  if (fp) {
+    state.draftWrites = (state.draftWrites || 0) + 1;
+    const t0 = performance.now(), count = drafts.length;
+    // How long the write of every drawing kept took, queue and all, and of how many (DEVELOPERS.md, Limits).
+    saveDrafts(fp, drafts).finally(() => { state.draftWrites--; state.lastDraftWrite = { count, ms: Math.round(performance.now() - t0) }; });
+  }
   showSaving();
 }
 function drawToolsClicked(e) {
@@ -551,25 +596,331 @@ const snapChanged = async (e) => { try { (await loadInk()).setSnap(e.target.chec
  * Returns null when it is a drawing now, else why not in words (the proposal is then kept).
  */
 function acceptTraced({ geometry, key, assisted, note }) {
-  if (!state.placeId) return 'Choose a place first (a drawing is added to the place chosen), then press Enter again: the proposal is kept until then.';
+  // With no place chosen, while a map is traced into a new dataset, the shape is a new place, named next (decision 2).
+  const feature = !state.placeId && !!traceKey;
+  if (!state.placeId && !feature) return 'Choose a place first (a drawing is added to the place chosen), then press Enter again: the proposal is kept until then.';
   const [res] = mapApi.draw.addFeatures([{ type: 'Feature', geometry, properties: { mode: geometry.type === 'Polygon' ? 'polygon' : 'linestring' } }]);
   if (!res?.valid) { drawError = state.drawError = `The shape could not be made a drawing (${res?.reason || 'refused'}).`; if (view) renderCard(); return drawError; }
   // What accepting did to it (its holes left out) is kept apart from what tracing says, so neither replaces the other.
-  const d = newDraft(res.id, geometry, { assistedPending: assisted, ...(note ? { acceptNote: note, traceNote: note } : {}) });
+  const extra = { assistedPending: assisted, ...(note ? { acceptNote: note, traceNote: note } : {}) };
+  const d = feature ? newFeatureDraft(res.id, geometry, extra) : newDraft(res.id, geometry, extra);
   traceDraft(d, { only: key });
+  if (feature) attachOrOpen(d.id);
   return null;
+}
+
+// ---- Tracing a historical map into a new dataset (src/chora/traced.js) --------------------------------------
+// Stephen's decisions of 14 October 2026. A map shown is traced into a dataset of its own: its settings are
+// asked once (the base address, needed; the dataset's title; the map's date, from its navDate; the language of
+// its names; what a point, a line and an area mark, and how well), the dataset is made from the map (its seed)
+// and opened, and from then on a drawing made with no place chosen is a new place: named in the form over the
+// map (the name as written, the label, its kind, its language), Enter, and the next. Every feature traced is
+// shown at once, and listed a page at a time. A save adds them as new places (save.js newPlaces), one
+// attestation each. Outside a workflow the same; in one at its step "trace", its save does the step.
+const keepTracings = () => traced.saveTracing(tracings);
+/** A map's settings, by its key, or null. */
+const settingsOf = (key) => (key ? tracings.maps[key] || null : null);
+/** The map entry shown for a key (overlays' layer manager), or null. */
+const mapEntry = (key) => layers?.entries.find((e) => e.key === key) || null;
+/** Whether the dataset open is the one made from a map, not yet saved. */
+const isSeedOpen = () => !!traceKey && !!tracings.seeds[traceKey];
+/** The workflow's step at hand, when it is one done in Chora (host.step: Methodos's), else null. */
+const workflowStep = () => { try { return host.step?.() || null; } catch { return null; } };
+/** A feature traced now, with no place chosen: a new place, named next (decision 2), given the map's defaults (decision 6). */
+function newFeatureDraft(id, geojson, extra = {}) {
+  const d = { id: String(id), kind: 'feature', placeId: null, placeLabel: '', names: [], types: [], mapKey: traceKey, geojson, role: '', precision: '',
+    ...traced.featureDefaults(settingsOf(traceKey), geojson),
+    basemap: basemaps.drawnOn(basemaps.byId(state.basemap)), zoom: mapApi.zoom(), drawnAt: new Date().toISOString(), ...extra };
+  drafts.push(d);
+  keepDrafts();
+  renderTraced(); renderTrace();
+  return d;
+}
+
+/** The panel "Trace into a new dataset": what to do, the settings form, or the tracing under way. */
+function renderTrace() {
+  if (!root) return;
+  const body = $('trace-body'), step = workflowStep();
+  const shown = layers ? layers.entries : [];
+  const lines = [];
+  if (step?.op === 'trace') lines.push(`<p class="note" id="chora-trace-step">${esc(CHORA_TRACE.workflowStep)}</p>`);
+  if (traceEditing) {
+    const s = settingsOf(traceEditing) || traced.defaultSettings(defaultsFor(traceEditing));
+    body.innerHTML = lines.join('') + traced.settingsForm(s, { started: traceKey === traceEditing && drafts.some((d) => d.kind === 'feature' && d.placeId) || (traceKey === traceEditing && !isSeedOpen() && !!dataset),
+      identify: step?.op === 'trace' && step.answers?.['will-identify'] === true });
+    publishTrace();
+    return;
+  }
+  if (traceKey) {
+    const s = settingsOf(traceKey) || {};
+    const features = drafts.filter((d) => d.kind === 'feature');
+    const named = new Set(features.filter((d) => d.placeId).map((d) => d.placeId)).size, unnamed = features.filter((d) => !d.placeId).length;
+    lines.push(`<p id="chora-trace-status">${esc(CHORA_TRACE.tracing(s.mapTitle || 'a historical map', dataset?.header?.title || s.datasetTitle || '', named, unnamed))}</p>`,
+      `<p class="muted">${esc(CHORA_TRACE.howTo)}</p>`,
+      ...(s.rightsWords ? [`<p class="${/^Free to reuse/.test(s.rightsWords) ? 'muted' : 'note'}" id="chora-trace-rights">${esc(s.rightsWords)}</p>`] : []),
+      ...(state.traceScope ? [`<p class="note" id="chora-trace-scope">${esc(state.traceScope.words)}</p>`] : []),
+      ...(mapEntry(traceKey) ? [] : [`<p class="warn">${esc(CHORA_TRACE.mapGone(s.mapTitle || ''))}</p>`]),
+      `<p><button type="button" id="chora-trace-new" class="primary">${esc(CHORA_TRACE.newPlace)}</button> <button type="button" id="chora-trace-settings">${esc(CHORA_TRACE.changeSettings)}</button> <button type="button" id="chora-trace-stop">${esc(CHORA_TRACE.stopTracing)}</button></p>`);
+  } else {
+    lines.push(`<p class="muted">${esc(shown.length ? CHORA_TRACE.intro : CHORA_TRACE.noMap)}</p>`);
+    // A dataset made from a map and not yet saved, with nothing open: offered again (in a workflow at its step, opened at once: resumeSeed).
+    const key = tracings.current, seed = key && tracings.seeds[key];
+    if (seed && !dataset) lines.push(`<p><button type="button" id="chora-trace-resume">${esc(CHORA_TRACE.resume(settingsOf(key)?.mapTitle || ''))}</button></p>`);
+  }
+  body.innerHTML = lines.join('');
+  publishTrace();
+}
+/** What the tracing is, for automated tests (window.__chora.trace); nothing else reads it. */
+function publishTrace() {
+  const features = drafts.filter((d) => d.kind === 'feature');
+  const s = settingsOf(traceKey);
+  state.trace = { key: traceKey, editing: traceEditing, seed: isSeedOpen(), mapTitle: s?.mapTitle ?? null, base: s?.base ?? null, settings: s,
+    features: features.length, named: new Set(features.filter((d) => d.placeId).map((d) => d.placeId)).size, unnamed: features.filter((d) => !d.placeId).length };
+  state.naming = naming ? { ...naming } : null;
+}
+/** A map's settings before the user gives any: from the map shown (its title, manifest and rights), with Options' base address. */
+function defaultsFor(key) {
+  const e = mapEntry(key);
+  return { key, title: e?.title || settingsOf(key)?.mapTitle || '', manifest: e?.manifest || null, rights: e?.rights || null, base: host.base?.() || '' };
+}
+/** "Trace into a new dataset" (or into the dataset open), for the map `key`: its settings form. */
+function beginSettings(key) {
+  traceEditing = key;
+  renderTrace(); renderMaps();
+  $('trace').scrollIntoView({ block: 'nearest' });
+  $('tset-base')?.focus();
+}
+function traceClicked(e) {
+  if (e.target.id === 'chora-trace-new') newPlace();
+  else if (e.target.id === 'chora-trace-settings') beginSettings(traceKey);
+  else if (e.target.id === 'chora-trace-stop') stopTracing();
+  else if (e.target.id === 'chora-trace-resume') resumeSeed({ asked: true });
+  else if (e.target.id === 'chora-tset-cancel') { traceEditing = null; renderTrace(); renderMaps(); }
+}
+function traceInput(e) {
+  // The script is asked only where the language implies one that is not Latin (decision 3): asked again as it is typed.
+  if (e.target.id === 'chora-tset-lang') $('tset-script-box').innerHTML = traced.scriptChoice('chora-tset-script', e.target.value.trim(), '');
+}
+/** Not traced into from now: drawings with no place chosen are let go again, as before; the drawings made stay. */
+function stopTracing() {
+  if (fp) { delete tracings.open[fp]; keepTracings(); }
+  traceKey = null; closeNaming();
+  renderTrace(); renderTraced(); renderMaps();
+}
+async function traceSubmitted(e) {
+  e.preventDefault();
+  const key = traceEditing, f = $('trace-form');
+  if (!key || !f) return;
+  const v = (id) => $(id)?.value ?? '';
+  const values = { base: v('tset-base'), datasetTitle: v('tset-title'), date: v('tset-date'), dateEach: !!$('tset-date-each')?.checked, language: v('tset-lang'), script: v('tset-script'),
+    pointRole: v('tset-point-role'), pointPrecision: v('tset-point-precision'), lineRole: v('tset-line-role'), linePrecision: v('tset-line-precision'),
+    areaRole: v('tset-area-role'), areaPrecision: v('tset-area-precision'), precisionKm: v('tset-km'), outline: !!$('tset-outline')?.checked };
+  const was = settingsOf(key) || traced.defaultSettings(defaultsFor(key));
+  const r = traced.settingsFrom(values, was);
+  if (r.error) { Object.assign($('tset-error'), { hidden: false, textContent: r.error }); state.traceError = r.error; return; }
+  state.traceError = null;
+  tracings.maps[key] = r.settings; tracings.current = key; keepTracings();
+  // The base address has one store: Options' (decision 8), written as if typed there.
+  host.setBase?.(r.settings.base);
+  traceEditing = null;
+  if (traceKey === key) { renderTrace(); renderTraced(); renderMaps(); return; }   // the settings changed, the tracing goes on
+  // Into the dataset open (one saved from a tracing before, opened again): traced into from now.
+  if (dataset && !isSeedOpen() && !tracings.seeds[key]) {
+    traceKey = key; tracings.open[fp] = key; keepTracings();
+    $('draw-tools').hidden = false; renderTrace(); renderTraced(); renderMaps(); await outlineScope(key);
+    return;
+  }
+  // A dataset of its own, made from the map: the one made before (with what was traced on it) if it has not been saved, else a new one.
+  const kept = tracings.seeds[key];
+  let seed = kept;
+  if (!kept || !(await loadDrafts(fingerprint([seedAsFile(kept)]))).length) seed = traced.seedFile(r.settings);
+  tracings.seeds[key] = seed; keepTracings();
+  const file = seedAsFile(seed);
+  await open([file], { traceKey: key });
+  // Chosen in "Choose your data", and kept there as the user's own choice is.
+  host.choose?.([file]); host.keep?.([file]);
+  renderMaps();
+  await outlineScope(key);
+}
+const seedAsFile = (seed) => new File([seed.text], seed.name, { type: 'application/json', lastModified: seed.lastModified });
+/**
+ * In a workflow that looks the places up, the sheet's outline made the lookup's area Scope (decision 10): set
+ * when the user leaves it ticked, said in the panel and shown in the tracker's Scope line, never silently.
+ */
+async function outlineScope(key) {
+  const step = workflowStep(), s = settingsOf(key), e = mapEntry(key);
+  if (step?.op !== 'trace' || step.answers?.['will-identify'] !== true || !s?.outline || !e || !host.setScopeArea) return;
+  try {
+    const o = await tracing.sheetOutline(e.g);
+    const ok = host.setScopeArea(o.area);
+    state.traceScope = ok ? { corners: o.corners, from: o.from, words: CHORA_TRACE.scopeSet(o.corners) } : null;
+  } catch (err) { state.traceScope = { corners: 0, words: CHORA_TRACE.scopeNot(err.message) }; }
+  renderTrace();
+}
+/**
+ * The dataset made from the map last traced, and not yet saved, opened again (the very file: the drawings kept under
+ * its fingerprint come back with it): at a workflow's step "trace" with nothing open, at once; elsewhere when asked.
+ */
+async function resumeSeed({ asked = false } = {}) {
+  if (dataset || files.length || state.phase === 'in-another-tab') return;
+  const key = tracings.current, seed = key && tracings.seeds[key];
+  if ((!asked && workflowStep()?.op !== 'trace') || !seed) return;
+  const file = seedAsFile(seed);
+  await open([file], { traceKey: key });
+  host.choose?.([file]);
+}
+
+// The name form, over the map (decision 2): a drawing with no place chosen opens it; Enter adds the place, Cancel lets
+// the drawing go; a drawing may instead be added to the place last named. "New place" opens it with nothing drawn yet.
+function openNaming(draftId, { editing = false } = {}) {
+  const d = draftId ? drafts.find((x) => x.id === draftId) : null;
+  const s = settingsOf(traceKey) || {};
+  const last = lastNamed && drafts.find((x) => x.kind === 'feature' && x.placeId === lastNamed && !x.part);
+  const name = d?.names?.[0];
+  naming = { draftId: d ? d.id : null, editing };
+  const what = editing ? CHORA_TRACE.whatEdit(d.placeLabel || name?.toponym || '') : !d ? CHORA_TRACE.whatNone
+    : /Point$/.test(d.geojson.type) ? CHORA_TRACE.whatPoint : /LineString$/.test(d.geojson.type) ? CHORA_TRACE.whatLine : CHORA_TRACE.whatArea;
+  const language = name?.language ?? s.language ?? '';
+  $('name-panel').innerHTML = traced.nameForm({ what, toponym: name?.toponym || '', label: editing ? d.placeLabel : '', kind: editing ? d.types?.[0]?.label || '' : s.lastKind || '',
+    language, script: name?.script || (scriptOf(language) ? s.script : ''), romanized: name?.romanized || '', addTo: d && !editing && last && last.id !== d.id ? last.placeLabel : null, editing });
+  $('name-panel').hidden = false;
+  publishTrace();
+  $('name-toponym').focus();
+}
+/** A drawing made while the form waits for one ("New place"): it is the form's, and what was typed stays; else the form opens for it. */
+function attachOrOpen(id) {
+  if (naming && !naming.draftId && !naming.editing) {
+    naming.draftId = id;
+    const d = drafts.find((x) => x.id === id);
+    $('name-what').textContent = /Point$/.test(d.geojson.type) ? CHORA_TRACE.whatPoint : /LineString$/.test(d.geojson.type) ? CHORA_TRACE.whatLine : CHORA_TRACE.whatArea;
+    $('name-error').hidden = true;
+    publishTrace();
+    $('name-toponym').focus();
+    return;
+  }
+  openNaming(id);
+}
+function closeNaming() {
+  naming = null;
+  if (root) { $('name-panel').hidden = true; $('name-panel').replaceChildren(); }
+  if (state) publishTrace();
+}
+/** "New place": no place chosen, the form open, the drawing to come (decision 2). */
+function newPlace() {
+  if (state.placeId) {
+    state.placeId = null; view = null;
+    for (const b of $('list').querySelectorAll('button[data-id]')) b.classList.remove('current');
+    $('card').hidden = true; adopt.close(); mapApi.setPlace(null); mapApi.setContext(null);
+    showDrafts(visibleDrafts());
+  }
+  openNaming(null);
+}
+function namingInput(e) {
+  if (e.target.id === 'chora-name-lang') {
+    const lang = e.target.value.trim();
+    $('name-script-box').innerHTML = traced.scriptChoice('chora-name-script', lang, '');
+    $('name-roman-box').hidden = !scriptOf(lang);
+  }
+  if (e.target.id === 'chora-name-script') $('name-roman-box').hidden = e.target.value === 'Latn';
+}
+function namingError(words) { Object.assign($('name-error'), { hidden: false, textContent: words }); state.namingError = words; }
+async function namingSubmitted(e) {
+  e.preventDefault();
+  if (!naming) return;
+  const d = naming.draftId ? drafts.find((x) => x.id === naming.draftId) : null;
+  const toponym = $('name-toponym').value.trim();
+  if (!toponym) { namingError(CHORA_TRACE.needName); return; }
+  if (!d) { namingError(CHORA_TRACE.needDrawing); return; }
+  const language = $('name-lang').value.trim();
+  if (language && !/^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{1,8})*$/.test(language)) { namingError(CHORA_TRACE.badLanguage(language)); return; }
+  const script = $('name-script')?.value || '';
+  const romanized = $('name-roman-box').hidden ? '' : $('name-romanized').value;
+  const label = $('name-label').value.trim() || toponym;
+  const kind = $('name-kind').value.trim();
+  const s = settingsOf(d.mapKey || traceKey);
+  // Its address, minted under the base address once (decision 8), by the address scheme, distinct from every other.
+  if (!d.placeId) {
+    try {
+      const taken = drafts.filter((x) => x.kind === 'feature' && x.placeId).map((x) => x.placeId);
+      d.placeId = (await request({ cmd: 'chora-mint', base: s?.base, label, romanized: romanized || undefined, taken }, 'chora-minted')).id;
+    } catch (err) { namingError(err.message); return; }
+  }
+  d.names = [traced.nameOf({ toponym, language, script: scriptOf(language) ? script : '', romanized })];
+  d.types = kind ? [kindType(kind)] : [];
+  d.placeLabel = label; delete d.part;
+  if (s && !naming.editing) { s.lastKind = kind; keepTracings(); }   // the last kind chosen is the next default (decision 7)
+  lastNamed = d.placeId;
+  state.lastNamed = { placeId: d.placeId, label };
+  closeNaming();
+  keepDrafts(); renderTraced(); renderTrace();
+}
+/** The drawing added to the place last named instead (a label's position, say): one more geometry of its one attestation. */
+function namingAddTo() {
+  const d = naming?.draftId && drafts.find((x) => x.id === naming.draftId);
+  const to = lastNamed && drafts.find((x) => x.kind === 'feature' && x.placeId === lastNamed && !x.part);
+  if (!d || !to) return;
+  Object.assign(d, { placeId: to.placeId, placeLabel: to.placeLabel, part: true, names: [], types: [], ...traced.addedPart(d.geojson) });
+  closeNaming();
+  keepDrafts(); renderTraced(); renderTrace();
+}
+function namingCancelled() {
+  const d = naming?.draftId && drafts.find((x) => x.id === naming.draftId);
+  const editing = naming?.editing;
+  closeNaming();
+  // A drawing not yet named goes (decision 2); a name being changed stays as it was.
+  if (d && !editing && !d.placeId) removeDraft(d.id);
+}
+function namingKey(e) { if (e.key === 'Escape') { e.preventDefault(); namingCancelled(); } }
+
+/** The list of the features traced, a page at a time, the latest first (c, d). */
+function renderTraced() {
+  if (!root) return;
+  const all = drafts.filter((d) => d.kind === 'feature').reverse();
+  $('traced').hidden = !traceKey && !all.length;
+  const pages = Math.max(1, Math.ceil(all.length / TRACED_PAGE));
+  tracedAt = Math.min(tracedAt, pages - 1);
+  const from = tracedAt * TRACED_PAGE, shown = all.slice(from, from + TRACED_PAGE);
+  const labelOf = new Map(all.filter((d) => d.placeId && !d.part).map((d) => [d.placeId, d.placeLabel]));
+  $('traced-count').textContent = CHORA_TRACE.listCount(all.length, from + 1, from + shown.length);
+  $('traced-list').innerHTML = shown.map((d) => traced.tracedItem(d, { partOf: d.part ? labelOf.get(d.placeId) : null })).join('');
+  $('traced-prev').disabled = tracedAt === 0; $('traced-next').disabled = tracedAt >= pages - 1;
+  $('traced-prev').parentElement.hidden = all.length <= TRACED_PAGE;
+  state.traced = { total: all.length, page: tracedAt, shown: shown.map((d) => d.id) };
+  publishTrace();
+}
+function tracedClicked(e) {
+  const li = e.target.closest('[data-draft]');
+  if (!li) return;
+  const d = drafts.find((x) => x.id === li.dataset.draft);
+  if (!d) return;
+  if (e.target.closest('[data-remove]')) removeDraft(d.id);
+  else if (e.target.closest('[data-name]')) openNaming(d.id);
+  else if (e.target.closest('[data-edit]')) openNaming(d.id, { editing: true });
+  else if (e.target.closest('[data-show]')) mapApi.fit(boxOf([d.geojson]), 14);
+}
+function tracedChanged(e) {
+  const sel = e.target.closest('select[data-field]');
+  const d = sel && drafts.find((x) => x.id === sel.closest('[data-draft]').dataset.draft);
+  if (!d) return;
+  // Chosen by the user: no longer the map's default (decision 6).
+  d[sel.dataset.field] = sel.value; d.defaulted = false;
+  keepDrafts(); renderTraced();
 }
 
 // ---- Saving --------------------------------------------------------------------------------------
 function showSaving() {
   if (!dataset) return;
   $('saving').hidden = false;
-  const places = new Set(drafts.map((d) => d.placeId)).size;
-  const adoptions = drafts.filter((d) => d.kind === 'adoption').length, drawings = drafts.length - adoptions;
-  const what = [drawings ? `${n(drawings)} drawing${drawings === 1 ? '' : 's'}` : '', adoptions ? `${n(adoptions)} location${adoptions === 1 ? '' : 's'} adopted from a gazetteer` : ''].filter(Boolean).join(' and ');
+  const own = drafts.filter((d) => d.kind !== 'feature');
+  const places = new Set(own.map((d) => d.placeId)).size;
+  const adoptions = own.filter((d) => d.kind === 'adoption').length, drawings = own.length - adoptions;
+  // The places traced from a map into a new dataset: one for each named, its parts counted with it.
+  const tracedPlaces = new Set(drafts.filter((d) => d.kind === 'feature').map((d) => d.placeId || d.id)).size;
+  const what = [drawings ? `${n(drawings)} drawing${drawings === 1 ? '' : 's'} of ${n(places)} place${places === 1 ? '' : 's'}` : '', adoptions ? `${n(adoptions)} location${adoptions === 1 ? '' : 's'} adopted from a gazetteer` : '',
+    tracedPlaces ? CHORA_TRACE.placesTraced(tracedPlaces) : ''].filter(Boolean).join(' and ');
   $('pending-total').textContent = drafts.length
-    ? `${what} of ${n(places)} place${places === 1 ? '' : 's'}, not yet saved. ${permissions.keepWorkingData() ? 'They are kept in this browser until you save.' : 'Save them before you leave: you chose not to keep working data between visits.'}`
-    : 'Nothing drawn yet. Choose a place, and draw on the map.';
+    ? `${what}, not yet saved. ${permissions.keepWorkingData() ? 'They are kept in this browser until you save.' : 'Save them before you leave: you chose not to keep working data between visits.'}`
+    : traceKey ? 'Nothing traced yet. Draw on the map, and name what you draw.' : 'Nothing drawn yet. Choose a place, and draw on the map.';
   $('save').disabled = !drafts.length;
   const c = contributors.load();
   const line = $('contributor-line');
@@ -605,11 +956,17 @@ function saveClicked() {
 
 async function saveDataset() {
   const contributor = contributors.load();
-  let additions;
+  let additions, newPlaces = [];
   try {
+    // The features traced from a map into a new dataset: a new place for each named (traced.js), none unnamed.
+    if (drafts.some((d) => d.kind === 'feature')) {
+      const np = traced.newPlacesOf(drafts, { settingsOf, contributor, version: toolsVersion });
+      if (np.unnamed.length) throw new Error(CHORA_TRACE.unnamedRefused(np.unnamed.length));
+      newPlaces = np.newPlaces;
+    }
     // A traced drawing cites the map and its georeference, and says so in its notes (trace.js).
     // An adoption gives its two attestations (one when the place was already linked), made now that the contributor is known.
-    additions = drafts.flatMap((d) => {
+    additions = drafts.filter((d) => d.kind !== 'feature').flatMap((d) => {
       if (d.kind === 'adoption') {
         const r = draftAttestations(d, contributor);
         if (r.refused) throw new Error(`${CHORA_ADOPT_PAGE.pendingItem(d.candidate.name || d.candidate.id)}: ${r.refused.reason}`);
@@ -631,7 +988,7 @@ async function saveDataset() {
   Object.assign($('save-progress'), { hidden: false, textContent: 'Saving…' });
   await storageCheck('save', $('save-storage-warning'));
   let r;
-  try { r = await request({ cmd: 'chora-save', files, additions, contributor }, 'done'); } catch (e) { $('save').disabled = false; $('save-progress').hidden = true; return fail(e.message); }
+  try { r = await request({ cmd: 'chora-save', files, additions, ...(newPlaces.length ? { newPlaces } : {}), contributor }, 'done'); } catch (e) { $('save').disabled = false; $('save-progress').hidden = true; return fail(e.message); }
   $('save').disabled = false;
   $('save-progress').hidden = true;
   $('phase').textContent = '';
@@ -677,7 +1034,7 @@ async function saveDataset() {
         navigator.storage.getDirectory().then((r) => r.getDirectoryHandle('chora-outputs')).then((d) => d.removeEntry(out.name)).catch(() => {});
         if (out.file) forgetSaved(out.file);
       }
-      drafts = rest; keepDrafts(); showDrafts(drafts.filter((d) => d.placeId === state.placeId)); if (view) renderCard();
+      drafts = rest; keepDrafts(); showDrafts(visibleDrafts()); if (view) renderCard(); renderTraced(); renderTrace();
       $('save-result').insertAdjacentHTML('beforeend', `<p>${said} To add more, open ${esc(out.name)}.</p>`);
     };
     b.onclick = async () => {
@@ -811,11 +1168,13 @@ function forgetOtherSaved() {
  */
 async function rebase(file, rest) {
   const m = mapApi.map, camera = { center: m.getCenter().toArray(), zoom: m.getZoom(), bearing: m.getBearing(), pitch: m.getPitch() };
-  const place = state.placeId, last = state.lastSave, given = state.handedOver;
+  const place = state.placeId, last = state.lastSave, given = state.handedOver, key = traceKey;
   drafts = []; keepDrafts();   // the old dataset's: those saved are in the file, the rest go with it
-  await open([file]);
+  // Traced from a map: the file saved is traced from it from now, and the dataset made from the map is not needed again.
+  if (key && tracings.seeds[key]) { delete tracings.seeds[key]; keepTracings(); }
+  await open([file], { traceKey: key });
   handed = file;
-  if (rest.length) { drafts = [...drafts, ...rest]; keepDrafts(); }
+  if (rest.length) { drafts = [...drafts, ...rest]; keepDrafts(); showDrafts(visibleDrafts()); renderTraced(); }
   Object.assign(state, { lastSave: last, handedOver: given, rebased: file.name });
   if (place && dataset) await selectPlace(place);
   m.jumpTo(camera);
@@ -1017,30 +1376,12 @@ async function addMapNow(pending, { collect = false } = {}) {
   // Where the page's policy was not shown to be enforced, no map is shown: its tiles could go anywhere.
   if (!(await permissions.enforced())) { setStatus(`warn:${ov.REFUSED}`); renderMaps(); return null; }
   try {
-    let r, keptEntry = null;
-    if (pending.kept) {
-      keptEntry = (await ov.kept()).find((k) => k.key === pending.kept);
-      if (!keptEntry) return null;
-      r = await ov.resolve({ kind: 'annotation', annotation: keptEntry.item, manifest: keptEntry.manifest, fetchedAt: keptEntry.fetchedAt }, deps);
-      r.manifestUrl = keptEntry.manifestUrl || r.manifestUrl;
-    } else if (pending.parsed) {
-      r = await ov.resolve(pending.parsed, deps);
-      r.manifestUrl ||= pending.manifestUrl || null;
-    } else {
-      r = await ov.resolve(ov.parseInput(pending.text), deps);
-      if (r.services) {
-        mapOffer = { ...r, text: pending.text, notFound: false };
-        if (!pending.lookup) { setStatus(''); renderMaps(); return null; }
-        const found = await ov.lookup(r.services, deps);
-        if (!found) { mapOffer.notFound = true; setStatus(''); renderMaps(); return null; }
-        const manifestUrl = mapOffer.manifestUrl;
-        r = await ov.resolve({ kind: 'annotation', annotation: found.annotation, fetchedAt: found.fetchedAt, manifest: r.manifest, url: found.url }, deps);
-        r.manifestUrl ||= manifestUrl || null;
-      }
-    }
+    // The picker's one step (overlays.js pickMap): the offer it makes is shown as soon as it is known.
+    const got = await ov.pickMap(pending, deps, { onOffer: (o) => { mapOffer = o; } });
+    if (got.kind === 'gone') return null;
+    if (got.kind === 'offer') { mapOffer = got.offer; setStatus(''); renderMaps(); return null; }
     mapOffer = null;
-    const a = await ov.admit(r, { ...deps, enforced: true });
-    await showMap(a, keptEntry);
+    await showMap(got.admitted, got.keptEntry);
   } catch (e) {
     if (e instanceof ov.NeedPermission) { if (collect) return e; needFor(e, pending); return null; }
     // A map kept that cannot be shown now (its server down, say) is left for the next load; what is said
@@ -1048,7 +1389,7 @@ async function addMapNow(pending, { collect = false } = {}) {
     if (collect) { console.warn('Chora: a map kept could not be shown', e); state.keptError = e.message; return null; }
     if (e instanceof ov.NeedChoice) {
       // Several georeferences of the map: the user chooses, the most recently changed offered first.
-      mapChoice = { choices: e.choices, chosen: e.defaultIndex, manifestUrl: mapOffer?.manifestUrl || null,
+      mapChoice = { choices: e.choices, chosen: e.defaultIndex, manifestUrl: e.manifestUrl ?? mapOffer?.manifestUrl ?? null,
         parsed: { kind: 'annotation', annotation: e.annotation, fetchedAt: e.fetchedAt, url: e.url, manifest: e.manifest } };
       mapOffer = null; setStatus(''); renderMaps();
       return null;
@@ -1119,6 +1460,7 @@ const renderMapsSoon = () => { rendering ??= setTimeout(() => { rendering = null
 
 function renderMaps() {
   const shown = new Map(layers.entries.map((e) => [e.key, e]));
+  if (!traceEditing) renderTrace();
   // The lines asking for permission, one for each not yet allowed (or allowed since the page loaded).
   const needBox = $('map-needs');
   needBox.replaceChildren();
@@ -1130,26 +1472,8 @@ function renderMaps() {
     needBox.appendChild(p);
     permissions.needs(p, c, s);
   }
-  let html = '';
-  if (mapChoice) {
-    const one = (c) => `Georeference ${c.index + 1}${c.label ? `: ${esc(c.label)}` : ''} <span class="muted">(${c.modified ? `changed ${esc(c.modified.slice(0, 10))}` : 'no date given'}, ${c.gcps === null ? 'control points not given' : `${c.gcps} control point${c.gcps === 1 ? '' : 's'}`}${c.id ? `; ${esc(c.id)}` : ''})</span>`;
-    html += `<div class="choice" id="chora-map-choice" role="group" aria-labelledby="chora-map-choice-text"><p id="chora-map-choice-text">This holds ${mapChoice.choices.length} georeferences of the map, made separately. Choose the one to show (the most recently changed is chosen):</p>
-      <ul class="choices">${mapChoice.choices.map((c) => `<li><label><input type="radio" name="georef-choice" value="${c.index}"${c.index === mapChoice.chosen ? ' checked' : ''}> ${one(c)}</label></li>`).join('')}</ul>
-      <p><button type="button" class="primary" id="chora-map-choose">Show this one</button> <button type="button" id="chora-map-choose-no">Not now</button></p></div>`;
-  }
-  if (mapOffer) {
-    const name = mapOffer.title ? `“${esc(mapOffer.title)}”` : 'This map';
-    // The Editor is linked unless Allmaps is set to Never, saying what following it sends (overlays.js).
-    const editor = editorShown() ? `<a href="${esc(ov.editorUrl(mapOffer.manifestUrl, mapOffer.services[0]))}" target="_blank" rel="noopener noreferrer" id="chora-map-editor">${esc(ov.EDITOR_LINK_TEXT)}</a>` : '';
-    html += `<div class="offer"><p>${name} came with no georeference${mapOffer.notFound ? ', and Allmaps has none for it' : ''}.</p>
-      ${mapOffer.notFound ? '' : '<p><button type="button" class="primary" id="chora-map-lookup">Look for a georeference</button></p>'}
-      ${editor ? `<p>${mapOffer.notFound ? 'You can' : 'Or'} georeference it in the Allmaps Editor, and paste here the georeference it makes: ${editor}</p>` : `<p>${mapOffer.notFound ? 'You can georeference it elsewhere, and' : 'Or'} paste a georeference of it here.</p>`}</div>`;
-  }
-  if (mapStatus) {
-    const warn = mapStatus.startsWith('warn:');
-    html += `<p class="${warn ? 'warn' : 'muted'}">${esc(mapStatus.replace(/^warn:/, ''))}${mapLink ? ` <a href="${esc(mapLink)}" target="_blank" rel="noopener noreferrer" id="chora-map-forwards">${esc(mapLink)}</a>` : ''}</p>`;
-  }
-  $('map-status').innerHTML = html;
+  // What the picker says of the last map asked for (overlays.js pickerStatus): the choice, the offer, the status line.
+  $('map-status').innerHTML = ov.pickerStatus({ choice: mapChoice, offer: mapOffer, status: mapStatus, link: mapLink, editor: editorShown(), prefix: 'chora' });
   $('overlay-list').innerHTML = state.overlays.map((o) => {
     const e = shown.get(o.key); if (!e) return '';
     const a = e.attribution || {};
@@ -1164,6 +1488,7 @@ function renderMaps() {
       <p class="overlay-controls"><label>Opacity <input type="range" min="0" max="100" step="5" value="${Math.round(o.opacity * 100)}" data-opacity></label>
       <label><input type="checkbox" data-show${o.visible ? ' checked' : ''}> Show</label>
       <button type="button" data-fit>Fit</button> <button type="button" data-remove-map>Remove</button></p>
+      ${traceKey === o.key ? `<p class="note" data-tracing>${esc(CHORA_TRACE.tracingThis)}</p>` : `<p><button type="button" data-trace-new>${esc(traceKey || !dataset || isSeedOpen() ? CHORA_TRACE.button : CHORA_TRACE.intoOpen)}</button></p>`}
       ${editorShown() ? `<p><a href="${esc(ov.editorUrl(e.manifestUrl, e.g.imageServiceId))}" target="_blank" rel="noopener noreferrer" data-editor>${esc(ov.EDITOR_LINK_TEXT)}</a></p>` : ''}</li>`;
   }).join('');
 }
@@ -1191,6 +1516,7 @@ function overlayClicked(e) {
   const key = li.dataset.overlay;
   if (e.target.matches('[data-permissions]')) permissions.open({ focus: e.target.dataset.permissions });
   if (e.target.matches('[data-fit]')) fitMap(key);
+  if (e.target.matches('[data-trace-new]')) beginSettings(key);
   if (e.target.matches('[data-remove-map]')) {
     layers.remove(key);
     ov.letGo(key).then(() => { state.overlays = state.overlays.filter((x) => x.key !== key); renderMaps(); updateTraceButtons(); });
@@ -1357,6 +1683,20 @@ export function mountChora(rootEl, context = {}) {
   $('overlay-list').addEventListener('input', overlayInput);
   $('overlay-list').addEventListener('change', overlayChanged);
   $('overlay-list').addEventListener('click', overlayClicked);
+  // Tracing a map into a new dataset: its panel and settings, the name form over the map, the list of what is traced.
+  tracings = traced.loadTracing();
+  $('trace').addEventListener('click', traceClicked);
+  $('trace').addEventListener('input', traceInput);
+  $('trace').addEventListener('submit', traceSubmitted);
+  $('name-panel').addEventListener('submit', namingSubmitted);
+  $('name-panel').addEventListener('input', namingInput);
+  $('name-panel').addEventListener('change', namingInput);
+  $('name-panel').addEventListener('keydown', namingKey);
+  $('name-panel').addEventListener('click', (e) => { if (e.target.id === 'chora-name-to') namingAddTo(); else if (e.target.id === 'chora-name-cancel') namingCancelled(); });
+  $('traced-list').addEventListener('click', tracedClicked);
+  $('traced-list').addEventListener('change', tracedChanged);
+  $('traced-prev').onclick = () => { tracedAt = Math.max(0, tracedAt - 1); renderTraced(); };
+  $('traced-next').onclick = () => { tracedAt++; renderTraced(); };
 
   // The map, its key, its drawing and its historical maps.
   listenForTileErrors();
@@ -1465,12 +1805,17 @@ export function mountChora(rootEl, context = {}) {
       // The historical maps shown last time (chora-overlays/) are working data too, as the panel says.
       for (const d of ['chora-outputs', SAVED]) try { await (await navigator.storage.getDirectory()).removeEntry(d, { recursive: true }); } catch { /* none kept */ }
       await ov.forgetKept();
+      // And the tracings' settings and the datasets made from maps (traced.js).
+      traced.forgetTracing(); tracings = traced.loadTracing();
       state.workingCleared = true;
     }
     inTurn(() => readmitKept());
-    // The dataset chosen in the page's step 1, if there is one, shown at once.
+    // The dataset chosen in the page's step 1, if there is one, shown at once; at a workflow's step "trace" with
+    // none, the dataset made from the map last traced.
     const given = host.files?.() || [];
     if (given.length && !files.length) await open(given);
+    else await resumeSeed();
+    renderTrace();
   }).catch((e) => (e.kind === 'pool-busy' ? inAnotherTab() : fail(e.message)));
   return {
     state,
@@ -1480,11 +1825,18 @@ export function mountChora(rootEl, context = {}) {
     holds: (list) => shown && !!dataset && state.phase !== 'in-another-tab' && isOpen([...(list || [])]),
     // Shown again: the map is fitted to its room, which it could not measure while hidden, and the files
     // chosen in step 1 meanwhile are opened.
-    show() { shown = true; mapApi.map.resize(); chosen(host.files?.() || []); },
+    show() {
+      shown = true; mapApi.map.resize(); layers?.pause(false); chosen(host.files?.() || []);
+      // At a workflow's step "trace" with nothing chosen: the dataset made from the map last traced (resumeSeed).
+      started?.then(() => { if (!(host.files?.() || []).length) resumeSeed(); renderTrace(); });
+    },
     // Hidden: a drawing or a trace under way is stopped, so that nothing waits on a map not seen.
     hide() {
       shown = false;
+      // The historical maps are not drawn into the map while it is hidden (overlays.js pause): drawn at no size, their renderer throws.
+      layers?.pause(true);
       if (traceWanted) setTraceMode(null);
+      closeNaming();
       mapApi.setMode('static');
       for (const x of $('draw-tools').querySelectorAll('button')) x.setAttribute('aria-pressed', 'false');
     },

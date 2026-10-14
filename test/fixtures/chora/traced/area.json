@@ -1,0 +1,96 @@
+{
+  "names": [
+    {
+      "toponym": "Silva",
+      "language": "la"
+    }
+  ],
+  "geometries": [
+    {
+      "geojson": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.1046875,
+              52.2171884
+            ],
+            [
+              0.1307292,
+              52.2171884
+            ],
+            [
+              0.1307292,
+              52.2015649
+            ],
+            [
+              0.1046875,
+              52.2015649
+            ],
+            [
+              0.1046875,
+              52.2171884
+            ]
+          ]
+        ]
+      },
+      "reprPoint": [
+        0.1177084,
+        52.2093767
+      ],
+      "bbox": [
+        0.1046875,
+        52.2015649,
+        0.1307292,
+        52.2171884
+      ],
+      "role": "https://w3id.org/plato#Extent",
+      "spatialPrecision": [
+        "approximate"
+      ]
+    }
+  ],
+  "timespans": [
+    {
+      "startEarliest": "1764",
+      "endLatest": "1764",
+      "sourceLabel": "[ca. 1764]"
+    }
+  ],
+  "types": [
+    {
+      "label": "greenwood"
+    }
+  ],
+  "contributor": {
+    "name": "Ada Surveyor"
+  },
+  "created": "2026-10-14T09:00:00Z",
+  "citations": [
+    {
+      "source": {
+        "@id": "https://iiif.example.org/manifests/grid/manifest",
+        "title": "A synthetic grid over Cambridge (test fixture)",
+        "authorityType": "source",
+        "licence": "https://creativecommons.org/publicdomain/mark/1.0/",
+        "timespan": {
+          "startEarliest": "1764",
+          "endLatest": "1764",
+          "sourceLabel": "[ca. 1764]"
+        }
+      },
+      "locator": "https://iiif.example.org/manifests/grid/canvas/c1#xywh=100,99,201,201",
+      "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+    },
+    {
+      "source": {
+        "@id": "https://annotations.allmaps.org/maps/0000000000000001",
+        "title": "Georeference of A synthetic grid over Cambridge (test fixture), made in Allmaps",
+        "authorityType": "source",
+        "derivedFrom": "https://iiif.example.org/manifests/grid/manifest"
+      },
+      "citationFunction": "http://purl.org/spar/cito/usesMethodIn"
+    }
+  ],
+  "notes": "Georeferenced through https://annotations.allmaps.org/maps/0000000000000001 (polynomial order 1, 4 control points), retrieved 2026-10-14T08:00:00Z. On canvas https://iiif.example.org/manifests/grid/canvas/c1 of manifest https://iiif.example.org/manifests/grid/manifest. Annotation modified 2026-09-30T00:00:00.000Z. The georeference misses its own control points by 0.00 km on average (root mean square; at most 0.00 km); this is a measure of the georeference, not of this position's accuracy. Traced by hand from a georeferenced historical map at zoom 13 in PLATO tools (Chora)."
+}

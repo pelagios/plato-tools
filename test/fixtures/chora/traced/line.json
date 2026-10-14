@@ -1,0 +1,80 @@
+{
+  "names": [
+    {
+      "toponym": "The Road",
+      "language": "en"
+    }
+  ],
+  "geometries": [
+    {
+      "geojson": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.1055371,
+            52.2176973
+          ],
+          [
+            0.126327,
+            52.2124359
+          ],
+          [
+            0.1462489,
+            52.2053438
+          ]
+        ]
+      },
+      "reprPoint": [
+        0.1261822,
+        52.2124725
+      ],
+      "bbox": [
+        0.1055371,
+        52.2053438,
+        0.1462489,
+        52.2176973
+      ],
+      "role": "https://w3id.org/plato#Extent",
+      "spatialPrecision": [
+        "approximate"
+      ]
+    }
+  ],
+  "types": [
+    {
+      "label": "road",
+      "identifier": "http://vocab.getty.edu/aat/300008217"
+    }
+  ],
+  "contributor": {
+    "name": "Ada Surveyor"
+  },
+  "created": "2026-10-14T09:00:00Z",
+  "citations": [
+    {
+      "source": {
+        "@id": "https://iiif.example.org/manifests/grid/manifest",
+        "title": "A synthetic grid over Cambridge (test fixture)",
+        "authorityType": "source",
+        "licence": "https://creativecommons.org/publicdomain/mark/1.0/",
+        "timespan": {
+          "startEarliest": "1790",
+          "endLatest": "1790",
+          "sourceLabel": "1790"
+        }
+      },
+      "locator": "https://iiif.example.org/iiif/grid#xywh=99,99,301,161",
+      "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+    },
+    {
+      "source": {
+        "@id": "https://annotations.allmaps.org/maps/0000000000000002",
+        "title": "Georeference of A synthetic grid over Cambridge (test fixture), made in Allmaps",
+        "authorityType": "source",
+        "derivedFrom": "https://iiif.example.org/manifests/grid/manifest"
+      },
+      "citationFunction": "http://purl.org/spar/cito/usesMethodIn"
+    }
+  ],
+  "notes": "Georeferenced through https://annotations.allmaps.org/maps/0000000000000002 (polynomial order 2, 9 control points), retrieved 2026-10-14T08:00:00Z. On canvas https://iiif.example.org/manifests/grid/canvas/c1 of manifest https://iiif.example.org/manifests/grid/manifest. Annotation modified 2026-09-30T00:00:00.000Z. The georeference misses its own control points by 0.00 km on average (root mean square; at most 0.00 km); this is a measure of the georeference, not of this position's accuracy. Traced by hand from a georeferenced historical map at zoom 13 in PLATO tools (Chora)."
+}

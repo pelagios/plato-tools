@@ -476,6 +476,17 @@ ol.adopt-candidates li.denied .cand-name { color: var(--muted); }
 .ink-panel label { display: block; margin: .15rem 0; }
 .ink-panel .ink-range input { width: 7rem; vertical-align: middle; }
 .ink-panel output { display: inline-block; min-width: 2.2rem; }
+/* Naming a place traced into a new dataset (src/chora/traced.js): over the map, on the side the ink panel is not. */
+.name-panel { left: auto; right: .6rem; z-index: 3; }
+.name-panel label { display: block; margin: .3rem 0 .05rem; }
+.name-panel input, .name-panel select { width: 100%; box-sizing: border-box; }
+.name-panel .name-what { font-weight: 700; margin: .2rem 0; }
+.name-panel .name-buttons { display: flex; flex-wrap: wrap; gap: .3rem; margin: .5rem 0 .2rem; }
+.chora-trace { border-top: 1px solid var(--line); margin-top: .8rem; padding-top: .3rem; }
+.chora-trace label { display: block; margin: .35rem 0 .05rem; }
+.chora-trace input[type="url"], .chora-trace input:not([type]), .chora-trace select { width: 100%; box-sizing: border-box; }
+.chora-trace fieldset.trace-shape { border: 1px solid var(--line); border-radius: 6px; margin: .3rem 0; padding: .2rem .5rem; }
+ul.pending.traced .traced-name { font-weight: 700; }
 .ink-panel .ink-buttons { margin: .4rem 0 .2rem; }
 .basemaps { position: absolute; left: .6rem; bottom: 2.2rem; max-width: min(24rem, calc(100% - 1.2rem)); max-height: 70%; overflow-y: auto; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: .3rem .7rem; font-size: .9rem; box-shadow: 0 1px 4px rgb(0 0 0 / .15); }
 .basemaps summary { cursor: pointer; }
