@@ -2307,7 +2307,9 @@ wired in `app.js`.
   the tracer's estimate. In a workflow that looks the places up, also whether the map's outline is the
   lookup's Scope (on unless unticked).
 - **The seed** (`seedDataset`): place-centric, no places, a draft, titled "Places traced from <map>",
-  under the base address (its `uriSpace` and `@id`), with the map's licence where it names one. Its text is
+  under the base address (its `uriSpace` and `@id`), with no licence (decision 10: nothing at dataset level;
+  the map's licence is on each citation of the map, and the dataset's is its maker's to give). Its base address
+  and title are fixed in the settings from the moment it exists (they are its file's). Its text is
   kept with the settings until it is first saved, so that the very file, and the drawings kept under its
   fingerprint (`drafts.js`), can be opened again: at a workflow's step `trace` with nothing open at once,
   elsewhere from "Go on tracing …". It is chosen in "Choose your data" (`host.choose`) and kept there as the
@@ -2338,21 +2340,25 @@ wired in `app.js`.
   adds the names, kinds and timespan: Chora's own path for a place the dataset has is unchanged), its
   geometries in the order drawn (the one named first), the map's date as its timespan unless the settings say
   not, and `featureParts`' citations and notes: the map cited as the evidence once for each part's box, its
-  source carrying the map's licence, its credit as written (`citation`, from the manifest's
+  source carrying that map's own licence, credit and date (by the key each part was traced from: a part over
+  another sheet never carries the first sheet's), its credit as written (`citation`, from the manifest's
   requiredStatement or attribution: decision 10, nothing at dataset level) and its date
   (`plato:source_timespan`, with `sourceLabel` as written); the georeference cited as the method; then
-  georefNote's sentences with the control-point misfit (`misfit: true`, decision 5: the misfit is never made
-  a precision), the label-anchor sentence only when every part is the label, and how each part was traced.
+  georefNote's sentences with the control-point misfit (decision 5: the misfit is never made a precision; left
+  out, not thrown, where a draft's record does not know it), the label-anchor sentence only when every part is the label, and how each part was traced.
   A feature not yet named is not saved, and the save says so. `save()` writes the new places after the
   input's own (the pipeline's `options.extraRecords`), refuses one whose address the dataset has
   (`chora-place-exists`) or that has nothing traced, and `verify()` expects their attestations added and
   exactly that many more places (`compare`'s `countPlaces`: the places the attestations are about), so that
-  two places saved as one fail it. The save's line says the places added.
+  two places saved as one fail it (a place of the dataset that had no attestation, drawn on in the same save,
+  counts as one more). The save's line says the places added; it tells the page whether it traced places from
+  a map (`host.saved(file, base, { traced })`), and only such a save does a workflow's step `trace`.
 - **Rights** (`src/engine/chora/rights.js`, one reading for every tool that shows or traces a map):
   `attributionOf` (moved from `overlays.js`), the georeference's own licence (`annotationLicenceOf`: an
   annotation's `rights`, else CC0 for Allmaps' annotations), and `rightsOf`, one verdict: free to reuse
   (the public domain, CC0, CC BY, CC BY-SA, RightsStatements.org NoC-US and NKC), not (NC, ND, In
-  Copyright), or not known (no licence named: a credit in words is not read as one). Its words are shown
+  Copyright), or not known (no licence named: a credit in words is not read as one, and one that says "public
+  domain" or "no known restrictions" is quoted and said not to be a licence). Its words are shown
   with the map's settings and the tracing.
 - **The picker** (`overlays.js`): `pickerForm`, `pickMap` (what was pasted, a map kept, or one chosen from
   a page of several, to a map admitted or the offer to look for a georeference) and `pickerStatus` are the
@@ -3164,7 +3170,8 @@ the map's server, known once its address is given, and `allmaps:allmaps`, for lo
 taking nothing, giving a dataset). Chora makes the dataset from the map there ("Tracing a map into a new
 dataset", above), told the step at hand by `host.step()` (Methodos's `step()`), and its save does the step
 (`placed()`, for `place` or `trace`: `CHORA_STEPS`; with no dataset that went to the step, the guard on the
-dataset Chora had open is skipped); "This step is done" takes the dataset chosen in step 1. Then Elenchos;
+dataset Chora had open is skipped, and the step is refused, in words, for a save that traced no place from a
+map); "This step is done" takes the dataset chosen in step 1. Then Elenchos;
 under "Will you look the places up in the World Historical Gazetteer…?" (`will-identify`, asked as a
 question) Map your data's lookup, review and decisions through the same operations and adapters, the
 lookup within the map's outline (its area Scope, set by Chora: `host.setScopeArea`), checked again and
@@ -3627,7 +3634,7 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   2026; "Match two datasets", above): nothing larger is refused, and nothing larger is measured.
 - **Tracing a map into a new dataset is measured to 5,000 features** (14 October 2026; "Tracing a map into a
   new dataset", above): at 5,000, opened and shown in 0.35 s, 245 ms to write the drawings kept after each
-  change, the save 2.6 s; the target, 2,000, at about half of each. Nothing larger is refused, and nothing larger
+  change, the save 2.6 s; the target, 2,000, opened in about two-thirds of that time, and written and saved in about half. Nothing larger is refused, and nothing larger
   is measured.
 - **A document's header comes first.** `dataSets` or `relationTypes` written after the records are
   reported, not read.

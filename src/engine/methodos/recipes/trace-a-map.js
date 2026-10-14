@@ -27,7 +27,7 @@ export default {
     maintainers: ASKS.maintainers,
   },
   before: [
-    { words: "Looking the places up uses the World Historical Gazetteer's allowance of requests: its daily cap is 5,000 requests per token, and the lookup says before it sends how much of that it would use. A map of many places may be looked up over more than one day, the lookup resuming where it stopped.", when: 'will-identify' },
+    { words: "Looking the places up uses the World Historical Gazetteer's allowance of requests: its cap is 5,000 requests a day per token, and the lookup says before it sends how much of that it would use. A map of many places may be looked up over more than one day, the lookup resuming where it stopped.", when: 'will-identify' },
   ],
   steps: [
     { id: 'trace', op: 'trace', title: 'Trace the places from the map, into a new dataset', from: {} },

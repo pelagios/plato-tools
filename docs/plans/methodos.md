@@ -528,7 +528,7 @@ data gives few) is unmeasured at this size too.
 new dataset" (DEVELOPERS.md, "Tracing a map into a new dataset"). Stephen's decisions of 14 October 2026, as built:
 
 1. *Starting.* "Follow it" starts the workflow at once: it takes no file. Chora makes the dataset, from the map's
-   title and licence, at the step `trace`; "Trace into a new dataset" works outside a workflow too.
+   title (with no licence: nothing at dataset level), at the step `trace`, and only a save of places traced does it; "Trace into a new dataset" works outside a workflow too.
 2. *New places.* A drawing made with no place chosen opens a name form over the map: draw, name, Enter; Cancel
    lets the drawing go; "Add to “…” instead" adds it to the place last named; "New place" deselects and opens the
    form. A shape accepted from the map's ink with no place chosen is a new place too.
@@ -548,7 +548,7 @@ new dataset" (DEVELOPERS.md, "Tracing a map into a new dataset"). Stephen's deci
    `sourceLabel` as written) and, by default, each place's.
 10. *Scope of v1.* The lookup is a question; Map your data's lookup, review and decisions follow under it; the
     sheet's outline is the lookup's area Scope, on unless unticked, shown in the tracker's Scope line; the plan
-    says WHG's daily cap of 5,000 requests per token. One sheet per workflow, its settings kept by Chora's map key.
+    says WHG's cap of 5,000 requests a day per token. One sheet per workflow, its settings kept by Chora's map key.
     The manifest's credit goes into the cited source's `citation`; nothing at dataset level.
 
 Built for a later "Make an open map" (#37) to reuse: the map picker as one component (`overlays.js`

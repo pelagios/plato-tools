@@ -59,12 +59,12 @@ test('the interview: a map, to a map or to publish, leads to it; the base addres
   assert.equal(baseAsked(choose('table', 'map'), { 'has-regions': true }).why, undefined, "Map your data's answer is as it was");
 });
 
-test('the plan: the lookup, its review and the decisions only when identifying, saying WHG\'s daily cap of 5,000 requests per token; publishing adds Agora\'s steps', () => {
+test('the plan: the lookup, its review and the decisions only when identifying, saying WHG\'s cap of 5,000 requests a day per token; publishing adds Agora\'s steps', () => {
   const c = choose('map', 'map');
   const yes = plan('trace-a-map', answersFor(c, { 'will-identify': true, 'will-publish': false }, { base: BASE }));
   assert.deepEqual(yes.steps.map((s) => s.id), ['trace', 'check', 'lookup', 'review', 'apply', 'again', 'compare', 'out']);
   assert.equal(yes.before.length, 1);
-  assert.match(yes.before[0], /daily cap is 5,000 requests per token/);
+  assert.match(yes.before[0], /cap is 5,000 requests a day per token/);
   assert.equal(yes.steps[0].tool, 'Chora'); assert.equal(yes.steps[0].kind, 'interactive');
   const no = plan('trace-a-map', answersFor(c, { 'will-identify': false, 'will-publish': true }, { base: BASE }));
   assert.deepEqual(no.steps.map((s) => s.id), ['trace', 'check', 'out', 'mint', 'report', 'site', 'w3id']);
@@ -134,7 +134,7 @@ async function tracedDataset(names, base) {
     const geojson = { type: 'Point', coordinates: (await georef.toWorld(g, { type: 'Point', coordinates: [120 + 90 * i, 200] }, { space: 'image', precision: 7 })).geojson.coordinates };
     const t = await trace.traceFor(g, geojson, { key: 'grid', title: g.title });
     const id = mintPlaceId(base, name, taken); taken.add(id);
-    const parts = trace.featureParts([{ trace: t, role: 'RepresentativePoint', geometry: geojson, zoom: 14 }], { sourceTimespan: mapTimespan('1746') });
+    const parts = trace.featureParts([{ trace: t, role: 'RepresentativePoint', geometry: geojson, zoom: 14 }], { sourceOf: () => ({ timespan: mapTimespan('1746') }) });
     places.push(newPlaceRecord({ id, label: name, attestations: [featureAttestation({ geometries: [{ geojson, ...TRACED_DEFAULTS.point }], names: [{ toponym: name, language: 'en' }], timespan: mapTimespan('1746'), contributor: { name: 'Ada Tracer' }, created: '2026-10-14T09:00:00Z', ...parts })] }));
   }
   const e = testEnv();
