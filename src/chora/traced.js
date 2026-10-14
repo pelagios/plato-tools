@@ -82,7 +82,7 @@ export function settingsFrom(v, was) {
 
 /** The dataset a tracing begins with, as a file: from the map's settings (seed.js seedDataset), named for the map. */
 export function seedFile(settings, { now = Date.now() } = {}) {
-  const text = JSON.stringify(seedDataset({ mapTitle: settings.mapTitle, title: settings.datasetTitle, licence: settings.licence, base: settings.base }), null, 2) + '\n';
+  const text = JSON.stringify(seedDataset({ mapTitle: settings.mapTitle, title: settings.datasetTitle, base: settings.base }), null, 2) + '\n';
   return { name: seedName(settings.mapTitle), text, lastModified: now };
 }
 
@@ -129,7 +129,9 @@ export function newPlacesOf(drafts, { settingsOf = () => null, contributor, vers
     const parts = [main, ...list.filter((d) => d !== main)];
     const s = settingsOf(main.mapKey) || {};
     const date = mapTimespan(s.date);
-    const traced = featureParts(parts.map((p) => ({ trace: p.trace, role: p.role, geometry: p.geojson, zoom: p.zoom })), { version, credit: s.credit || null, sourceTimespan: date });
+    // Each part's map cited with that map's own credit and date, by the key it was traced from: never another sheet's.
+    const sourceOf = (t) => { const own = settingsOf(t.key); return own ? { credit: own.credit || null, timespan: mapTimespan(own.date) } : null; };
+    const traced = featureParts(parts.map((p) => ({ trace: p.trace, role: p.role, geometry: p.geojson, zoom: p.zoom })), { version, sourceOf });
     const radius = parts.find((p) => p.radiusMine && Number.isFinite(p.precisionKm));
     // Chora's drawing note has no full stop of its own (words.js): one is put before a sentence after it.
     const how = traced ? traced.notes : choraDrawingNote({ basemap: main.basemap, zoom: main.zoom });
@@ -168,7 +170,7 @@ export function scriptChoice(id, language, chosen) {
  * it, the language of the names (the script where it implies one), the defaults for points, lines and areas,
  * an uncertainty radius of the user's own, and in a workflow that looks the places up, the outline as its Scope.
  */
-export function settingsForm(s, { started = false, identify = false } = {}) {
+export function settingsForm(s, { started = false, identify = false, fileTitle = null } = {}) {
   const shapes = SHAPES.map(([k, words]) => `<fieldset class="trace-shape" data-shape="${k}"><legend>${esc(words)}</legend>
       <label>What it marks <select id="chora-tset-${k}-role">${opt(ROLES.filter((r) => r !== 'LabelAnchor'), s.defaults[k].role, roleWords)}</select></label>
       <label>How well known <select id="chora-tset-${k}-precision">${opt(PRECISIONS, s.defaults[k].precision, (p) => p.replace('_', ' '))}</select></label></fieldset>`).join('');
@@ -179,7 +181,8 @@ export function settingsForm(s, { started = false, identify = false } = {}) {
     <input id="chora-tset-base" type="url" required aria-required="true" autocomplete="url" spellcheck="false" value="${esc(s.base)}"${started ? ' readonly aria-describedby="chora-tset-base-fixed"' : ' aria-describedby="chora-tset-base-help"'}>
     <p class="muted" id="${started ? 'chora-tset-base-fixed' : 'chora-tset-base-help'}">${esc(started ? CHORA_TRACE.baseFixed : CHORA_TRACE.baseHelp)}</p>
     <label for="chora-tset-title">${esc(CHORA_TRACE.titleQuestion)}</label>
-    <input id="chora-tset-title" value="${esc(s.datasetTitle)}" autocomplete="off">
+    <input id="chora-tset-title" value="${esc(started && fileTitle ? fileTitle : s.datasetTitle)}" autocomplete="off"${started ? ' readonly aria-describedby="chora-tset-title-fixed"' : ''}>
+    ${started ? `<p class="muted" id="chora-tset-title-fixed">${esc(CHORA_TRACE.titleFixed)}</p>` : ''}
     <label for="chora-tset-date">${esc(CHORA_TRACE.dateQuestion)}</label>
     <input id="chora-tset-date" value="${esc(s.date)}" autocomplete="off" placeholder="1764" aria-describedby="chora-tset-date-help">
     <p class="muted" id="chora-tset-date-help">${esc(CHORA_TRACE.dateHelp)}</p>

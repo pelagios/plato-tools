@@ -44,11 +44,11 @@ async function traced(g, pts, { names = [{ toponym: 'Fort Du Quesne', language: 
     parts.push({ trace: await trace.traceFor(g, lg, { key: 'm', title: g.title, fetchedAt: '2026-10-14T08:00:00Z' }), role: 'LabelAnchor', geometry: lg, zoom: 12 });
     geometries.push({ geojson: lg, role: 'LabelAnchor' });
   }
-  const p = trace.featureParts(parts, { credit: 'Public Domain/No known restrictions on use.', sourceTimespan: timespan });
+  const p = trace.featureParts(parts, { sourceOf: (x) => (x.key === 'm' ? { credit: 'Public Domain/No known restrictions on use.', timespan } : null) });
   return featureAttestation({ geometries, names, types, timespan, contributor: who, created: WHEN, ...p });
 }
 async function seedFile(extra = {}) {
-  return textFile(JSON.stringify(seedDataset({ mapTitle: rocque.title, licence: 'https://creativecommons.org/publicdomain/mark/1.0/', base: BASE, ...extra })), seedName(rocque.title));
+  return textFile(JSON.stringify(seedDataset({ mapTitle: rocque.title, base: BASE, ...extra })), seedName(rocque.title));
 }
 async function saved(f, newPlaces, additions = [], options = {}) {
   const e = env();
@@ -58,13 +58,14 @@ async function saved(f, newPlaces, additions = [], options = {}) {
   return { ...r, input, e, name, text: name ? e.outs[name].join('') : null };
 }
 
-test('the seed: an empty place-centric dataset named for the map, under the base address, with its licence, which Elenchos passes', async () => {
-  const doc = seedDataset({ mapTitle: rocque.title, licence: 'https://creativecommons.org/publicdomain/mark/1.0/', base: 'https://example.org/traced' });
+test('the seed: an empty place-centric dataset named for the map, under the base address, with no licence of the map\'s (nothing at dataset level), which Elenchos passes', async () => {
+  const doc = seedDataset({ mapTitle: rocque.title, licence: 'https://creativecommons.org/licenses/by-nc-sa/3.0/', base: 'https://example.org/traced' });
   assert.equal(doc.profile, 'place-centric');
   assert.deepEqual(doc.spatialEntities, []);
   assert.equal(doc.gazetteer.title, `Places traced from ${rocque.title}`);
   assert.equal(doc.gazetteer.uriSpace, 'https://example.org/traced/');
-  assert.equal(doc.gazetteer.licence, 'https://creativecommons.org/publicdomain/mark/1.0/');
+  assert.equal(doc.gazetteer.licence, undefined, "a map's licence given is not the dataset's: a Rumsey map would make it BY-NC-SA");
+  assert.ok(doc.gazetteer.title && doc.gazetteer.uriSpace, 'the rest of the header is there');
   assert.equal(doc.gazetteer.status, 'draft');
   assert.match(seedName(rocque.title), /^traced-a-general-map-of-north-america[a-z-]*\.json$/);
   const r = await go([textFile(JSON.stringify(doc), 'seed.json')], 'check');
@@ -73,7 +74,7 @@ test('the seed: an empty place-centric dataset named for the map, under the base
   // The control: Elenchos can fail it. A seed that is not one (a place with no label) has a problem.
   const bad = await go([textFile(JSON.stringify({ ...doc, spatialEntities: [{ '@id': BASE + 'place/x' }] }), 'bad.json')], 'check');
   assert.ok(bad.report.errors > 0);
-  // Without a licence, or a base, none is written.
+  // Without a base, none is written.
   const bare = seedDataset({ mapTitle: '' });
   assert.equal(bare.gazetteer.licence, undefined); assert.equal(bare.gazetteer.uriSpace, undefined);
   assert.equal(bare.gazetteer.title, 'Places traced from a historical map');
@@ -283,7 +284,11 @@ test('rights: the map\'s licence and the georeference\'s (Allmaps\' are CC0) giv
   const nc = rightsOf({ manifest: { id: 'https://www.davidrumsey.com/m' }, annotation: ROCQUE_A });
   assert.equal(nc.free, false); assert.match(nc.words, /CC BY-NC-SA 3\.0/);
   const unknown = rightsOf({ manifest: ROCQUE_M, annotation: ROCQUE_A });
-  assert.equal(unknown.free, null); assert.match(unknown.words, /the map names no licence/);
+  // The BPL manifest's credit says "Public Domain/No known restrictions" in words, and names no licence: not known, and said so.
+  assert.equal(unknown.free, null);
+  assert.equal(unknown.words, `Not known to be free to reuse: the map's credit says “${ROCQUE_M.attribution}”, which is not a licence, and its georeference is licensed CC0. Check the holder's terms before you publish what you trace from it.`);
+  const bare = rightsOf({ manifest: { id: 'https://x.example.org/m', attribution: 'Held by a library' }, annotation: ROCQUE_A });
+  assert.match(bare.words, /the map names no licence/, 'a credit that says nothing of its use is not quoted as if it did');
   assert.equal(unknown.map.credit, ROCQUE_M.attribution);
 });
 
@@ -305,4 +310,30 @@ test('the sheet\'s outline: the mask through the georeference, at most 1,000 cor
   // The image's corners are in it: the whole image, not the mask's inset.
   const corner = await at(grid, 0, 0);
   assert.ok(r.area.coordinates[0].some((p) => Math.abs(p[0] - corner[0]) < 1e-5 && Math.abs(p[1] - corner[1]) < 1e-5), JSON.stringify(corner));
+});
+
+test('a place of the dataset with no attestations, drawn on in the same save as new places, is one more place: the save passes (Mneme counts it)', async () => {
+  const doc = { ...seedDataset({ mapTitle: rocque.title, base: BASE }), spatialEntities: [{ '@id': BASE + 'place/listed', label: 'Listed', attestations: [] }, { '@id': BASE + 'place/bare', label: 'Bare' }] };
+  const f = textFile(JSON.stringify(doc), 'listed.json');
+  const add = { placeId: BASE + 'place/listed', attestation: (await places(1, { from: 7 }))[0].attestations[0] };
+  const add2 = { placeId: BASE + 'place/bare', attestation: (await places(1, { from: 8 }))[0].attestations[0] };
+  const r = await saved(f, await places(2), [add, add2]);
+  assert.ok(r.mneme?.passed, JSON.stringify(r.mneme?.reasons));
+  assert.deepEqual(r.mneme.report.counts.places, { earlier: 0, later: 4 }, 'two new, and two of its own given their first attestations');
+  assert.equal(r.report.counts['attestations added'], 4);
+});
+
+test('the misfit not known (a draft kept without its figures): the sentence is left out, not thrown; a thin plate spline still says it passes through its points', async () => {
+  const g = await georef.readGeoreference(fx('test/fixtures/chora-iiif/annotation-order2.json'));
+  const geojson = { type: 'Point', coordinates: await at(g, 200, 200) };
+  const t = await trace.traceFor(g, geojson, { key: 'm', title: 'x' });
+  const old = { ...t, record: { ...t.record, controlPointMisfitKm: null, controlPointMisfitMaxKm: null } };
+  const p = trace.featureParts([{ trace: old, role: 'RepresentativePoint', geometry: geojson, zoom: 9 }]);
+  assert.ok(p.notes.startsWith('Georeferenced through'), p.notes);
+  assert.ok(!p.notes.includes('misses its own control points'));
+  const known = trace.featureParts([{ trace: t, role: 'RepresentativePoint', geometry: geojson, zoom: 9 }]);
+  assert.ok(known.notes.includes('misses its own control points'), 'with its figures, it is said');
+  const tps = await trace.traceFor(rocque, { type: 'Point', coordinates: await at(rocque, 5000, 4000) }, { key: 'r', title: 'r' });
+  const pt = trace.featureParts([{ trace: { ...tps, record: { ...tps.record, controlPointMisfitKm: null } }, role: 'RepresentativePoint', geometry: { type: 'Point', coordinates: [0, 0] }, zoom: 9 }]);
+  assert.ok(pt.notes.includes('passes through its control points exactly'));
 });

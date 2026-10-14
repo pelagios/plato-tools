@@ -102,6 +102,11 @@ export function rightsOf({ manifest = null, serviceId = null, annotation = null,
   const m = freeToReuse(map.licence), g = freeToReuse(georeference.licence);
   const free = m === false || g === false ? false : m === true && g === true ? true : null;
   const named = (x, what) => (x.licence ? `${what} is licensed ${x.licenceLabel || x.licence}` : `${what} names no licence`);
+  // A credit that says the map is free in words ("Public Domain", "No known restrictions") is not a licence: said so.
+  const inWords = !map.licence && map.credit && /public domain|no known (copyright )?restrictions/i.test(map.credit);
+  if (free === null && inWords) {
+    return { map, georeference, free, words: `Not known to be free to reuse: the map's credit says “${map.credit}”, which is not a licence, and ${named(georeference, 'its georeference')}. Check the holder's terms before you publish what you trace from it.` };
+  }
   const words = free === true ? `Free to reuse: ${named(map, 'the map')}, and ${named(georeference, 'its georeference')}.`
     : free === false ? `Not free to reuse as it is: ${named(map, 'the map')}, and ${named(georeference, 'its georeference')}. This may bear on how what you trace from it can be reused.`
     : `Not known to be free to reuse: ${named(map, 'the map')}, and ${named(georeference, 'its georeference')}. Check the holder's terms before you publish what you trace from it.`;

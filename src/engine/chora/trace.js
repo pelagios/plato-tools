@@ -189,21 +189,24 @@ const isAnchor = (role) => role === 'LabelAnchor' || role === georef.LABEL_ANCHO
  * The citations and notes of one feature traced from a map into a new place (featureAttestation, seed.js):
  * `parts` its geometries as drawn, each { trace, role, geometry, zoom } (a part not traced, trace null, cites
  * nothing). The map is cited as the evidence once for each part's box on it (georefCitation, padded as the
- * part's trace says), its source carrying the map's licence, its credit as written (`credit`, the manifest's
- * requiredStatement: decision 10) and its date (`sourceTimespan`, plato:source_timespan: decision 9); the
- * georeference once, as the method. The notes: georefNote's fixed sentences with the control-point misfit
- * (decision 5: said, and never made the position's precision), the label-anchor sentence only when every
- * part is where the map writes the name; then how each part was traced, each said once. Null when no part
- * was traced from a map.
+ * part's trace says), its source carrying the map's licence, its credit as written (the manifest's
+ * requiredStatement: decision 10) and its date (plato:source_timespan: decision 9), each that map's own:
+ * `sourceOf(trace)` gives { credit, timespan } for the map a part was traced from (by its trace.key), or nothing,
+ * so that a part over another sheet never carries the first sheet's; the georeference once, as the method.
+ * The notes: georefNote's fixed sentences with the control-point misfit (decision 5: said, and never made the
+ * position's precision; left out where the record does not know it, rather than thrown), the label-anchor
+ * sentence only when every part is where the map writes the name; then how each part was traced, each said
+ * once. Null when no part was traced from a map.
  */
-export function featureParts(parts, { version, credit = null, sourceTimespan = null } = {}) {
+export function featureParts(parts, { version, sourceOf = () => null } = {}) {
   const traced = (parts || []).filter((p) => p && p.trace);
   if (!traced.length) return null;
   const citations = [], seen = new Set(), records = new Map();
   for (const p of traced) {
     const t = p.trace;
     const c = georef.georefCitation(t.record, { region: t.region, ...(t.pad ? { pad: t.pad } : {}) });
-    const source = { ...c.source, ...(t.licence ? { licence: t.licence } : {}), ...(credit ? { citation: credit } : {}), ...(sourceTimespan ? { timespan: { ...sourceTimespan } } : {}) };
+    const own = sourceOf(t) || {};
+    const source = { ...c.source, ...(t.licence ? { licence: t.licence } : {}), ...(own.credit ? { citation: own.credit } : {}), ...(own.timespan ? { timespan: { ...own.timespan } } : {}) };
     const key = `${source['@id'] ?? ''}|${c.locator ?? ''}`;
     if (!seen.has(key)) { seen.add(key); citations.push({ ...c, source }); }
     const id = t.record.annotationId ?? t.record.imageServiceId;
@@ -211,11 +214,17 @@ export function featureParts(parts, { version, credit = null, sourceTimespan = n
   }
   for (const t of records.values()) if (t.record.annotationId) citations.push(georef.georefAnnotationCitation(t.record));
   const anchor = traced.every((p) => isAnchor(p.role));
-  const said = [...records.values()].map((t) => georef.georefNote(anchor ? { ...t.record, role: georef.LABEL_ANCHOR } : t.record, { ...(t.fetchedAt ? { fetched: t.fetchedAt } : {}), misfit: true }));
+  const said = [...records.values()].map((t) => georef.georefNote(anchor ? { ...t.record, role: georef.LABEL_ANCHOR } : t.record, { ...(t.fetchedAt ? { fetched: t.fetchedAt } : {}), misfit: misfitKnown(t.record) }));
   const how = [...new Set(traced.map((p) => howTraced(p.trace, { zoom: p.zoom, geometry: p.geometry, version })))];
   return { citations, notes: [...said, ...how].join(' ') };
 }
 
+/**
+ * Whether georefNote can say the control-point misfit of a record: a transformation that passes through its
+ * points says so in words; any other needs the figures toPixels measured (a draft kept by an older page may
+ * not have them, and georefNote throws without them).
+ */
+const misfitKnown = (record) => record?.transformation === 'thinPlateSpline' || Number.isFinite(record?.controlPointMisfitKm);
 /** Douglas–Peucker: the points of an open line kept within `tol` of it (degrees, flat). */
 function simplifyLine(pts, tol) {
   if (pts.length < 3) return pts;

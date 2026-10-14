@@ -117,10 +117,10 @@ export function navDateWords(navDate) {
 /**
  * The dataset a tracing begins with: place-centric, no places yet, a draft, its title "Places traced
  * from <the map's title>" (or `title`), its description saying so, under the base address (uriSpace), with
- * the licence given (the map's, by its rights; none when it names none). The map's credit is not here:
- * it is carried in each citation of the map (featureParts, trace.js).
+ * and no licence (decision 10: nothing at dataset level; the dataset's licence is its maker's to give). The
+ * map's licence and credit are carried in each citation of the map (featureParts, trace.js).
  */
-export function seedDataset({ mapTitle, title, licence, base } = {}) {
+export function seedDataset({ mapTitle, title, base } = {}) {
   const map = typeof mapTitle === 'string' && mapTitle.trim() ? mapTitle.trim() : 'a historical map';
   const b = normaliseBase(base);
   return {
@@ -130,7 +130,6 @@ export function seedDataset({ mapTitle, title, licence, base } = {}) {
       ...(b ? { '@id': b } : {}),
       title: typeof title === 'string' && title.trim() ? title.trim() : `Places traced from ${map}`,
       description: `The places traced from the georeferenced historical map “${map}” in PLATO tools (Chora), each as it is written and drawn on that map, citing the map and its georeference.`,
-      ...(typeof licence === 'string' && /^https?:\/\/\S+$/.test(licence) ? { licence } : {}),
       status: 'draft',
       ...(b ? { uriSpace: b } : {}),
     },

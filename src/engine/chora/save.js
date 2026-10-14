@@ -62,13 +62,15 @@ const refuseNotKept = (rep, items, kind = 'chora-not-kept') => rep.add('error', 
  * keyer()'s: null for a record that is not a place, which is passed through as it is. A place the
  * dataset gives twice under one @id gets its additions once, at the first, as Chora's store shows it.
  */
-function appendTo(rec, key, byPlace, placed, unlisted) {
+function appendTo(rec, key, byPlace, placed, unlisted, firsts) {
   const adds = key === null || placed.has(key) ? null : byPlace.get(key);
   if (!adds) return rec;
   // Attestations that are not a list cannot have drawings put after them without replacing them: the
   // record is left as it was, and the save refused (save(), which looks for such a place first).
   if (!listed(rec)) { unlisted.set(key, rec); return rec; }
   placed.add(key);
+  // A place with no attestation until now: the version check, which counts the places attestations are about, counts it as one more.
+  if (!(rec.attestations || []).length) firsts.add(key);
   return { ...rec, attestations: [...(rec.attestations || []), ...adds] };
 }
 /** Whether a record's attestations are a list, or absent (a place with none yet). */
@@ -84,9 +86,9 @@ const refuse = (rep, key, rec) => rep.error('chora-attestations-not-a-list', CHO
  * here as there. makeWriter names the file from options.name, so the output is `name`. Returns run()'s
  * result.
  */
-function writeWithAdditions(input, byPlace, placed, unlisted, env, name, target, newPlaces = []) {
+function writeWithAdditions(input, byPlace, placed, unlisted, env, name, target, newPlaces = [], firsts = new Set()) {
   const keyOf = keyer();
-  return run({ input, action: 'convert', target, options: { name, augment: (rec) => appendTo(rec, keyOf(rec), byPlace, placed, unlisted), ...(newPlaces.length ? { extraRecords: newPlaces } : {}) } }, env);
+  return run({ input, action: 'convert', target, options: { name, augment: (rec) => appendTo(rec, keyOf(rec), byPlace, placed, unlisted, firsts), ...(newPlaces.length ? { extraRecords: newPlaces } : {}) } }, env);
 }
 /**
  * env, with the name of each output the run opens kept in `opened`. A run stopped part-way (a
@@ -238,8 +240,8 @@ export async function save(input, additions, env, options = {}) {
   const placed = new Set();
   progress({ save: 'writing', attestations: 0, ...(options.attestations ? { total: options.attestations } : {}), elapsedMs: Date.now() - t0 });
   const opened = [];
-  const newPlaces = [...fresh.values()];
-  const w = await writeWithAdditions(input, byPlace, placed, unlisted, naming(step('writing', options.attestations), opened), name, target, newPlaces);
+  const newPlaces = [...fresh.values()], firsts = new Set();
+  const w = await writeWithAdditions(input, byPlace, placed, unlisted, naming(step('writing', options.attestations), opened), name, target, newPlaces, firsts);
   const report = w.report;
   const added = [...byPlace.values()].reduce((s, l) => s + l.length, 0) + newPlaces.reduce((s, r) => s + r.attestations.length, 0);
   // The files written, or, from a run that ended with no outputs (stopped part-way, or knowingly
@@ -280,6 +282,7 @@ export async function save(input, additions, env, options = {}) {
   progress({ save: 'checking', version: 'earlier', phase: 'reading', attestations: 0, ...(earlier ? { total: earlier } : {}), elapsedMs: Date.now() - t0 });
   // The version check reads the dataset, then the file written, which has the additions besides.
   const checking = { ...env, progress: (p) => progress({ ...p, save: 'checking', ...(earlier ? { total: p.version === 'later' ? earlier + added : earlier } : {}), elapsedMs: Date.now() - t0 }) };
-  const mneme = await verify(input, await options.reopen(w.outputs[0]), added, checking, { places: newPlaces.length });
+  // The places the check is to find more of: the new ones, and any of the dataset's own given its first attestation now.
+  const mneme = await verify(input, await options.reopen(w.outputs[0]), added, checking, { places: newPlaces.length ? newPlaces.length + firsts.size : 0 });
   return { report, outputs: w.outputs, mneme };
 }

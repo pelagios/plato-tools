@@ -162,7 +162,28 @@ test('a map\'s settings: the base address needed, a bad language or radius refus
     traced.forgetTracing();
     assert.deepEqual(traced.loadTracing(), { maps: {}, seeds: {}, open: {}, current: null });
   } finally { delete globalThis.localStorage; }
-  // The seed made from the settings: the map's title, its licence, the base.
-  const seed = JSON.parse(traced.seedFile({ ...ok, mapTitle: 'A map', licence: 'https://creativecommons.org/publicdomain/mark/1.0/' }, { now: 5 }).text);
-  assert.equal(seed.gazetteer.uriSpace, 'https://example.org/x/'); assert.equal(seed.gazetteer.licence, 'https://creativecommons.org/publicdomain/mark/1.0/');
+  // The seed made from the settings: the map's title and the base; the map's licence is not the dataset's (decision 10).
+  const seed = JSON.parse(traced.seedFile({ ...ok, mapTitle: 'A map', licence: 'https://creativecommons.org/licenses/by-nc-sa/3.0/' }, { now: 5 }).text);
+  assert.equal(seed.gazetteer.uriSpace, 'https://example.org/x/'); assert.equal(seed.gazetteer.licence, undefined);
+  assert.equal(seed.gazetteer.title, ok.datasetTitle);
+});
+
+test('a feature with a part over another sheet: each map cited with its own credit and date, never the first sheet\'s; with no settings for that sheet, none', async () => {
+  const dominions = await georef.readGeoreference(fx('test/fixtures/georef/bpl-british-dominions-annotation.json'), { manifest: fx('test/fixtures/georef/bpl-british-dominions-manifest.json') });
+  const id = 'https://example.org/traced/place/two-sheets';
+  const main = await draft(rocque, 'rocque', [[7340, 2890]], { placeId: id, label: 'Two sheets', names: [traced.nameOf({ toponym: 'Two sheets' })], s: S.rocque });
+  const other = await draft(dominions, 'dom', [[3000, 2000]], { placeId: id, label: 'Two sheets', part: true, s: S.rocque });
+  const B = settings('dom', dominions.title, { date: '1820' }, { rights: 'https://creativecommons.org/publicdomain/mark/1.0/', attribution: 'The second sheet\'s credit' });
+  const cites = (settingsOf) => traced.newPlacesOf([main, other], { settingsOf, contributor: who }).newPlaces[0].attestations[0].citations.filter((c) => c.citationFunction.endsWith('citesAsEvidence'));
+  const onlyA = cites((k) => (k === 'rocque' ? S.rocque : null));
+  assert.equal(onlyA.length, 2);
+  const [a, b] = onlyA;
+  assert.equal(a.source.citation, ROCQUE_M.attribution); assert.equal(a.source.timespan.sourceLabel, '[ca. 1764]');
+  assert.notEqual(b.source['@id'], a.source['@id'], 'the second part is on the other sheet');
+  assert.equal(b.source.citation, undefined, "no credit for a sheet whose settings are not given, never the first sheet's");
+  assert.equal(b.source.timespan, undefined);
+  const both = cites((k) => (k === 'rocque' ? S.rocque : k === 'dom' ? B : null));
+  assert.equal(both[1].source.citation, "The second sheet's credit");
+  assert.deepEqual(both[1].source.timespan, { startEarliest: '1820', endLatest: '1820', sourceLabel: '1820' });
+  assert.equal(both[0].source.citation, ROCQUE_M.attribution);
 });
