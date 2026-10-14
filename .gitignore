@@ -6,3 +6,7 @@ src/build-info.json
 .env
 .env.*
 .venv/
+
+# Secrets belong in ~/.config/plato-tools/secrets.env; never in the checkout
+secrets.env
+*.secrets.env
