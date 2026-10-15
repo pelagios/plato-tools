@@ -7,6 +7,7 @@ import { prepare, run, TARGETS } from './pipeline.js';
 import { compare } from './compare.js';
 import { publish } from './agora/index.js';
 import { match, gather } from './krisis/match.js';
+import { mintCollector } from './krisis/wikidata.js';
 import { apply } from './krisis/apply.js';
 import { review, choraLoadFailure } from './words.js';
 import { DataError } from './input.js';
@@ -347,6 +348,18 @@ self.onmessage = async ({ data }) => {
       postMessage({ type: 'done', ...result });
     } else if (typeof data.cmd === 'string' && data.cmd.startsWith('chora-')) {
       await choraCommand(data);
+    } else if (data.cmd === 'wikidata-collect') {
+      // Krisis: Wikidata items (wikidata.js). What an item is made from, read from the dataset's records for the
+      // page's plan (the names with their languages, the points, the dates, the sources cited, each attestation's
+      // licence read), for the places asked for (or all); nothing is written.
+      const subjects = await detect(data.subjects);
+      if (!readable(subjects)) { postMessage({ type: 'wikidata-collect', records: null, gazetteer: null, reason: subjects.reason }); return; }
+      const { env, tidy } = await runEnv();
+      const c = mintCollector(Array.isArray(data.places) ? new Set(data.places) : null);
+      let r;
+      try { r = await run({ input: subjects, action: 'check', options: { ...(data.options || {}), sink: c.sink } }, { ...env, progress: () => {} }); } finally { tidy(); }
+      const { gazetteer, records } = c.result();
+      postMessage({ type: 'wikidata-collect', gazetteer, records: r.incomplete ? null : [...records.entries()], reason: r.incomplete ? (r.report.items.find((i) => i.kind === 'unreadable')?.message || 'not read to the end') : null });
     } else if (data.cmd === 'places') {
       // Krisis: gazetteer lookup. The places of the dataset, with the links it states, for a lookup the
       // page runs on its own thread (src/engine/krisis/lookup.js), so that the token never comes here.

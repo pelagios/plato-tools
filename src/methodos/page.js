@@ -42,7 +42,7 @@ function problemOf(r) {
 // Each operation's tool on this page: the key of #tool=<key> (src/app.js, TOOLS), or null where the
 // step is done elsewhere (Hermes's columns, at the drop zone; Chora, on the map, at #chora).
 const PAGE_TOOL = {
-  check: 'check', convert: 'convert', compare: 'versions', match: 'match', lookup: 'match', 'lookup.levels': 'match', review: 'match', apply: 'match',
+  check: 'check', convert: 'convert', compare: 'versions', match: 'match', lookup: 'match', 'lookup.levels': 'match', review: 'match', apply: 'match', 'wikidata.items': 'match',
   'relate.containment': 'match', 'publish.report': 'publish', 'publish.mint': 'publish', 'publish.site': 'publish', 'publish.w3id': 'publish',
 };
 // The tools that the interview names when no workflow fits: their names, and where each is chosen.
@@ -588,6 +588,18 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       if (why) throw new Error(`${why} ${reviewInput(s) ? `Open the review the match made (“Open the review (${reviewInput(s).name})”), and decide there.` : 'Do the match again with the files it took.'}`);
       return { work: await refsHeld([new File([r.text], r.name, { type: 'application/json' })], 'work.krisis') };
     }
+    if (s.op === 'wikidata.items') {
+      // Issue #36: the review open, with whatever the "Wikidata items" panel recorded in it (the search, the batch, the
+      // Q-ids), is the step's result: optional, so a review with nothing minted is handed on as it is, and said so.
+      const r = page.review();
+      if (!r) throw new Error('There is no review open: open the review this workflow made (“Open the review”), and use its panel “Wikidata items”; or say the step is done with the review open, if there is no item to make.');
+      const work = JSON.parse(r.text);
+      const other = notReviewed(work, runner.inputsOf(wf, s.id).subjects || []);
+      if (other.length) throw new Error(`The review open was not made of ${other.join(', ')}, the dataset this step takes: open the review this workflow made.`);
+      const minted = Object.keys(work.mint?.qids || {}).length;
+      say(minted ? `${minted} Wikidata ${minted === 1 ? 'item' : 'items'} recorded in the review: the next step writes ${minted === 1 ? 'it' : 'them'} into the dataset.` : 'No Wikidata item was recorded in the review: the workflow goes on with the review as it is.');
+      return { work: await refsHeld([new File([r.text], r.name, { type: 'application/json' })], 'work.krisis') };
+    }
     if (s.op === 'place') {
       // By hand: the dataset saved in Chora, chosen in step 1 (as its save chooses it), or another.
       const files = page.files();
@@ -616,7 +628,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     if (w.current !== s.id) throw new Error(`The workflow is not at the step “${s.title}”.`);
     wf = runner.complete(w, s.id, outputs);
     asIs = null;
-    say(null); await keep(); render(false);
+    if (s.op !== 'wikidata.items') say(null);   // its result says what it recorded (resultOf)
+    await keep(); render(false);
   }
   /**
    * The dataset a save in Chora wrote (`files`, as chosen in step 1 by the page), from the dataset Chora
@@ -796,7 +809,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   }
   /** The work file the review step at hand takes, kept in this browser, or null. */
   function reviewInput(s = wf && !changed && !viewing ? atStep() : null) {
-    if (viewing || !s || s.op !== 'review' || !['pending', 'waiting'].includes(s.state)) return null;
+    if (viewing || !s || !['review', 'wikidata.items'].includes(s.op) || !['pending', 'waiting'].includes(s.state)) return null;
     let ref;
     try { [ref] = runner.inputsOf(wf, s.id).work; } catch { return null; }
     return ref && heldFor(ref) ? ref : null;

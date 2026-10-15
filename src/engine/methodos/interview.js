@@ -46,8 +46,9 @@ const LISTED = 'Needed: each place of your list is given its address under it, a
 /** The words under the base address's field saying why it is needed (baseAsked's `why`, else the regions'). */
 export const baseWhy = (asked) => asked?.why || REGIONS;
 const ROUTES = [
-  { have: 'table', want: 'map', recipe: 'map-your-data', set: { target: 'plato-json' }, ask: ['has-regions', 'will-draw', 'will-publish'], base: { when: ['has-regions', 'will-publish'], needed: 'has-regions' } },
-  { have: 'table', want: 'publish', recipe: 'map-your-data', set: { target: 'plato-json', 'will-publish': true }, ask: ['has-regions', 'will-draw'], base: { when: ['has-regions', 'will-publish'], needed: 'has-regions' } },
+  // 'will-mint' (Issue #36: Wikidata items for the places no gazetteer knows) is asked last, and is no unless answered.
+  { have: 'table', want: 'map', recipe: 'map-your-data', set: { target: 'plato-json' }, ask: ['has-regions', 'will-draw', 'will-publish', 'will-mint'], base: { when: ['has-regions', 'will-publish'], needed: 'has-regions' } },
+  { have: 'table', want: 'publish', recipe: 'map-your-data', set: { target: 'plato-json', 'will-publish': true }, ask: ['has-regions', 'will-draw', 'will-mint'], base: { when: ['has-regions', 'will-publish'], needed: 'has-regions' } },
   { have: 'plato', want: 'publish', recipe: 'publish-a-dataset', set: {}, ask: [], base: { needed: false } },
   // An edition, or annotations: Map your data's questions but the regions (neither says which region each place
   // is in); the base address when publishing, optional, as Publish a dataset asks it (minting takes it).
@@ -59,12 +60,12 @@ const ROUTES = [
   // it is, matched with another (chosen at the match). `from-table` is the route's, never asked. The base address:
   // for a table always, optional (its places have their addresses under it, which the decisions name); for a PLATO
   // dataset, whose places have theirs, when publishing, as Publish a dataset asks it.
-  { have: 'table', want: 'match', recipe: 'match-two-datasets', set: { target: 'plato-json', 'from-table': true }, ask: ['into-dataset', 'will-publish'], base: { needed: false } },
-  { have: 'plato', want: 'match', recipe: 'match-two-datasets', set: { target: 'plato-json', 'from-table': false }, ask: ['into-dataset', 'will-publish'], base: { when: 'will-publish', needed: false } },
+  { have: 'table', want: 'match', recipe: 'match-two-datasets', set: { target: 'plato-json', 'from-table': true }, ask: ['into-dataset', 'will-publish', 'will-mint'], base: { needed: false } },
+  { have: 'plato', want: 'match', recipe: 'match-two-datasets', set: { target: 'plato-json', 'from-table': false }, ask: ['into-dataset', 'will-publish', 'will-mint'], base: { when: 'will-publish', needed: false } },
   // A historical map, traced into a new dataset (Stephen, 14 October 2026): the base address is needed from the
   // start, as every place traced is given its address under it as it is named; the lookup asked as a question.
-  { have: 'map', want: 'map', recipe: 'trace-a-map', set: { target: 'plato-json' }, ask: ['will-identify', 'will-publish'], base: { needed: true, why: TRACED } },
-  { have: 'map', want: 'publish', recipe: 'trace-a-map', set: { target: 'plato-json', 'will-publish': true }, ask: ['will-identify'], base: { needed: true, why: TRACED } },
+  { have: 'map', want: 'map', recipe: 'trace-a-map', set: { target: 'plato-json' }, ask: ['will-identify', 'will-publish', 'will-mint'], base: { needed: true, why: TRACED } },
+  { have: 'map', want: 'publish', recipe: 'trace-a-map', set: { target: 'plato-json', 'will-publish': true }, ask: ['will-identify', 'will-mint'], base: { needed: true, why: TRACED } },
   // A map image to share (Stephen, 14 October 2026; #37): the places of a list, a table or a PLATO dataset identified as Map your
   // data identifies them, then made into a map in Chora. `from-table` is the route's, never asked. The base address: for a list
   // or a table, needed (its places have their addresses only under it, which the lookup records its matches against); for a

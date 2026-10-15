@@ -40,6 +40,15 @@ export const OPERATIONS = Object.fromEntries([
     waitsFor: 'the candidates to be reviewed, in step 5', takes: { work: { types: ['work.krisis'] } }, gives: { work: 'work.krisis' } }),
   op({ key: 'apply', title: 'Record the decisions in the dataset', tool: 'Krisis',
     takes: { subjects: { types: ANY }, work: { types: ['work.krisis'] } }, gives: { dataset: 'dataset' } }),
+  // Wikidata items for the places no gazetteer knows (Issue #36; src/engine/krisis/wikidata.js): in the review's
+  // panel "Wikidata items", the user searches Wikidata for the places with no match (the hits go into the review),
+  // writes the QuickStatements batch, runs it in QuickStatements with their own account, and brings the Q-ids back,
+  // each checked and recorded in the review as a decision; the step is done with the review's work file, which the
+  // step that records the decisions then takes. Optional: a review with no place to mint is handed on as it is.
+  op({ key: 'wikidata.items', title: 'Create Wikidata items for the places no gazetteer knows', tool: 'Krisis', kind: 'interactive', networked: true, permissions: [['gazetteer', 'wikidata']],
+    cancel: 'keeps-partial',
+    waitsFor: 'the places with no match to be searched in Wikidata, the batch written and run by you in QuickStatements, and the new items\' Q-ids checked and recorded, in the review\'s panel "Wikidata items" (step 5); then say the step is done',
+    takes: { subjects: { types: ANY }, work: { types: ['work.krisis'] } }, gives: { work: 'work.krisis' } }),
   // Chora, in the page, gives the dataset its save wrote to this step (src/methodos/page.js, placed): the
   // step is done with it. "This step is done" takes the dataset chosen in step 1, as for any interactive step.
   op({ key: 'place', title: 'Draw or trace the places on a map', tool: 'Chora', kind: 'interactive',

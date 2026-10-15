@@ -22,7 +22,8 @@
 //               to one question, 'q' and '!q');
 //     options   the operation's options, literal or from an answer ('$release'; left out if not given);
 //     when      the yes-no question under which the step runs ('will-publish'), or '!' and one under
-//               which it does not; a step whose condition fails is skipped.
+//               which it does not; or a list of those, every one of which must hold ('will-identify' and
+//               'will-mint': the items step of Trace a historical map); a step whose condition fails is skipped.
 // The recipe is data: check() walks it, the runner copies what it needs of it into the workflow's
 // state, and digest() hashes it, so that a workflow says exactly which recipe it followed.
 import { sha256 } from '../../lib/sha256.js';
@@ -41,10 +42,16 @@ export const alternatives = (ref) => String(ref).split('??').map((s) => s.trim()
 /** Whether a step runs under the answers given. */
 export function applies(step, answers) {
   if (!step.when) return true;
-  const not = step.when.startsWith('!');
-  const v = answers[not ? step.when.slice(1) : step.when] === true;
-  return not ? !v : v;
+  return [].concat(step.when).every((w) => {
+    const not = w.startsWith('!');
+    const v = answers[not ? w.slice(1) : w] === true;
+    return not ? !v : v;
+  });
 }
+/** The conditions of a step's `when`, as a set of their words ('q', '!q'); empty for none. */
+const whensOf = (step) => new Set(step?.when === undefined ? [] : [].concat(step.when));
+/** Whether every condition step `p` runs under is one step `s` runs under too: then `s` never runs without `p` having run. */
+const covers = (s, p) => [...whensOf(p)].every((w) => whensOf(s).has(w));
 
 /**
  * Throw, in words, if the recipe is not well formed: every operation known, every input given by a
@@ -86,8 +93,11 @@ export function check(recipe) {
     const op = OPERATIONS[s.op];
     if (!op) say(`the step "${s.id}" names an operation that does not exist, "${s.op}".`);
     if (s.when !== undefined) {
-      const q = String(s.when).replace(/^!/, '');
-      if (asks[q]?.kind !== 'yes-no') say(`the step "${s.id}" runs when "${q}", which is not a yes-or-no question it asks.`);
+      if (Array.isArray(s.when) && !s.when.length) say(`the step "${s.id}" runs under an empty list of conditions: leave "when" out instead.`);
+      for (const w of [].concat(s.when)) {
+        const q = String(w).replace(/^!/, '');
+        if (asks[q]?.kind !== 'yes-no') say(`the step "${s.id}" runs when "${q}", which is not a yes-or-no question it asks.`);
+      }
     }
     const from = s.from || {};
     for (const slot of Object.keys(from)) if (!Object.hasOwn(op.takes, slot)) say(`the step "${s.id}" gives ${op.title} an input "${slot}" that it does not take.`);
@@ -108,8 +118,9 @@ export function check(recipe) {
           if (!p) say(`the step "${s.id}" takes "${slot}" from "${a}", but no earlier step is called "${id}": every input must be produced before it is used.`);
           const given = OPERATIONS[p.op].gives[out];
           if (!given) say(`the step "${s.id}" takes "${slot}" from "${a}", but ${OPERATIONS[p.op].title} gives no "${out}".`);
-          type = [given]; conditional = p.when !== undefined && p.when !== s.when;
-          if (conditional) whens.add(p.when);
+          // Not conditional when the step it comes from runs under every condition this one does (the same, or fewer).
+          type = [given]; conditional = p.when !== undefined && !covers(s, p);
+          if (conditional) for (const w of [].concat(p.when)) whens.add(w);
         }
         const wrong = type.filter((t) => !take.types.includes(t));
         if (wrong.length) say(`the step "${s.id}" hands ${typeWords(wrong)} ("${a}") to ${op.title} as "${slot}", which takes ${typeWords(take.types)}.`);

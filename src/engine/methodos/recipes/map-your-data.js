@@ -3,7 +3,9 @@
 // the decisions recorded (with the region each place is in, where it gives them), the places drawn
 // where wanted, checked again, compared with what came in, and written out; published if asked.
 // The decisions are recorded by one of two steps, by the answer about regions: `relate` where the
-// table gives them (PLATO #23, option B), `apply` where it does not.
+// table gives them (PLATO #23, option B), `apply` where it does not. Between the review and either, under
+// "will-mint" (Issue #36), Wikidata items for the places no gazetteer knows: the step hands on the review's
+// work file with the new Q-ids recorded, which the recording step takes in place of the review's.
 import { BASE } from './asks.js';
 
 const decided = 'relate.dataset ?? apply.dataset';
@@ -11,7 +13,7 @@ const result = `place.dataset ?? ${decided}`;
 export default {
   key: 'map-your-data',
   title: 'Map your data',
-  version: 2,
+  version: 3,
   files: {
     files: { words: 'The table of place names (CSV or GeoJSON)', types: ['files'] },
   },
@@ -19,6 +21,8 @@ export default {
     'has-regions': { question: 'Does the table say which region each place is in (a parish, a county)?', kind: 'yes-no' },
     'will-draw': { question: 'Will you draw or trace places that the gazetteer cannot locate?', kind: 'yes-no' },
     'will-publish': { question: 'Will you publish the result?', kind: 'yes-no' },
+    // Issue #36: Wikidata items, under their own answer, no by default (the question is asked last).
+    'will-mint': { question: 'Will you create Wikidata items for the places no gazetteer knows (a batch you run in QuickStatements yourself)?', kind: 'yes-no', default: false },
     // Asked by the interview when the table gives regions, or the result is published (interview.js baseAsked), pre-filled from Options and written back there.
     base: BASE,
     target: { question: 'In what format do you want the result?', kind: 'choice', choices: ['plato-json', 'plato-jsonl', 'tables', 'ntriples', 'lpf', 'lpf-seq'] },
@@ -33,8 +37,9 @@ export default {
     { id: 'regions', op: 'lookup.levels', title: 'Identify the regions, the widest first', from: { subjects: 'dataset.dataset' }, when: 'has-regions' },
     { id: 'lookup', op: 'lookup', title: 'Look the places up in the World Historical Gazetteer', from: { subjects: 'dataset.dataset', work: 'regions.work' } },
     { id: 'review', op: 'review', title: 'Decide which candidates are the same place', from: { work: 'lookup.work' } },
-    { id: 'apply', op: 'apply', title: 'Record the decisions in the dataset', from: { subjects: 'dataset.dataset', work: 'review.work' }, when: '!has-regions' },
-    { id: 'relate', op: 'relate.containment', title: 'Record the decisions, with the region each place is in', from: { subjects: 'dataset.dataset', work: 'review.work' }, options: { base: '$base' }, when: 'has-regions' },
+    { id: 'wikidata', op: 'wikidata.items', title: 'Create Wikidata items for the places no gazetteer knows', from: { subjects: 'dataset.dataset', work: 'review.work' }, when: 'will-mint' },
+    { id: 'apply', op: 'apply', title: 'Record the decisions in the dataset', from: { subjects: 'dataset.dataset', work: 'wikidata.work ?? review.work' }, when: '!has-regions' },
+    { id: 'relate', op: 'relate.containment', title: 'Record the decisions, with the region each place is in', from: { subjects: 'dataset.dataset', work: 'wikidata.work ?? review.work' }, options: { base: '$base' }, when: 'has-regions' },
     { id: 'place', op: 'place', title: 'Draw or trace the places still without a location', from: { dataset: decided }, when: 'will-draw' },
     { id: 'again', op: 'check', title: 'Check the result', from: { files: result } },
     { id: 'compare', op: 'compare', title: 'Compare the result with the dataset made from the table', from: { earlier: 'dataset.dataset', later: result } },

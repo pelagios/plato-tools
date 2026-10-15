@@ -5,7 +5,8 @@
   "yes": {
    "has-regions": false,
    "will-draw": true,
-   "will-publish": false
+   "will-publish": false,
+   "will-mint": false
   },
   "recipe": "map-your-data",
   "steps": [
@@ -26,7 +27,8 @@
   "want": "publish",
   "yes": {
    "has-regions": false,
-   "will-draw": false
+   "will-draw": false,
+   "will-mint": false
   },
   "recipe": "map-your-data",
   "steps": [
@@ -147,7 +149,8 @@
   "want": "match",
   "yes": {
    "into-dataset": true,
-   "will-publish": false
+   "will-publish": false,
+   "will-mint": false
   },
   "recipe": "match-two-datasets",
   "steps": [
@@ -168,7 +171,8 @@
   "want": "match",
   "yes": {
    "into-dataset": false,
-   "will-publish": true
+   "will-publish": true,
+   "will-mint": false
   },
   "recipe": "match-two-datasets",
   "steps": [
@@ -192,7 +196,8 @@
   "want": "match",
   "yes": {
    "into-dataset": true,
-   "will-publish": false
+   "will-publish": false,
+   "will-mint": false
   },
   "recipe": "match-two-datasets",
   "steps": [
@@ -211,7 +216,8 @@
   "want": "map",
   "yes": {
    "will-identify": true,
-   "will-publish": false
+   "will-publish": false,
+   "will-mint": false
   },
   "base": "https://example.org/traced/",
   "recipe": "trace-a-map",
@@ -230,7 +236,8 @@
   "have": "map",
   "want": "publish",
   "yes": {
-   "will-identify": false
+   "will-identify": false,
+   "will-mint": false
   },
   "base": "https://example.org/traced/",
   "recipe": "trace-a-map",

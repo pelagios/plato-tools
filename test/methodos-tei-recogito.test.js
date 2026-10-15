@@ -115,7 +115,8 @@ test('both recipes are well formed, take Map your data\'s questions in its words
     // The steps: read and made a dataset, then Map your data's own, without regions, by operation and id.
     assert.deepEqual(r.steps.map((s) => s.op), ['check', 'convert', 'lookup', 'review', 'apply', 'place', 'check', 'compare', 'convert', 'publish.mint', 'publish.report', 'publish.site', 'publish.w3id']);
     const mine = r.steps.slice(2).map((s) => [s.id, s.op, s.when ?? null]);
-    const map = MAP.steps.filter((s) => !['columns', 'check', 'dataset', 'regions', 'relate'].includes(s.id)).map((s) => [s.id, s.op, s.when === '!has-regions' ? null : s.when ?? null]);
+    // Not Map your data's Wikidata items step either (Issue #36): the editions' and the export's workflows are not among the three that have it.
+    const map = MAP.steps.filter((s) => !['columns', 'check', 'dataset', 'regions', 'relate', 'wikidata'].includes(s.id)).map((s) => [s.id, s.op, s.when === '!has-regions' ? null : s.when ?? null]);
     assert.deepEqual(mine, map);
     // Every operation is one the tools already have, available, with its adapter or the page's interactive step: none forked.
     for (const s of r.steps) { assert.equal(OPERATIONS[s.op].available, true, s.op); assert.ok(ADAPTERS[s.op] || OPERATIONS[s.op].kind === 'interactive', s.op); }

@@ -97,5 +97,6 @@ test('answers not asked are not carried into the recipe', () => {
   const c = choose('plato', 'publish');
   assert.deepEqual(answersFor(c, { 'will-draw': true }), {});
   const m = choose('table', 'publish');
-  assert.deepEqual(answersFor(m, { 'will-publish': false, 'has-regions': false }), { target: 'plato-json', 'will-publish': true, 'has-regions': false });
+  // 'will-mint' is asked on this route, with a default (no), so it is carried, as the interview shows it chosen.
+  assert.deepEqual(answersFor(m, { 'will-publish': false, 'has-regions': false }), { target: 'plato-json', 'will-publish': true, 'has-regions': false, 'will-mint': false });
 });

@@ -80,6 +80,27 @@ Usage:
                                             World Historical Gazetteer by default), and add what
                                             it finds to a work file for review (this sends each
                                             place's name to the gazetteer; nothing else unless asked)
+  plato-tools wikidata search SUBJECTS --review WORKFILE --allow-host wikidata [--near KM] [--lang CODE] [--limit N] [--dry-run]
+                                            search Wikidata for the places the review leaves
+                                            with no match (by name, and near each point: this
+                                            sends names and coordinates to Wikidata), adding
+                                            what it finds to WORKFILE as candidates to review
+  plato-tools wikidata batch SUBJECTS --review WORKFILE [--consent] [--lang CODE] [--statements LIST]
+                                            write a QuickStatements batch (v1 text) of items for
+                                            the places still with no match, to run in
+                                            QuickStatements with your own Wikidata account; the
+                                            batch is recorded in WORKFILE. A dataset under a
+                                            licence that asks credit or share-alike needs
+                                            --consent (see below); one that allows no commercial
+                                            use or no adaptations, or has no licence, is refused.
+  plato-tools wikidata ids SUBJECTS --review WORKFILE --reviewer NAME --allow-host wikidata [--qids FILE] [--user NAME]
+                                            bring the new items' Q-ids back: from FILE (pasted,
+                                            one a line, in the batch's order) and/or your own new
+                                            items in Wikidata since the batch (--user, your
+                                            Wikidata user name); each is checked in Wikidata (the
+                                            label, the point within 1 km, the reference to the
+                                            place) and recorded in WORKFILE as a decision, which
+                                            apply then writes as an identity
   plato-tools candidates [options] WORKFILE
                                             publish a review's suggestions as a PLATO candidate
                                             set, for its attestations to point at (promotedFrom);
@@ -324,6 +345,17 @@ ${QUALIFIER_LISTS.map((l) => `                    ${l.id}: ${l.label}${l.status 
                     may be asked again while it is still to review.
   --unconstrained   lookup --levels: also look up the places whose regions are not yet settled,
                     without a constraint.
+  --allow-host wikidata
+                    wikidata: the consent to ask Wikidata (search and ids). The flag is the consent:
+                    nothing is sent without it.
+  --consent         wikidata batch: your statement that you hold the rights in the dataset, or have
+                    the holder's permission, and release the statements under CC0, recorded in the
+                    work file with your name (--reviewer) and the date.
+  --statements LIST wikidata batch: which statements to write, of labels, aliases, description, p31,
+                    p625, p17, p131 (default: all).
+  --user NAME       wikidata ids: your Wikidata user name, sent to Wikidata (and nowhere else) to
+                    read the items you created since the batch was written.
+  --qids FILE       wikidata ids: a file of the new items' Q-ids, as pasted, in the batch's order.
   --json            print one JSON object per input, one per line, then one for the total.
                     Its "columns", for a table of places, is a list of {column, field, reason},
                     with pattern, level, or separator, levels and firstIsName where the field
@@ -428,6 +460,8 @@ async function main(argv) {
         release: { type: 'string' }, previous: { type: 'string' }, 'concept-doi': { type: 'string' }, maintainer: { type: 'string', multiple: true, default: [] },
         repo: { type: 'string' }, 'site-url': { type: 'string' }, turtle: { type: 'boolean', default: false },
         only: { type: 'string' }, 'dataset-path': { type: 'string' }, 'tools-ref': { type: 'string' }, 'site-dir': { type: 'string' },
+        // wikidata (Issue #36): the consent to ask Wikidata, the rights statement, the statements, the user name, the Q-ids, a stand-in API for the tests.
+        'allow-host': { type: 'string', multiple: true, default: [] }, consent: { type: 'boolean', default: false }, statements: { type: 'string' }, user: { type: 'string' }, qids: { type: 'string' }, api: { type: 'string' },
         help: { type: 'boolean', short: 'h', default: false }, version: { type: 'boolean', short: 'V', default: false },
       },
     });
@@ -474,11 +508,13 @@ async function main(argv) {
   if (o['previous-candidates'] || o['set-iri']) return usage('--previous-candidates and --set-iri are for candidates.');
   if (action === 'match' || action === 'apply') return review(action, args, o, resources);
   if (action === 'lookup') return lookupCommand(args, o, resources);
+  if (action === 'wikidata') return wikidataCommand(args, o, resources);
+  if (o['allow-host'].length || o.consent || o.statements !== undefined || o.user !== undefined || o.qids !== undefined || o.api !== undefined) return usage('--allow-host, --consent, --statements, --user, --qids and --api are for wikidata.');
   // (--limit, for lookup and preview, is refused above for any other command.)
   if (o.gazetteer || o.places || o['all-names'] || o.variants || o.countries || o.near || o.lang || o.batch || o['dry-run'] || o['token-env'] || o['gazetteer-iri']) return usage('--gazetteer, --token-env, --gazetteer-iri, --places, --all-names, --variants, --countries, --near, --lang, --batch and --dry-run are for lookup.');
   if (o.levels || o.level !== undefined || o.relax !== undefined || o.unconstrained) return usage('--levels, --level, --relax and --unconstrained are for lookup.');
   if (o.with || o.threshold || o['max-distance'] || o.top || o.qualifiers !== undefined || o.review || o.output || o.reviewer || o.orcid || o['others-title'] !== undefined || o['draft-answers'] !== undefined) return usage('--with, --threshold, --max-distance, --top, --qualifiers, --review, --output, --reviewer, --orcid, --others-title and --draft-answers are for match and apply.');
-  if (!reads && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, preview, cluster, compare, publish, match, apply, lookup, candidates, datacube and project.`);
+  if (!reads && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, preview, cluster, compare, publish, match, apply, lookup, wikidata, candidates, datacube and project.`);
   // Elenchos: candidate sets checked together, with no other input: the first is checked, with the others
   // (each is first made sure of below, so that a dataset given with --candidates is refused, not checked).
   const alone = action === 'check' && !args.length && !!o.candidates;
@@ -1354,6 +1390,232 @@ async function lookupCommand(args, o, resources) {
 // decisions the page saves in it), reads no dataset, and its --base is the candidate set's, where
 // match's and apply's is the base of spreadsheet tables' places. It writes <subjects>.candidates.json
 // to --out, and stores each candidate's address back in the work file, so that apply points at them.
+// Krisis: Wikidata items for the places no gazetteer knows (Issue #36; src/engine/krisis/wikidata.js). Three
+// commands over one review: search (Wikidata asked, with --allow-host wikidata), batch (the QuickStatements
+// text written, the batch recorded in the work file), ids (the Q-ids checked in Wikidata and recorded).
+async function wikidataCommand(args, o, resources) {
+  const [what, ...rest] = args;
+  if (!['search', 'batch', 'ids'].includes(what)) return usage('wikidata takes search, batch or ids, then the dataset.');
+  if (o.json && o.brief) return usage('choose --json or --brief, not both.');
+  if (!o.review) return usage('wikidata needs --review, the work file of the review (saved by the page, or made by lookup).');
+  if (rest.length !== 1) return usage(`wikidata ${what} takes one dataset of places; ${rest.length} ${rest.length === 1 ? 'was' : 'were'} given.`);
+  const { reviewer, problem } = reviewerOption(o);
+  if (problem) return usage(problem);
+  if (reviewer && /@/.test(reviewer.name)) return usage('--reviewer is an address with @ in it, which is never written: give a name.');
+  const W = (await import('../src/engine/krisis/wikidata.js'));
+  const S = (await import('../src/engine/krisis/wikidata-search.js'));
+  const { WIKIDATA_WORDS: T } = await import('../src/engine/words.js');
+  const { readWork, serialiseWork, filesDiffer } = await import('../src/engine/krisis/work.js');
+  const { gather } = await import('../src/engine/krisis/match.js');
+  const { run } = await import('../src/engine/pipeline.js');
+  const { gazetteerPermission } = await import('../src/engine/krisis/lookup.js');
+  const core = await import('../src/lib/permissions-core.js');
+  const { writeFileSync, renameSync, mkdirSync, existsSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { createHash } = await import('node:crypto');
+  const t0 = Date.now();
+  const r = { type: `wikidata-${what}`, subjects: { input: null, format: null, profile: null }, work: o.review, status: 'failed', counts: {}, items: [], warnings: [], outputs: [], elapsedMs: 0 };
+  const finishUp = () => {
+    r.elapsedMs = Date.now() - t0;
+    r.exitCode = r.status === 'failed' ? 2 : r.status === 'problems' ? 1 : 0;
+    if (o.json) { process.stdout.write(JSON.stringify(r) + '\n'); return r.exitCode; }
+    const lines = [`Wikidata items, ${what}: ${r.subjects.input || rest[0]}${r.subjects.format ? ` (${formatName(r.subjects)})` : ''}; review ${o.review}`];
+    if (r.message) lines.push(`  Could not be done: ${r.message}`);
+    for (const l of r.said || []) lines.push(`  ${l}`);
+    for (const w of r.warnings) lines.push(`  ${w}`);
+    if (!o.brief) for (const i of r.items) lines.push(`  ${i}`);
+    for (const x of r.outputs) lines.push(`  Wrote ${x.path} (${fmtBytes(x.size)})`);
+    if (r.stored) lines.push(`  Updated ${o.review}.`);
+    process.stdout.write(lines.join('\n') + '\n');
+    return r.exitCode;
+  };
+  let work;
+  try { work = readWork(readFileSync(o.review, 'utf8')); }
+  catch (e) { r.message = e.code === 'ENOENT' ? `there is no such file as ${o.review}.` : e.message; return finishUp(); }
+  // The consent to ask Wikidata: the flag, checked before any request (the command line has no settings).
+  const api = o.api || W.API;
+  let apiOrigin;
+  try { apiOrigin = new URL(api).origin; } catch { return usage(`--api ${o.api} is not a web address.`); }
+  if (o.api && !/^https:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(apiOrigin)) return usage('--api is for a stand-in on this computer (https://127.0.0.1:…), for testing: Wikidata itself needs no --api.');
+  const subj = gazetteerPermission(api);
+  const { grants, refused } = core.fromFlags({ allowHost: o['allow-host'], hostCategory: 'gazetteer' });
+  if (refused.length) return usage(`--allow-host ${refused[0]} is not wikidata or a site (https://…).`);
+  const allowed = subj !== null && core.check(grants, 'gazetteer', subj) === 'allowed';
+  const network = what === 'search' ? !o['dry-run'] : what === 'ids';
+  if (network && !allowed) return usage(`${what === 'search' ? 'searching Wikidata' : 'checking the Q-ids in Wikidata'} sends requests to it: give --allow-host wikidata, the consent to ask it.`);
+  // The fetch every request goes through: no cookies, no redirect followed, an answer from elsewhere refused (as the page's permissions.fetch does).
+  const sites = core.originsFor('gazetteer', subj);
+  if (o.api) sites.push(apiOrigin);
+  const guarded = async (url, init = {}) => {
+    const u = o.api ? url.replace(W.API, api) : url;
+    if (core.check(grants, 'gazetteer', gazetteerPermission(u)) !== 'allowed') throw Object.assign(new Error(`${u} is not a site --allow-host covers`), { name: 'PermissionError', kind: 'address' });
+    let res;
+    try { res = await globalThis.fetch(u, { ...init, credentials: 'omit', redirect: 'manual' }); } catch (e) { throw Object.assign(new Error(`Wikidata could not be reached: ${e.message}`), { name: 'PermissionError', kind: 'network' }); }
+    const bad = core.checkAnswer(res, u, sites);
+    if (bad) throw Object.assign(new Error(bad.kind === 'moved' ? 'Wikidata answered by sending the request elsewhere, which is not followed.' : 'no answer'), { name: 'PermissionError', kind: bad.kind });
+    return res;
+  };
+  const items = await gatherInputs(rest);
+  const { input, message } = await readInput(items[0]);
+  if (!input) { r.message = message; return finishUp(); }
+  Object.assign(r.subjects, { input: items[0].label, format: input.format, profile: input.profile || null });
+  const differ = await filesDiffer(work.subjects, input.files);
+  if (differ.length) r.warnings.push(`The work file was made from other files than ${differ.join(', ')}: its places may no longer match the data.`);
+  const host = new NodeHost({ workDir: o['work-dir'], outDir: o.out, overwrite: o.overwrite });
+  const xlsx = input.container === 'workbook' ? await import('xlsx') : undefined;
+  const g = host.env(resources, { xlsx });
+  let gathered;
+  try { gathered = await gather({ subjects: input, options: { base: o.base } }, g.env); }
+  catch (e) { g.finish(true); host.cleanup(); r.message = isSystemError(e) ? e.message : e instanceof DataError ? e.message : toolsFault(e); return finishUp(); }
+  g.finish(false);
+  if (gathered.incomplete) { host.cleanup(); r.message = gathered.report.items.find((i) => i.kind === 'unreadable')?.message; return finishUp(); }
+  const places = gathered.places;
+  const saveWork = () => {
+    try { writeFileSync(o.review + '.tmp', serialiseWork(work)); renameSync(o.review + '.tmp', o.review); r.stored = true; return true; }
+    catch (e) { r.message = `the work file ${o.review} could not be updated: ${e.message}`; return false; }
+  };
+  const lang = o.lang !== undefined ? W.wdLang(o.lang) : null;
+  if (o.lang !== undefined && !lang) { host.cleanup(); return usage(`--lang ${o.lang} is not a language code such as en, la or cy.`); }
+
+  if (what === 'search') {
+    const near = o.near === undefined ? undefined : (/^\s*\d+(\.\d+)?\s*$/.test(o.near) && Number(o.near) >= 0 ? Number(o.near) : NaN);
+    const limit = o.limit === undefined ? undefined : (/^\s*\d+\s*$/.test(o.limit) && Number(o.limit) >= 1 && Number(o.limit) <= 50 ? Number(o.limit) : NaN);
+    if (Number.isNaN(near)) { host.cleanup(); return usage(`--near ${o.near} is not a number of kilometres.`); }
+    if (Number.isNaN(limit)) { host.cleanup(); return usage(`--limit ${o.limit} is not a count from 1 to 50.`); }
+    const q = W.qualifying(work, places);
+    const want = new Set([...q.ready, ...q.leftOut.notSearched, ...q.leftOut.unanswered]);
+    const chosen = places.filter((p) => want.has(p.iri));
+    const options = { ...(near !== undefined ? { nearKm: near } : {}), ...(limit !== undefined ? { limit } : {}), lang };
+    r.preview = S.searchPreview(chosen, options);
+    r.said = [T.searchPreview(r.preview)];
+    if (!chosen.length) r.said = [T.searchNone];
+    if (o['dry-run'] || !chosen.length) { r.status = 'ok'; host.cleanup(); return finishUp(); }
+    const controller = new AbortController();
+    process.once('SIGINT', () => controller.abort());
+    const live = process.stderr.isTTY && !o.json;
+    let result;
+    try { result = await S.runWikidataSearch({ fetch: guarded, work, places: chosen, options, reviewer, signal: controller.signal, onBatch: live ? ({ done, total }) => process.stderr.write(`\r\x1b[K${T.searching({ done, total })}`) : undefined }); }
+    catch (e) { host.cleanup(); r.message = toolsFault(e); return finishUp(); }
+    finally { if (live) process.stderr.write('\r\x1b[K'); }
+    r.counts = result.record.counts;
+    r.said.push(T.searched(result.record.counts));
+    if (result.stopped) r.warnings.push(T.stopped(result.stopped));
+    const toDecide = W.qualifying(work, places).leftOut.undecided.length;
+    if (toDecide) r.warnings.push(T.hitsToDecide(toDecide));
+    host.cleanup();
+    if (!saveWork()) return finishUp();
+    r.status = result.stopped || result.record.counts.unanswered ? 'problems' : 'ok';
+    return finishUp();
+  }
+
+  // batch and ids read the dataset's records: what each item is made from.
+  const c = W.mintCollector(null);
+  const e2 = host.env(resources, { xlsx });
+  let read;
+  try { read = await run({ input, action: 'check', options: { base: o.base, sink: c.sink } }, e2.env); } catch (e) { e2.finish(true); host.cleanup(); r.message = isSystemError(e) ? e.message : toolsFault(e); return finishUp(); }
+  e2.finish(false);
+  if (read.incomplete) { host.cleanup(); r.message = read.report.items.find((i) => i.kind === 'unreadable')?.message || 'the dataset could not be read to the end.'; return finishUp(); }
+  const records = c.result();
+  const base = o.base || records.gazetteer?.uriSpace || undefined;
+  let statements;
+  if (o.statements !== undefined) {
+    const keys = o.statements.split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+    const unknown = keys.filter((k) => !W.STATEMENTS.includes(k));
+    if (unknown.length) { host.cleanup(); return usage(`--statements ${unknown[0]} is not one of ${W.STATEMENTS.join(', ')}.`); }
+    statements = Object.fromEntries(W.STATEMENTS.map((k) => [k, keys.includes(k)]));
+  }
+  const m = W.mintOf(work);
+  if (statements) m.options.statements = statements;
+  if (lang) m.options.lang = lang;
+  const plan = W.planItems({ work, places, records, options: { statements: m.options.statements, lang: m.options.lang ?? null, base } });
+
+  if (what === 'batch') {
+    const gate = plan.gate;
+    r.said = [T.gate(gate)];
+    if (gate.kind === 'refused') { host.cleanup(); r.message = 'the licence does not allow it (above).'; return finishUp(); }
+    if (gate.kind === 'consent') {
+      if (!m.consent && !o.consent) { host.cleanup(); r.message = `give --consent, with --reviewer, to state: ${W.CONSENT}`; return finishUp(); }
+      if (!m.consent) {
+        if (!reviewer) { host.cleanup(); r.message = '--consent needs --reviewer, the name of the person consenting.'; return finishUp(); }
+        m.consent = W.consentRecord({ by: reviewer, licence: gate.licence });
+      }
+      r.said.push(T.consented(m.consent));
+    }
+    const left = T.leftOutLine(plan.left);
+    if (left) r.items.push(`Left out: ${left}.`);
+    if (plan.whgNotSearched) r.warnings.push(T.whgNotSearched(plan.whgNotSearched));
+    if (!plan.items.length) { host.cleanup(); r.message = T.noItems; if (saveWork()) r.status = 'problems'; return finishUp(); }
+    if (plan.items.length > W.MAX_ITEMS) { host.cleanup(); r.message = T.tooMany(plan.items.length, W.MAX_ITEMS); return finishUp(); }
+    if (records.gazetteer?.status !== 'published') r.warnings.push(T.unpublished);
+    const notFree = plan.items.reduce((n, it) => n + it.leftOut.length, 0);
+    if (notFree) r.warnings.push(T.notFree(notFree));
+    for (const it of plan.items) for (const w of it.warnings) r.items.push(`${it.iri}: ${T.warnings[w] || w}.`);
+    const date = new Date().toISOString().slice(0, 10);
+    const text = W.quickStatementsV1(plan.items, { date, title: records.gazetteer?.title ?? null, statements: m.options.statements });
+    const stem = (input.files[0]?.name || 'review').replace(/\.(gz)$/i, '').replace(/\.[^.]+$/, '');
+    const name = W.batchName(stem), out = join(o.out, name);
+    try { mkdirSync(o.out, { recursive: true }); writeFileSync(out, text, { flag: o.overwrite ? 'w' : 'wx' }); }
+    catch (e) { host.cleanup(); r.message = e.code === 'EEXIST' ? `${out} already exists; give --overwrite to replace it, or --out for somewhere else.` : e.message; return finishUp(); }
+    r.outputs.push({ path: out, size: Buffer.byteLength(text) });
+    const b = W.recordBatch(work, { items: plan.items, name, sha256: createHash('sha256').update(text).digest('hex'), statements: m.options.statements });
+    r.counts = { ...plan.count, batch: b.id };
+    r.said.push(T.volume(plan.count), T.written(b), ...T.howTo.map((h, i) => `${i + 1}. ${h}`));
+    host.cleanup();
+    if (!saveWork()) return finishUp();
+    r.status = 'ok';
+    return finishUp();
+  }
+
+  // ids: the Q-ids back, each checked, then recorded.
+  if (!reviewer) { host.cleanup(); return usage('wikidata ids needs --reviewer: each identity records who made it.'); }
+  if (o.qids === undefined && o.user === undefined) { host.cleanup(); return usage('wikidata ids needs --qids FILE (the Q-ids pasted) or --user NAME (your Wikidata user name), or both.'); }
+  const batch = m.batches.at(-1);
+  if (!batch) { host.cleanup(); r.message = T.noBatch; return finishUp(); }
+  const rows = plan.items.filter((it) => batch.places.includes(it.iri)).sort((a, b) => batch.places.indexOf(a.iri) - batch.places.indexOf(b.iri));
+  const pairs = [];
+  if (o.qids !== undefined) {
+    let text;
+    try { text = readFileSync(o.qids, 'utf8'); } catch (e) { host.cleanup(); return usage(`--qids ${o.qids} cannot be read: ${e.code === 'ENOENT' ? 'there is no such file.' : e.message}`); }
+    const p = W.pairPasted(W.readPastedQids(text), rows);
+    r.said = [T.pastedCounts(p)];
+    pairs.push(...p.pairs.map((x) => ({ ...x, how: 'pasted' })));
+  }
+  const controller = new AbortController();
+  process.once('SIGINT', () => controller.abort());
+  try {
+    if (o.user !== undefined) {
+      if (/@/.test(o.user)) { host.cleanup(); return usage('--user is a Wikidata user name, never an address with @ in it.'); }
+      m.user = o.user.trim();
+      const contribs = await S.readContribs({ fetch: guarded, user: m.user, since: batch.at, signal: controller.signal });
+      const ents = await S.readEntities({ fetch: guarded, ids: contribs.items.map((x) => x.qid), signal: controller.signal });
+      const matched = W.matchItems(ents.entities, rows);
+      (r.said ||= []).push(T.readCounts({ items: contribs.items.length, matched: matched.matched.length, twice: matched.twice.length }));
+      for (const x of matched.matched) if (!pairs.some((p) => p.iri === x.iri)) pairs.push({ qid: x.qid, iri: x.iri, how: 'contribs', verified: x.verified });
+    }
+    // Pasted ids are checked in Wikidata too: never recorded unverified.
+    const toCheck = pairs.filter((p) => !p.verified);
+    if (toCheck.length) {
+      const ents = await S.readEntities({ fetch: guarded, ids: toCheck.map((p) => p.qid), signal: controller.signal });
+      for (const p of toCheck) { const e = ents.entities[p.qid]; p.verified = e && e.missing === undefined ? W.verifyItem(e, rows.find((it) => it.iri === p.iri)) : { ok: false, label: false, distanceKm: null, near: null, reference: false, missing: true }; }
+    }
+  } catch (e) {
+    host.cleanup();
+    r.message = e?.name === 'PermissionError' ? e.message : e?.name === 'WikidataError' ? e.message : toolsFault(e);
+    return finishUp();
+  }
+  let recorded = 0;
+  for (const p of pairs) {
+    if (p.verified?.ok) { W.recordMinted(work, p.iri, p.qid, { batch, reviewer, how: p.how, verified: p.verified }); recorded++; r.items.push(`${p.iri}: ${p.qid} ${T.verified(p.verified)}`); }
+    else r.items.push(`${p.iri}: ${p.qid} ${p.verified?.missing ? 'Not recorded: there is no such item in Wikidata.' : T.notVerified(p.verified)}`);
+  }
+  r.counts = { pairs: pairs.length, recorded };
+  (r.said ||= []).push(recorded ? T.recorded(recorded) : T.nothingVerified);
+  host.cleanup();
+  if (!saveWork()) return finishUp();
+  r.status = recorded === pairs.length ? 'ok' : 'problems';
+  return finishUp();
+}
+
 async function candidatesCommand(args, o, resources) {
   if (o.json && o.brief) return usage('choose --json or --brief, not both.');
   if (o.to || o.with || o.review || o.output || o.candidates || o.threshold || o['max-distance'] || o.top || o.reviewer || o.orcid || o.columns)

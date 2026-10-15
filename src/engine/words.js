@@ -1542,3 +1542,90 @@ export const SCOPE_WORDS = {
   suspect: 'The lookup stopped: WHG answered nothing at all to any query of the first batch, sent within the Scope\'s Where. The Where may be wrong, or not taken. Those places are marked not answered, not "no match": look one up again without Scope to see, change the Scope, or send the same places again unchanged (resume) to accept the empty answers as genuine.',
   suspectRow: 'Not answered: the first batch, sent within the Scope\'s Where, came back empty for every place, so the lookup stopped. Look it up again without Scope to see.',
 };
+
+// ---- Krisis: Wikidata items for the places no gazetteer knows (src/engine/krisis/wikidata.js, Issue #36) -----
+// The statement itself (mint-section.js CONSENT, the same words: a test holds them equal) and the distance (wikidata.js
+// VERIFY_KM), repeated here so that words.js imports nothing of the engine's.
+const CONSENT_WORDS = 'I hold the rights in this dataset, or have the holder\'s permission, and release these statements under CC0.';
+const VERIFY_WORDS = '1 km';
+/** What the panel, the command line and the Methodos step say. Plain British English; the guide quotes it. */
+export const WIKIDATA_WORDS = {
+  title: 'Wikidata items for the places no gazetteer knows',
+  intro: 'A place the review leaves with no match (every candidate judged not it, or none found) can be given an item in Wikidata. First it is searched in Wikidata itself, by name and near its point, and any hit goes into the review like any candidate; then a QuickStatements batch is written for the places still without a match, which you run in QuickStatements with your own Wikidata account (these tools never write to Wikidata); and once the items exist, their Q-ids are checked against the batch and recorded here as identities, which Finish writes into your dataset.',
+  /** The search. */
+  searchHeading: '1. Search Wikidata first',
+  search: (n) => `Search Wikidata for ${plural(n, 'place')} with no match`,
+  searchNone: 'Every place with no match has been searched in Wikidata, or there is none: nothing to search.',
+  searchPreview: (p) => `Would search ${plural(p.places, 'place')} in Wikidata: ${plural(p.names, 'name')}${p.near ? `, and items within ${p.nearKm} km of ${plural(p.near, 'point')} (this sends their coordinates)` : ''}, in ${plural(p.requests, 'request')}, one at a time.${p.withoutName ? ` ${plural(p.withoutName, 'place has', 'places have')} no name to send.` : ''}`,
+  searching: ({ done, total }) => `${done.toLocaleString('en-GB')} of ${plural(total, 'place')} searched in Wikidata…`,
+  searched: (c) => `Searched ${plural(c.places, 'place')} in Wikidata: ${plural(c.answered, 'place was', 'places were')} answered, ${c.notFound.toLocaleString('en-GB')} with nothing found, ${plural(c.added, 'hit')} added to the review.${c.unanswered ? ` ${plural(c.unanswered, 'place was', 'places were')} not answered: search again.` : ''}`,
+  hitsToDecide: (n) => `${plural(n, 'place has', 'places have')} a Wikidata hit still to decide in the review: decide each (“Not this one” or “Different places” lets the place go to the batch; “Same place” records the item found).`,
+  stopped: (st) => (st.kind === 'permission' ? LOOKUP_WORDS.stopped(st) : st.kind === 'stopped' ? 'The search was stopped. What was answered is kept.' : st.kind === 'rate' ? 'The search stopped: Wikidata refused the requests as too many. Try again later.' : `The search stopped: ${st.message || 'Wikidata could not be reached'}. The places not answered can be searched again.`),
+  /** The licence gate (D3). */
+  gateHeading: '2. The licence',
+  gate: (g) => {
+    if (!g) return 'The dataset\'s licence is not known yet: choose your dataset, and its licence is read.';
+    if (g.kind === 'free') return `The dataset is in the public domain (${g.licence}), as Wikidata's data is (CC0): its statements may go there.`;
+    if (g.kind === 'consent') return `The dataset is under ${g.licence}, which asks ${g.why === 'sa' ? 'share-alike' : 'credit'}; Wikidata's data is in the public domain (CC0), where nothing can be asked. Only the rights holder can release these statements under CC0: confirm below that you are, or have their permission.`;
+    const why = { nc: `its licence (${g.licence}) allows no commercial use`, nd: `its licence (${g.licence}) allows no adaptations`, 'rights-statement': `it has a ${g.licence}, which grants nothing`, 'no-licence': 'it has no licence', unknown: `its licence (${g.licence}) is not one these tools know` }[g.why];
+    return `No batch can be made from this dataset: ${why}, and Wikidata's data is in the public domain (CC0). Give the dataset an open licence that lets its statements be released under CC0, and try again.`;
+  },
+  consentLabel: CONSENT_WORDS,
+  consented: (c) => `Confirmed by ${c.by.name} on ${c.at.slice(0, 10)}, for the dataset's licence ${c.licence}.`,
+  consentNeeded: 'Confirm the statement above first: the batch is written only once it is made.',
+  notFree: (n) => `${plural(n, 'statement was', 'statements were')} left out: taken from a cited source that is not free to copy (a licence that asks more than CC0 allows, or a rights statement).`,
+  /** The items (D6, D7). */
+  itemsHeading: '3. The items',
+  statements: { labels: 'Labels (the name in each language)', aliases: 'Aliases (the other names)', description: 'A description', p31: 'Instance of (P31): the kind of place', p625: 'Coordinate location (P625)', p17: 'Country (P17), from the country code', p131: 'Located in (P131): the region the region review matched to a Wikidata item' },
+  langLabel: 'The language of names that have none (a code such as en, la or cy):',
+  descriptionLabel: 'Description',
+  kindLabel: 'Kind of place',
+  kindChoose: 'Choose…',
+  exclude: 'Leave this place out',
+  include: 'Put it back',
+  noItems: 'No place qualifies for an item yet.',
+  ready: (n) => `${plural(n, 'place qualifies', 'places qualify')} for an item.`,
+  /** Why a place is left out, by qualifying()'s and planItems()'s reasons. */
+  leftOut: {
+    rowState: 'kept out of the review, or left out of the dataset', excluded: 'left out of the batch by you', matched: 'matched to a record (not minted)', linked: 'linked to a gazetteer record already',
+    undecided: 'with a candidate still to decide', notSearched: 'not yet searched in Wikidata', unanswered: 'searched in Wikidata without an answer (search again)',
+    noPoint: 'without a point, and in no region matched to a Wikidata item', noAddress: 'with no web address to cite', outsideBase: 'with an address not under the dataset\'s base address, which it will not serve',
+    noSource: 'with no attestation citing a source (Wikidata asks for a serious, public reference)', noName: 'with no name', noKind: 'with no kind of place known: choose one', noLanguage: 'with no name in a known language: give the language above', notFree: 'with no name free to copy',
+  },
+  leftOutLine: (left) => Object.entries(left).filter(([, v]) => v.length).map(([k, v]) => `${plural(v.length, 'place')} ${WIKIDATA_WORDS.leftOut[k]}`).join('; '),
+  whgNotSearched: (n) => `${plural(n, 'of them was', 'of them were')} never looked up in the World Historical Gazetteer: look them up first, so that an item is not made for a place a gazetteer knows.`,
+  warnings: { 'no-language': 'a name with no language was left out', 'description-length': 'the description is not two to twelve words', 'quote-replaced': 'a double quote was written as a closing quotation mark', 'country-unknown': 'the country code is not one the table knows', 'point-not-free': 'the point is copied from a source that is not free, so none is written', 'point-out-of-range': 'the point is not on the globe' },
+  /** The batch (D8, D10). */
+  batchHeading: '4. The batch',
+  volume: (c) => `${plural(c.items, 'item')}, ${plural(c.statements, 'statement')}.`,
+  tooMany: (n, cap) => `${plural(n, 'item')} is more than the ${cap} one batch may hold here. Leave places out, or, for a run of this size, ask for Wikidata's approval first (Wikidata:Requests for permissions/Bot) and talk to WikiProject Historical Place; then make the batch in parts.`,
+  unpublished: 'This dataset is not published (status is not "published"), so the addresses the batch cites may not lead anywhere yet, and a published dataset is what makes a place a serious, public reference: publish first, or be sure that every address will be served.',
+  download: 'Download the QuickStatements batch',
+  written: (b) => `Batch ${b.id} written: ${b.name} (${plural(b.items, 'item')}), on ${b.at.slice(0, 10)}.`,
+  howTo: [
+    'Open QuickStatements (quickstatements.toolforge.org) and log in with your Wikidata account; it needs to be autoconfirmed (at least 50 edits, and four days old).',
+    'Choose “New batch”, then “V1 commands”, paste the batch, and “Import V1 commands”.',
+    'Check the commands shown, and “Run” them (“Run in background” for more than a few items). Keep the batch number: your new items are read back by your account, and the batch is an edit group, which can be undone whole (editgroups.toolforge.org).',
+    'Then come back here and bring the Q-ids in, below.',
+  ],
+  /** The Q-ids back (D4). */
+  idsHeading: '5. The Q-ids back',
+  pasteLabel: 'Paste the Q-ids of the new items (one a line, in the batch\'s order; or the table QuickStatements shows):',
+  check: 'Check the Q-ids',
+  userLabel: 'Or read your new items from Wikidata, by your Wikidata user name (sent to Wikidata only):',
+  readMine: 'Read my new items',
+  batchChoose: 'The batch they were made from:',
+  noBatch: 'Write a batch first: the Q-ids are checked against its rows.',
+  checking: 'Checking the items in Wikidata…',
+  verified: (v) => `Verified: the label${v.distanceKm !== null ? `, the point (${v.distanceKm} km away)` : ''}, and the reference to this place.`,
+  notVerified: (v) => `Not recorded: ${[!v.label && 'the item\'s label is not one of this place\'s', v.near === false && `its point is ${v.distanceKm} km away, more than ${VERIFY_WORDS}`, v.distanceKm === null && v.near === false && 'it has no point', !v.reference && 'it carries no reference to this place\'s address'].filter(Boolean).join('; ')}.`,
+  pastedCounts: (p) => `${plural(p.pairs.length, 'id')} set against the batch's rows${p.extraQids ? `; ${plural(p.extraQids, 'id')} beyond its rows ignored` : ''}${p.rowsLeft ? `; ${plural(p.rowsLeft, 'row')} without an id` : ''}.`,
+  readCounts: (r) => `${plural(r.items, 'new item')} since the batch was written; ${plural(r.matched, 'of them carries', 'of them carry')} a reference to a place of the batch${r.twice ? `; ${plural(r.twice, 'place has', 'places have')} two items, neither taken` : ''}.`,
+  record: (n) => `Record ${plural(n, 'identity', 'identities')}`,
+  recorded: (n) => `${plural(n, 'identity', 'identities')} recorded in the review: Finish writes ${n === 1 ? 'it' : 'them'} into the dataset. Save the review as well.`,
+  nothingVerified: 'No item was verified, so nothing was recorded.',
+  busy: 'Wait for the work in hand to finish.',
+  needName: 'Give your name as the reviewer first: each identity records who made it.',
+  noReview: 'Begin a review first: the places with no match are the review\'s.',
+  noDataset: 'Choose your dataset first: the batch is made from its records.',
+};

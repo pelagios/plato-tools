@@ -14,11 +14,13 @@ const result = 'apply.dataset ?? trace.dataset';
 export default {
   key: 'trace-a-map',
   title: 'Trace a historical map',
-  version: 1,
+  version: 2,
   files: {},
   asks: {
     'will-identify': { question: 'Will you look the places up in the World Historical Gazetteer, to identify each with a record there?', kind: 'yes-no' },
     'will-publish': ASKS['will-publish'],
+    // Issue #36: Wikidata items, under their own answer and only where the places are looked up (the step's `when` is both).
+    'will-mint': { question: 'Will you create Wikidata items for the places no gazetteer knows (a batch you run in QuickStatements yourself)?', kind: 'yes-no', default: false },
     // Needed from the start (decision 8): every place traced is given its address under it as it is named.
     base: { ...BASE, optional: false },
     target: ASKS.target,
@@ -34,7 +36,8 @@ export default {
     { id: 'check', op: 'check', title: 'Check the dataset traced', from: { files: 'trace.dataset' } },
     { id: 'lookup', op: 'lookup', title: "Look the places up in the World Historical Gazetteer, within the map's outline", from: { subjects: 'trace.dataset' }, when: 'will-identify' },
     { id: 'review', op: 'review', title: 'Decide which candidates are the same place', from: { work: 'lookup.work' }, when: 'will-identify' },
-    { id: 'apply', op: 'apply', title: 'Record the decisions in the dataset', from: { subjects: 'trace.dataset', work: 'review.work' }, when: 'will-identify' },
+    { id: 'wikidata', op: 'wikidata.items', title: 'Create Wikidata items for the places no gazetteer knows', from: { subjects: 'trace.dataset', work: 'review.work' }, when: ['will-identify', 'will-mint'] },
+    { id: 'apply', op: 'apply', title: 'Record the decisions in the dataset', from: { subjects: 'trace.dataset', work: 'wikidata.work ?? review.work' }, when: 'will-identify' },
     { id: 'again', op: 'check', title: 'Check the result', from: { files: 'apply.dataset' }, when: 'will-identify' },
     { id: 'compare', op: 'compare', title: 'Compare the result with the dataset traced', from: { earlier: 'trace.dataset', later: 'apply.dataset' }, when: 'will-identify' },
     { id: 'out', op: 'convert', title: 'Write it out', from: { files: result }, options: { target: '$target' } },

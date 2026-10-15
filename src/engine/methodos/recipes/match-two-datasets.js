@@ -17,7 +17,7 @@ const ask = (k) => ({ ...mapYourData.asks[k] });
 export default {
   key: 'match-two-datasets',
   title: 'Match two datasets',
-  version: 1,
+  version: 2,
   files: {
     files: { words: 'Your dataset (a table of places, CSV or GeoJSON, or a dataset in a PLATO format), the one the decisions are about', types: ['files'] },
     others: { words: 'The other dataset', types: ['files'], late: true },
@@ -38,6 +38,7 @@ export default {
       kind: 'yes-no', answers: ['Add them to my dataset', 'Keep them in a file of their own'], default: true,
     },
     'will-publish': ask('will-publish'),
+    'will-mint': ask('will-mint'),   // Issue #36: Wikidata items, under their own answer
     base: BASE,
     target: ask('target'),
     release: ask('release'),
@@ -52,7 +53,8 @@ export default {
     { id: 'match', op: 'match', title: 'Find the places of yours that may be the same as places of the other dataset', from: { subjects: 'dataset.dataset ?? $files', others: '$others' } },
     { id: 'check-other', op: 'check', title: 'Check the other dataset', from: { files: '$others' }, options: { problems: 'report' } },
     { id: 'review', op: 'review', title: 'Decide which candidates are the same place', from: { work: 'match.work' } },
-    { id: 'apply', op: 'apply', title: 'Record the decisions', from: { subjects: 'dataset.dataset ?? $files', work: 'review.work' }, options: { intoDataset: '$into-dataset', exportCandidates: '$will-publish', base: '$base' } },
+    { id: 'wikidata', op: 'wikidata.items', title: 'Create Wikidata items for the places no gazetteer knows', from: { subjects: 'dataset.dataset ?? $files', work: 'review.work' }, when: 'will-mint' },
+    { id: 'apply', op: 'apply', title: 'Record the decisions', from: { subjects: 'dataset.dataset ?? $files', work: 'wikidata.work ?? review.work' }, options: { intoDataset: '$into-dataset', exportCandidates: '$will-publish', base: '$base' } },
     { id: 'again', op: 'check', title: 'Check the result', from: { files: 'apply.dataset' } },
     { id: 'compare', op: 'compare', title: 'Compare the result with your dataset', from: { earlier: 'dataset.dataset ?? $files', later: 'apply.dataset' }, when: 'into-dataset' },
     { id: 'out', op: 'convert', title: 'Write it out', from: { files: 'apply.dataset' }, options: { target: '$target' } },

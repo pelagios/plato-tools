@@ -42,6 +42,9 @@ export function start(recipe, answers = {}, files = {}, { unavailable = 'skip' }
   check(recipe);
   const asks = recipe.asks || {};
   for (const k of Object.keys(answers)) if (!Object.hasOwn(asks, k)) no(`"${recipe.title}" does not ask "${k}".`);
+  // A yes-or-no question with a default (recipe.js: 'will-mint', no unless answered) is answered by it when no answer
+  // is given: a workflow saved before the question was asked carries on with the default, as the interview shows it.
+  answers = { ...Object.fromEntries(Object.entries(asks).filter(([, q]) => q.kind === 'yes-no' && typeof q.default === 'boolean').map(([k, q]) => [k, q.default])), ...answers };
   for (const [k, q] of Object.entries(asks)) {
     const a = answers[k];
     if (a === undefined) { if (!q.optional) no(`"${recipe.title}" needs an answer to: ${q.question}`); continue; }

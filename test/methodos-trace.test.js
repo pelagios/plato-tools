@@ -42,7 +42,7 @@ test('the operation: interactive, done in Chora, declaring the map\'s server and
 });
 
 test('the interview: a map, to a map or to publish, leads to it; the base address is needed, with why; the lookup is a question', () => {
-  for (const [want, ask] of [['map', ['will-identify', 'will-publish']], ['publish', ['will-identify']]]) {
+  for (const [want, ask] of [['map', ['will-identify', 'will-publish', 'will-mint']], ['publish', ['will-identify', 'will-mint']]]) {
     const c = choose('map', want);
     assert.equal(c.kind, 'recipe'); assert.equal(c.recipe, 'trace-a-map');
     assert.deepEqual(questionsFor(c).map((q) => q.key), ask);
@@ -189,7 +189,7 @@ test('end to end in Node: traced, checked, looked up within the map\'s outline (
   d = await drive(st, host);
   // Every step done but the w3id rules, which stop, saying why: the dataset made from the map is a draft until its
   // maker says it is published, and the rules make its addresses public for good (as for every workflow that publishes).
-  assert.deepEqual(d.state.steps.map((x) => [x.id, x.state]), [['trace', 'done'], ['check', 'done'], ['lookup', 'done'], ['review', 'done'], ['apply', 'done'], ['again', 'done'],
+  assert.deepEqual(d.state.steps.map((x) => [x.id, x.state]), [['trace', 'done'], ['check', 'done'], ['lookup', 'done'], ['review', 'done'], ['wikidata', 'skipped'], ['apply', 'done'], ['again', 'done'],
     ['compare', 'done'], ['out', 'done'], ['mint', 'done'], ['report', 'done'], ['site', 'done'], ['w3id', 'stopped']], JSON.stringify(d.state.steps.map((x) => [x.id, x.state, x.problem || x.error])));
   assert.match(d.state.steps.at(-1).problem.words, /status is not 'published'/);
   assert.equal(d.reports.compare.errors, 0, 'only added to: the dataset traced is all still there');

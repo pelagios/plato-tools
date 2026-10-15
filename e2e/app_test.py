@@ -10373,7 +10373,7 @@ def trace_workflow_checks(pw, url, tmp):
         page.click('#methodos-start')
         until(page, "() => document.getElementById('methodos-tracker').dataset.status === 'idle' || document.getElementById('methodos-tracker').dataset.status === 'waiting'", 10)
         t = track(); r['begun'] = t
-        return (s.get('canary') == 'enforced' and asked_now == ['will-identify', 'will-publish'] and not unplanned['follow'] and 'base address' in unplanned['verdict']
+        return (s.get('canary') == 'enforced' and asked_now == ['will-identify', 'will-publish', 'will-mint'] and not unplanned['follow'] and 'base address' in unplanned['verdict']
                 and unplanned['help'].startswith('Needed: every place you trace is given its address under it')
                 and planned == ['trace', 'check', 'lookup', 'review', 'apply', 'again', 'compare', 'out'] and len(before) == 1 and 'cap is 5,000 requests a day per token' in before[0]
                 and list(t['steps']) == planned and t['steps']['trace'] == 'current' and t['status'] != 'pending' and 'Not started' not in t['message']

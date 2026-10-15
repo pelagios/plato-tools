@@ -101,7 +101,10 @@ function decisions(doc) {
 // ---- the plan, the steps, the interview --------------------------------------------------------------------
 test('the recipe is well formed: the table read as Map your data reads it, the other dataset chosen late and matched as it is, checked after the match, its problems not stopping the workflow', () => {
   assert.equal(checkRecipe(M), M);
-  assert.deepEqual(M.steps.map((s) => s.id), ['columns', 'check', 'dataset', 'check-a', 'match', 'check-other', 'review', 'apply', 'again', 'compare', 'out', 'mint', 'report', 'site', 'w3id']);
+  assert.deepEqual(M.steps.map((s) => s.id), ['columns', 'check', 'dataset', 'check-a', 'match', 'check-other', 'review', 'wikidata', 'apply', 'again', 'compare', 'out', 'mint', 'report', 'site', 'w3id']);
+  // Issue #36: the Wikidata items step, under its own answer, hands the review's work file on to the step that records the decisions.
+  assert.deepEqual(M.steps.find((s) => s.id === 'wikidata'), { id: 'wikidata', op: 'wikidata.items', title: 'Create Wikidata items for the places no gazetteer knows', from: { subjects: 'dataset.dataset ?? $files', work: 'review.work' }, when: 'will-mint' });
+  assert.equal(M.steps.find((s) => s.id === 'apply').from.work, 'wikidata.work ?? review.work');
   // The table's three steps are Map your data's own, by operation, inputs and options, run only from a table;
   // a dataset already in a PLATO format is checked instead, and taken as it is.
   for (const id of ['columns', 'check', 'dataset']) {
@@ -139,9 +142,9 @@ test('the recipe is well formed: the table read as Map your data reads it, the o
 
 test('the interview: a table of places, and a match of two datasets, leads to the workflow, asking where the decisions go (into the dataset unless said otherwise) and publishing, and the base address, optional', () => {
   const c = choose('table', 'match');
-  assert.deepEqual([c.kind, c.recipe, c.ask], ['recipe', 'match-two-datasets', ['into-dataset', 'will-publish']]);
+  assert.deepEqual([c.kind, c.recipe, c.ask], ['recipe', 'match-two-datasets', ['into-dataset', 'will-publish', 'will-mint']]);
   const qs = questionsFor(c);
-  assert.deepEqual(qs.map((q) => [q.key, q.answers ?? null, q.default ?? null]), [['into-dataset', M.asks['into-dataset'].answers, true], ['will-publish', null, null]]);
+  assert.deepEqual(qs.map((q) => [q.key, q.answers ?? null, q.default ?? null]), [['into-dataset', M.asks['into-dataset'].answers, true], ['will-publish', null, null], ['will-mint', null, false]]);
   // Answered once publishing is: the question with a default needs no answer (the presence: without publishing, it is not answered).
   assert.equal(answered(c, {}), false);
   assert.equal(answered(c, { 'will-publish': false }), true);
@@ -154,10 +157,10 @@ test('the interview: a table of places, and a match of two datasets, leads to th
   const own = plan(c.recipe, answersFor(c, { 'will-publish': false, 'into-dataset': false }));
   assert.deepEqual(into.steps.map((s) => s.id), ['columns', 'check', 'dataset', 'match', 'check-other', 'review', 'apply', 'again', 'compare', 'out']);
   assert.deepEqual(own.steps.map((s) => s.id), ['columns', 'check', 'dataset', 'match', 'check-other', 'review', 'apply', 'again', 'out']);
-  assert.deepEqual(own.left.map((s) => s.id), ['check-a', 'compare', 'mint', 'report', 'site', 'w3id']);
+  assert.deepEqual(own.left.map((s) => s.id), ['check-a', 'wikidata', 'compare', 'mint', 'report', 'site', 'w3id']);
   // A dataset in a PLATO format: the same questions; checked, not read from a table; the base address only when publishing.
   const p = choose('plato', 'match');
-  assert.deepEqual([p.kind, p.recipe, p.ask, p.set['from-table'], c.set['from-table']], ['recipe', 'match-two-datasets', ['into-dataset', 'will-publish'], false, true]);
+  assert.deepEqual([p.kind, p.recipe, p.ask, p.set['from-table'], c.set['from-table']], ['recipe', 'match-two-datasets', ['into-dataset', 'will-publish', 'will-mint'], false, true]);
   assert.deepEqual(plan(p.recipe, answersFor(p, { 'will-publish': false })).steps.map((s) => s.id), ['check-a', 'match', 'check-other', 'review', 'apply', 'again', 'compare', 'out']);
   assert.equal(baseAsked(p, { 'will-publish': false }), null);
   assert.equal(baseAsked(p, { 'will-publish': true }).needed, false);
@@ -252,7 +255,7 @@ test('Match two datasets, end to end in Node, the decisions added to the dataset
 
   const c = await drive(await reviewed(a.host, a.state), a.host);
   assert.equal(c.state.status, 'completed', said(c.state));
-  assert.deepEqual(c.state.steps.map((s) => s.state), ['done', 'done', 'done', 'skipped', 'done', 'done', 'done', 'done', 'done', 'done', 'done', 'skipped', 'skipped', 'skipped', 'skipped']);
+  assert.deepEqual(c.state.steps.map((s) => s.state), ['done', 'done', 'done', 'skipped', 'done', 'done', 'done', 'skipped', 'done', 'done', 'done', 'done', 'skipped', 'skipped', 'skipped', 'skipped'], 'the Wikidata items step skipped: not asked for');
   assert.equal(c.reports.again.errors, 0);
   // Mneme: only added to. Every place of the dataset made from the table is there, unchanged; two answers are added (with the dataset's own three).
   assert.deepEqual(['unchanged', 'changed', 'lost', 'added'].map((k) => c.reports.compare.counts[k]), [5, 0, 0, 2]);
