@@ -431,6 +431,7 @@ written now; the rest wait on a branch.
 | **Places from Recogito** | Elenchos → Hermes annotations (+ georeferenced regions) → Krisis lookup → review → apply → Chora (if drawing) → Elenchos → Mneme → write out → Publish (if publishing) | Built (phase 5, 12 October 2026): section 6.1 |
 | **Places from a text** | Hermes text (a hosted model, or later an in-browser one) → review → Krisis → Chora → Publish | `llm-extract` deferred |
 | **Trace a historical map** | Chora: a georeferenced map, traced into a new dataset → save → Elenchos → Krisis lookup within the map's outline → review → apply (if identifying) → Elenchos → Mneme → write out → Publish (if publishing) | Built (14 October 2026): section 6.3 |
+| **Make an open map** | Hermes columns → Elenchos → Metaphrasis (a list or a table), or Elenchos (a PLATO dataset) → Krisis lookup → review → apply → Chora (each place located) → Elenchos → Chora's "Make a map" (an SVG and a PNG for Wikimedia Commons) | Built (15 October 2026): section 6.4 |
 | **Map your data** | Section 5 | Krisis lookup, adoption, region columns, hand-back |
 
 "Convert for WHG" and "Convert for Peripleo" are not workflows: each is Metaphrasis to LPF, one step,
@@ -558,6 +559,45 @@ map's licence and its georeference's, Allmaps' being CC0, given one free-to-reus
 **How large, measured:** at 5,001 features, a fifth of them areas traced with assistance, opened and shown in
 0.35 s, each change written in 245 ms, saved with the version check in 2.6 s; at 2,001, 0.24 s, 123 ms and 1.2 s
 (DEVELOPERS.md, "Limits").
+
+### 6.4 Make an open map, as built
+
+*15 October 2026 (plan #34, item 8; Issue #37).* `src/engine/methodos/recipes/make-an-open-map.js`, and in Chora
+"Make a map" (DEVELOPERS.md, "Making an open map"). A plain map of ancient places for Wikipedia, made by someone
+who knows no GIS, under a licence Wikimedia Commons accepts. Stephen's decisions of 14 October 2026, as built:
+
+1. *The way in.* A list of place names (pasted, or a table), or a dataset in a PLATO format; the interview's new
+   want "A map image for Wikipedia or Commons". The places are identified as Map your data identifies them, then
+   the map is made in Chora and downloaded there, which does the last step (a hand-off of its own type, `map`).
+   No tracing: that is "Trace a historical map", the other direction. The two share the picker for georeferenced
+   maps (Chora's own, `overlays.js`: a map added under "Historical maps" is offered by "Make a map") and the
+   reading of a map's rights (`rights.js`).
+2. *Licences combined* from what the map is made of (`agora/licence.js`): share-alike raises it to CC BY-SA
+   (DARE, CC BY-SA 3.0; OpenStreetMap, CC BY-SA and ODbL), said why; NC, ND, a licence not known (a pasted
+   background among them) and CARTO are refused; CAWM CC BY 4.0; Natural Earth public domain; the user's own
+   drawing CC BY 4.0 unless they choose another.
+3. *A historical map with no clear rights:* stated by the user from a short list, the manifest's own words beside
+   it, a date in the manifest pre-selecting; recorded as their statement; refused only while nothing is stated.
+4. *SVG, a hybrid:* true vectors on Natural Earth; a picture background embedded, the panel saying the SVG is
+   then mostly a picture. *The PNG* is drawn from the same SVG, the font inlined.
+5. *Projections:* Web Mercator and equirectangular (a Wikipedia location map's base).
+6. *The shaded relief,* public domain, built and hosted on pelagios.org from a release asset (DEVELOPERS.md,
+   "The shaded relief"), over Natural Earth in Chora and in the map.
+7. *Vague places:* dots and the circle to scale; Chora's marks only with their key.
+8. *Taken as a set:* a locator inset; the coastline captioned by its source; `<text>` in fonts Commons has, checked
+   by a render with librsvg that includes polytonic Greek; one language a file; download, and a prefilled
+   Special:Upload link; the settings in the SVG's metadata; `{{Map}}`; a scale bar always, "at latitude N"; the
+   residuals in the description; tiles within a budget of about 400; an affine embed, else an offscreen render;
+   the places in view, ticked, at most about 200.
+9. *Labels:* the preferred label, or a name attested by language and script, and a whole-map rule; our own
+   deterministic placement; dragged, hidden, re-classed and sized, one short note; no arrows.
+10. *The author:* Chora's contributor, name and ORCID iD; never an email address.
+
+**Found while building, and settled here (to confirm):** recording the decisions gives a place its identity, not
+its location, so a list of names reaches the map with nothing to draw unless each place is located in Chora (its
+match's location adopted). The step that locates them is therefore every time, not a question. And a pasted list
+had no ids, so its places had no addresses for the lookup to record its matches against (Map your data's pasted
+list had the same gap): its ids are now made from its names, under the base address, as a traced place's are.
 
 ## 7. Persistence
 

@@ -689,8 +689,11 @@ readers link to those headings, so keep them.
   *Regions, to split into levels* with its separator, its levels (narrowest first) and *The first
   part is the place's name*; `columnWarnings(…, levels, splits)` warns of two regions at one level.
   **The pasted list**: `<details id="paste">` under the drop zone (`PASTE_WORDS`): the lines that are
-  not blank, trimmed, become `pastedListCsv(text)`, a CSV headed `name` with every cell quoted (so a
-  `;`, `,` or tab is never taken for the separator), handed to `choose()` as `pasted-list.csv`
+  not blank, trimmed, become `pastedListCsv(text)`, a CSV headed `id` and `name` with every cell quoted (so a
+  `;`, `,` or tab is never taken for the separator), each id made from its name (`seed.js` `slugOf`, as a traced
+  place's is; unique by a number after it; `place` for a name with no Latin letter or digit: 15 October 2026, so
+  that a pasted list's places have addresses under the base address, without which the lookup cannot match them;
+  a table of the user's own with no id column still gives none, decision D2), handed to `choose()` as `pasted-list.csv`
   (`pastedListFile`, `src/engine/hermes/pasted.js`), through the usual detection and matching. The
   command line reads files, and has none (its `--help` says so). **The command line**: `--split
   COLUMN=SEP[:LEVELS]` (repeatable; LEVELS after the last `:`, narrowest first, `name` first for
@@ -2025,7 +2028,7 @@ below), and its engine `src/engine/chora/` (`store.js`, `view.js`, `draw.js`, `s
   permission is allowed, at every request, and Chora counts each refusal (`window.__chora.blocked`).
   Beneath it is the page's Content Security Policy, and MapLibre's worker is made from a `blob:`
   (`blobWorkerUrl`) so that its requests are under the policy too.
-- **Other basemaps** (OpenFreeMap, Ancient World (CAWM), OpenStreetMap, CARTO, or a pasted style or tile address) are
+- **Other basemaps** (OpenFreeMap, Ancient World (CAWM), Roman Empire (DARE), OpenStreetMap, CARTO, or a pasted style or tile address) are
   used only once their permission is allowed: `basemap:<provider>` for a built-in one, whose sites
   are all in the module's `REGISTRY` (a style's sources, glyphs and sprites may be on sites other
   than its own: CARTO's are on `tiles.basemaps.cartocdn.com`, and its TileJSON's tiles on `tiles-a`
@@ -2075,6 +2078,12 @@ below), and its engine `src/engine/chora/` (`store.js`, `view.js`, `draw.js`, `s
   that it could not be loaded from `https://cawm.lib.uiowa.edu`, as above. Its e2e checks answer its tiles by a route, and a failed
   connection by `route.abort('failed')`. Scope's drawn area is on Natural Earth alone, with no
   chooser, so CAWM is not offered there.
+- **Roman Empire (DARE)** (`dare`, added 15 October 2026) is the Digital Atlas of the Roman Empire's tiles,
+  `https://dh.gu.se/tiles/imperium/{z}/{x}/{y}.png` (256-pixel PNG, XYZ, CORS `*`), in a group of its own, under
+  `basemap:dare` ("Digital Atlas of the Roman Empire"). Zooms 3 to 11 are there (0 to 2 are 404, 12 is 404:
+  measured 15 October 2026), so its source says so. Its licence is CC BY-SA 3.0, as its terms say
+  (imperium.ahlfeldt.se, info_api.php), with the credit they ask; a map made on it is CC BY-SA (below).
+- **Every preset says what a map made from it may do** (`export`): "Making an open map", below.
 - **The gazetteer lookup** (`src/engine/gazetteer/`), shared with Krisis, speaks the W3C
   reconciliation protocol, with the token in the `Authorization` header only. WHG has 16 slots for
   the whole site, so there is one request in flight whoever asks. `createLookup` gives one shared
@@ -2461,6 +2470,166 @@ location as one act that records two claims: an identity (this place IS the reco
 - **Errors** (`lookupProblem`): a quota 401 keeps the token and says try tomorrow; a refused token offers to
   give it again or forget it; a per-query error or `gateway.answered: false` is "try again", never "nothing
   found".
+
+### Making an open map
+
+Issue #37 (plan #34, item 8; Stephen's decisions of 14 October 2026). "Make a map" in Chora (a panel under the
+places, `src/chora/export-ui.js`) makes a plain map of the view, its places labelled, as an SVG and a PNG under a
+licence that Wikimedia Commons accepts, with the file's Commons page ready to paste. It is also the last step of
+Methodos's "Make an open map" (below, "Workflows"). The engine is pure and in `src/engine/chora/export/`; the page's
+part is `export-ui.js`, `export-raster.js` (pictures), `export-fonts.js` (the font) and `relief.js`.
+
+- **The view** is what Chora's map shows (`{center, zoom, width, height}`), made into a map `width` pixels wide
+  (`project.js` `exportView`: the same ground, the zoom raised by the ratio). **Projections**: Web Mercator as
+  MapLibre draws it (`mercator`: held to MapLibre's `MercatorCoordinate` on fixed views, a place near 180° on the
+  copy of the world nearest the centre), and equirectangular over the same bounds, true to scale on its middle
+  parallel, so that it can be a Wikipedia location map's base (`equirectangular`); no equal-area one. A picture
+  made in Mercator is remapped to equirectangular row by row (`tiles.js` `rowSources`: the two share width and
+  longitudes, so only rows move).
+- **The places** are those of the overview in view (`places.js` `inView`), at most `PLACE_CAP` (200) in the
+  dataset's order, the panel saying how many there were; all ticked, untick to leave one out. The worker's
+  `chora-export-places` gives each as `exportPlace` reads it: its locations (not denied, not withdrawn), its names,
+  its point (the store's), its label's kind from its types (`labelClassOf`: water, a region, else a settlement),
+  its identities (`records`) and each attestation's sources and citations (`licensing`). Clustering is not used.
+  Each point is a red dot with its circle of uncertainty to scale where it has `precisionKm` (`geo.js`
+  `circleAround`, geodesic); Chora's four marks of how well a location is known are drawn only with their key
+  (`marks.js`: the marks restated as one list of shapes, which `vague.js` `drawShapes` draws on a canvas and
+  `furniture.js` `shapesSvg` writes as SVG: one description, two readers).
+- **Labels** (`labels.js`). The name: the preferred label, or a name attested for the place (`nameChoices`, by
+  language and script, a denied one not offered), or the whole map's rule "the name in <language> where one is
+  attested, else the preferred label", which a label's own choice overrides and which sets the file's
+  `xml:lang`. One language a file: another is a click away. Placement (`placeLabels`) is ours, deterministic and
+  greedy: areas first, then points; eight positions round a point in the cartographer's order (upper right, lower
+  right, upper left, lower left, right, above, left, below), seven near an area's point; the first inside the map
+  that overlaps no label placed, no mark and no furniture (and Natural Earth's own names, where drawn). None free:
+  the least overlapping, said to overlap ("drag it"). A label may be dragged in the preview (its box's top left
+  from its point is kept, `offset`, scaled with the width), put back, hidden, re-classed (a region in spaced
+  capitals, water in italic), sized, and given one short note on a second line. No arrows. Text is measured in
+  the page in Noto Sans (`export-fonts.js`, Fontsource's subsets, OFL `public/fonts/NotoSans-OFL.txt`), the font
+  the PNG is drawn in; in Node by an estimate.
+- **Backgrounds.** Every basemap preset has an `export` field (`basemaps.js`), in the licence shape CAWM's has
+  (`{iri, credit, confirmed}`), with `data` (OpenStreetMap's ODbL), `templates`, `refused`, `vector` and
+  `coastline` (the words that name the coastline's source). Natural Earth is drawn as true vectors
+  (`vector.js` `styleNodes`: its style read layer by layer, filters by the style specification's
+  `featureFilter` and paint by its `createExpression`, at the screen's zoom, widths scaled to the file), only its
+  plain layers (`compose.js` `NE_PLAIN`: ocean, land, rivers, lakes) unless "Modern borders and names", "Seas
+  named" or "Mountains, deserts and other regions named" is ticked (`NE_MODERN`, `marine-labels`,
+  `physical-labels`: public/basemap/README.md). A raster basemap (CAWM, DARE, OpenStreetMap) is its tiles,
+  fetched through the permissions within a budget of 400 (`tiles.js` `tilePlan`: as fine as the map's size asks,
+  up to the provider's `maxzoom`; over the budget a coarser zoom, said), stitched on a canvas and embedded as one
+  `<image>`; a style (OpenFreeMap) is drawn by an offscreen MapLibre map of the map's size (`export-raster.js`
+  `renderOffscreen`, its canvas within the graphics' limit, `maxCanvasSize` set to it and said where it binds)
+  and embedded. An SVG with a picture in it is said to be mostly a picture, the PNG perhaps better for Commons,
+  which tags it `{{SVG with raster elements}}`.
+- **The shaded relief** (`src/engine/chora/relief.js`, `src/chora/relief.js`): below.
+- **A georeferenced historical map** shown in Chora may be the background, over the basemap or alone, at its
+  opacity. Where its warp is affine (polynomial order 1, Helmert, straight) and the projection Mercator, its image
+  is fetched once from its IIIF server at the size the map gives it (`iiifImage`, at most 4,000 pixels) and
+  embedded with `transform="matrix(…)"` from three of its corners placed by `georef.toWorld` and projected, clipped
+  by its mask in the same matrix (`compose.js`). Any other warp, or equirectangular, is drawn by an offscreen map
+  with the map's own layer manager (`historicalRendered`) and embedded as a picture. Its rights (`rights.js`
+  `rightsOf`): free to reuse, or stated by the user from `licence.js` `STATEMENTS` (`{{PD-old-100}}`,
+  `{{PD-Art|PD-old-100}}`, or the licence its manifest gives), the manifest's own words shown beside; a date in the
+  manifest more than 120 years ago pre-selects `{{PD-Art|PD-old-100}}` (`suggestedStatement`); refused while
+  nothing is stated. The statement is recorded as the user's, in the Commons page. The georeference's residuals
+  (`controlPointMisfitKm`) go in the description, not on the map; its address is `{{Map}}`'s warp url.
+- **The licence** (`licence.js` `composeLicence`), worked out from what the map is made of with
+  `agora/licence.js` (`licenceTerms`, `licenceReasons`, `attestationLicences`): the user's own drawing and labels
+  CC BY 4.0 unless they choose CC BY-SA 4.0 or CC0; share-alike anywhere (DARE's CC BY-SA 3.0, OpenStreetMap's CC
+  BY-SA 2.0, a source's) raises the map to CC BY-SA 4.0, credit asked raises CC0 to CC BY 4.0, each said why;
+  ODbL data (OpenStreetMap's, through OpenFreeMap or a WHG record) is a Produced Work, `{{ODbL OpenStreetMap}}`
+  beside, never a raise. Refused, each named with why, and the downloads and the upload link withheld: a licence
+  not known (a pasted basemap's, a source's with none or another), a rights statement, NC, ND, CARTO's terms, and
+  a historical map with no rights stated.
+- **The furniture** (`furniture.js`): a scale bar always, "at latitude N" (the middle of the map, the standard
+  parallel for equirectangular), the variation from top to bottom said where it is over a tenth; a north arrow,
+  a locator inset of Natural Earth's land with the map's extent, a title, the key, each if wanted; the
+  attribution on a pale panel: the map's author and licence, the background's credit, the relief's, the
+  historical map's, the gazetteers the places were identified with (`recordSites`, named: WHG's w3id addresses
+  as "World Historical Gazetteer"), and the coastline's source ("Modern coastline: Natural Earth, 50m (public
+  domain)", or "Coastline: as <background> draws it").
+- **The SVG** (`svg.js`, `compose.js`): deterministic (the same settings, the same bytes: a golden file,
+  `test/fixtures/chora/export/golden.svg`), its groups Inkscape's layers, text as `<text>` in `FONT_STACK`
+  ("Noto Sans, DejaVu Sans, Liberation Sans, sans-serif": Commons ignores web fonts, and has both Noto and
+  DejaVu with polytonic Greek), a halo by `paint-order="stroke"`, its title and description, a Dublin Core
+  description, and **the map's settings in its `<metadata>`** (`<plato:map>`, JSON: the view, width,
+  projection, background, layers, relief, historical map and statement, places left out, each label's choices
+  and offset, the rule, the furniture, the licence, the title), which "Remake from a map made here" reads
+  (`settingsIn`) to make the same map again.
+- **The PNG** is drawn by the browser from the same SVG with the fonts inlined (`cssWithData`: the woff2 files
+  as `data:` addresses; an image drawn from an SVG may load nothing else), at the map's size, and given its
+  resolution (pHYs, from the dots per inch chosen) and its words (`png-meta.js`: tEXt, or iTXt where Latin-1
+  cannot hold them: Title, Author, Description, Copyright, Source, Software, Creation Time, and the settings as
+  `plato-tools:map`).
+- **The Commons page** (`commons.js` `filePage`): `{{Map}}` (title, description and legend in the file's
+  language, author, date, map date, projection, scale, latitude and longitude from the bounds, source,
+  warp status and url, permission, other versions), then the licence (`{{self|cc-by-4.0}}` and its kin) and the
+  templates of what it is made of (`{{Natural Earth}}`, `{{ODbL OpenStreetMap}}`, `{{PD-USGov-NASA-SRTM}}`,
+  `{{PD-USGov-USGS}}`, a historical map's statement, `{{SVG with raster elements}}`). **The author is Chora's
+  contributor, by name, with their ORCID iD where given; never an email address** (`authorWords` writes none,
+  and a name with `@` in it is not written). "Upload to Wikimedia Commons ↗" is a link to `Special:Upload` with
+  `wpDestFile`, `wpUploadDescription` and `wpLicense` (`self|…`) filled in (`uploadUrl`), saying in words what
+  following it sends, as the Allmaps Editor's link does: it is the user's own navigation, and nothing is sent by
+  the page. A link longer than 7,000 characters is not offered: "Copy the description" is.
+- **The preview** is the SVG itself, put into the page over the map (`#chora-export-preview`), its labels drawn
+  in the page's Noto Sans; a label dragged there is placed again from where it was dropped.
+- **Requests**: on Natural Earth, nothing leaves this site (the basemap's files and the relief file are its
+  own). A raster basemap's tiles, an OpenFreeMap style's, and a historical map's image go only to the sites whose
+  permission is already allowed for showing them, through the permissions' fetch or MapLibre's guard.
+- **Not done**: a fully vector OpenFreeMap (it is a picture); labels along a line or curved; `<switch
+  systemLanguage>` translations in one file (one language a file, by decision); Natural Earth's names in another
+  language than English; the inset's own coastline at 10m; measured scale (a map of 200 places with every option
+  is unmeasured). OpenStreetMap's tile usage policy discourages bulk downloads: a map on it fetches at most 400
+  tiles, once, when it is made.
+
+**Tests**: `test/chora-export.test.js` (projection, clipping, labels, the style read, the golden SVG parsed by
+saxes, 14 licence cases, the Commons page word for word, PNG chunks), `test/chora-export-pieces.test.js` (the
+tile plan, the row remap, the places in view and read), `test/chora-export-rsvg.test.js`, `test/chora-relief.test.js`
+and `test/chora-basemaps.test.js`; and `open_map_basemap_checks`, `open_map_compose_checks`,
+`open_map_export_checks` and `open_map_historical_checks` in `e2e/app_test.py`. **Commons' renderer**:
+`chora-export-rsvg.test.js` draws the golden map with `rsvg-convert` (librsvg, as Commons uses: 2.60 there, 2.52
+on Ubuntu 22.04) seeing only DejaVu and Noto (a fontconfig of its own), and asserts every character of the
+labels, polytonic Greek among them, is drawn as a glyph and not as librsvg's missing-glyph box (a frame round the
+character's code); its detector is shown to find a character no font has, and not to take a Latin A or an l for
+one. It needs `librsvg2-bin`, `fonts-dejavu-core` and `fonts-noto-core` (the gates install them), and fails, not
+skips, without them. The browser checks probe the PNG's pixels on a test style of Natural Earth's (its colours
+flat and loud, answered by a route), never screenshot diffs.
+
+### The shaded relief
+
+`basemap/relief.pmtiles`: a multidirectional shaded relief from NASA SRTM GL3 (3″, void-filled) and USGS
+GMTED2010, both public domain, built by `scripts/relief/` (`fetch_sources.sh` needs `EARTHDATA_TOKEN` in the
+environment, never in a file; `build.sh` runs each heavy step through `heavy.sh`; `MANIFEST.tsv` lists every
+source file with its sha256), 322 MB, grey WebP tiles of 256 pixels: zooms 0 to 10 over 15° W to 60° E and
+15° N to 62° N, zoom 11 over 10° W to 45° E and 28° N to 47° N, flat land and sea at grey 181.
+
+- **Hosting**: same-site, on pelagios.org. The file is not committed (over 100 MB; `.gitignore` names it). The
+  Pages workflow (`.github/workflows/pages.yml`, "Shaded relief, from the release asset") downloads the asset
+  `relief.pmtiles` of the release `relief-v1` of this repository after the build, checks it against the
+  committed `public/basemap/relief.pmtiles.sha256` (a file that differs fails the build), and puts it at
+  `dist/basemap/relief.pmtiles`. **While the release has no such asset (404), the step says so and the build goes
+  on without it**; any other failure to fetch it fails the build. The gates never fetch it. To publish a new
+  relief: rebuild, put its sha256 in the `.sha256` file, and attach it to a release (a new tag needs the workflow's
+  address changed too).
+- **Ranges on GitHub Pages** (measured 15 October 2026 on pelagios.org, on a `.pbf`, the same
+  `application/octet-stream` a `.pmtiles` is served as): Chromium and Firefox asking a range get `206` with the
+  exact bytes, uncompressed; Pages compresses that type on the fly only for a client that asks for gzip itself
+  (curl with `Accept-Encoding: gzip` got the range of a gzipped body). The `.pmtiles` itself is to be checked once
+  the release exists.
+- **In Chora**: "Shaded relief" in the basemap chooser, over Natural Earth only, kept in this browser
+  (`chora-relief`). The file's first bytes are read first (`relief.js` `available`: a host may answer a missing
+  file with a page of its own, as Vite's preview server does), then its header by `pmtiles` 4.3.0 (verified
+  against this file), then a tile at a time by range requests. Where it is not on the site, the option says "Shaded
+  relief is not available: the relief file is not on this site.", unticked. Each tile is toned (`toneRelief`):
+  flat ground (181 ± 2, WebP decoding it as 182) transparent, so the basemap's colour stays; a shadow a warm dark
+  at up to 60% opacity, a lit slope white at up to 45%. The toned tiles reach MapLibre as PNGs through a protocol
+  of the page's own (`plato-relief://z/x/y`), which the permissions' `transformRequest` lets through, alone; its
+  layer is under Natural Earth's rivers and lakes and Chora's own layers.
+- **In a map made**: the same toned tiles, stitched within the tile budget, embedded under the places; its
+  attribution and its Commons templates (`{{PD-USGov-NASA-SRTM}}`, `{{PD-USGov-USGS}}`).
+- **Tested** with `test/fixtures/chora/relief/relief-fixture.pmtiles` (590 bytes, made by `make-relief.py` beside
+  it: every tile left half flat, upper right in shadow, lower right lit), served to the page by a route that
+  honours ranges (206, `Content-Range`).
 
 ## Gazetteer lookup
 
@@ -2914,9 +3083,10 @@ page's interview and tracker (below); keeping a workflow beyond the tab is phase
   places in a text) is declared with the reason it is not available, and a
   workflow whose answers would reach it is refused at the start, in those words.
   Chora's save is no operation of its own: it completes the interactive step `place`, or `trace` (`placed()` in
-  `src/methodos/page.js`; "Chora, the map", above).
+  `src/methodos/page.js`; "Chora, the map", above); a map downloaded from Chora's "Make a map" completes the step
+  `map.export` (`mapped()`), as a hand-off of its own type, `map`.
 - **Recipes** (`recipes/`) are data: "Map your data", "Publish a dataset", "Places from an edition
-  (TEI)", "Places from Recogito", "Match two datasets" and "Trace a historical map" (below). A step names an
+  (TEI)", "Places from Recogito", "Match two datasets", "Trace a historical map" and "Make an open map" (below). A step names an
   operation, where each input comes from (a file chosen at the start, `$files`, or an earlier step's
   output, `mint.dataset`, with `??` for "this, or that if it was skipped"), its options (literal or
   from an answer) and the yes-or-no question under which it runs. `recipe.js` checks a recipe
@@ -3191,6 +3361,33 @@ routes, the plan, the runner with no file, and walked end to end in Node against
 the names and the outline as bounds and nothing else of the map or the dataset; with no Scope, no bounds)
 and `trace_workflow_checks` in `e2e/app_test.py`.
 
+**Make an open map** (plan #34, item 8; Issue #37; Stephen's decisions of 14 October 2026).
+`recipes/make-an-open-map.js` begins from a list of names (pasted, or a table, CSV or GeoJSON) or a dataset in a
+PLATO format, the interview's route saying which (`from-table`, set, never asked, as Match two datasets has it):
+a list or a table has its columns matched, is checked and made a PLATO dataset under the base address (needed for
+it, with why: the lookup records each match against the place's own address, which a place of a list has only
+under it; a pasted list's ids are made from its names, "Hermes", above); a PLATO dataset is checked and taken as it
+is. Then Map your data's lookup, review and decisions, through the same operations and adapters; **the places
+located in Chora, every time** (`place`: recording the decisions gives each place its identity, not its location,
+and a match's location is adopted by hand in Chora, as decided, so a list of names would otherwise reach the map
+with nothing to draw; a dataset whose places have locations goes on with "Nothing to draw"); checked again; and
+the map made in Chora and downloaded there (`map.export`: interactive, Chora's, taking the dataset, giving a
+`map` hand-off: `handoffs.js`'s new type, "a map made in Chora, as an SVG or a PNG, its settings kept in it").
+Its download does the step (`mapped()`, `CHORA_STEPS`), when Chora has open the dataset that went to the step
+(else said why, as for `place`); "This step is done" is not offered there, and the tracker says to make the map
+in Chora instead. No tracing (that is "Trace a historical map", the other direction: a georeferenced historical
+map is here only an optional background) and nothing published, so no `out` step: the result is the map. The
+recipe's `cannot` says the cap of 200 places in view, that a place with no location is not drawn, what cannot go
+to Commons and why, and that a label with no room is said; its `before`, WHG's daily cap. In the interview, the
+new want "A map image for Wikipedia or Commons", from "A list of place names (a spreadsheet or CSV)" or "A dataset
+already in a PLATO format", leads to it; from anything else, why not, and Hermes or Chora meanwhile. Tested in
+`test/methodos-open-map.test.js` (the recipe, the operation, the routes and base address, the plans, and walked
+in Node from three pasted names through a fake WHG, which is sent the names alone, to a map made by the export's
+engine of the located places, whose hand-off a dataset cannot stand in for) and `open_map_workflow_checks` in
+`e2e/app_test.py` (followed on the page from the interview and three pasted names, against a stub of WHG, each
+place's location adopted in Chora, to the SVG downloaded, which does the last step; nothing asked of any site but
+this one and the stub).
+
 **The base address, in one field** (Stephen, 12 October 2026). Every workflow that publishes asks it in the
 interview, through the one field (`#methodos-base`), optional, filled in from Options and written back
 there; its question is one object, `recipes/asks.js` `BASE`, which every recipe's `asks.base` is. Map your
@@ -3427,7 +3624,7 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
 `src/lib/permission-words.js`.
 
 - **A permission is (category, subject)**, categories by what the site learns: `basemap` (a provider
-  of the `REGISTRY`, `openfreemap`, `osm`, `cawm` or `carto`, each declaring every site it asks, or a pasted
+  of the `REGISTRY`, `openfreemap`, `osm`, `cawm`, `dare` or `carto`, each declaring every site it asks, or a pasted
   basemap's site), `iiif` (a historical map's host), `allmaps` (the service), `gazetteer` (`whg`, or
   another service's site), `linked` (a host), `collaborate` (`whg`: WHG's Workbench, which keeps the
   projects saved to it, whole, and lets whoever has a share link read them; a service only, apart from
@@ -3701,7 +3898,9 @@ every night on `main` (03:17 UTC), and by hand with `gh workflow run Gates --ref
 **same-checks** runs whenever prove-it-fails does, and compares the two.
 
 - **unit**: `npm test`, `scripts/install-test.mjs` (the tools installed as npx installs them, and
-  the command run) and `npm run build`.
+  the command run) and `npm run build`. It installs `librsvg2-bin`, `fonts-dejavu-core` and
+  `fonts-noto-core` first, for the test that draws a map as Commons does (`test/chora-export-rsvg.test.js`),
+  which fails without them; locally, `sudo apt-get install librsvg2-bin fonts-dejavu-core fonts-noto-core`.
 - **e2e**: `python e2e/app_test.py` against the build, in Playwright's Chromium. Its `RESULT:` line
   is in the run's summary, with every failing check named.
 - **prove-it-fails**: `python e2e/app_test.py --prove-it-fails`, green only when every check fails
