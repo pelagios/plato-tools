@@ -77,7 +77,9 @@ export function mountWikidata(host) {
     const n = ++drawing;
     const w = work();
     el.hidden = !w;
-    if (!w) return;
+    // Closed, the panel asks nothing: reading the places (the worker's gather) makes the page busy, and the review's
+    // keys do nothing while it is (the match review's e2e found a key lost that way, 15 October 2026).
+    if (!w || !el.open) return;
     const g = await host.places();
     if (n !== drawing) return;
     // 1. The search.
