@@ -4635,7 +4635,7 @@ def match_two_checks(pw, url, tmp):
         until(page, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
         until(page, "() => window.__plato?.columns?.headers && !document.getElementById('methodos-done').hidden", 30)
         t = track(); r['begun'] = t; begun = late()
-        ok = (asked_now == ['into-dataset', 'will-publish'] and into == {'legend': 'Add the decisions to your dataset, or keep them in a file of their own about it?',
+        ok = (asked_now == ['into-dataset', 'will-publish', 'will-mint'] and into == {'legend': 'Add the decisions to your dataset, or keep them in a file of their own about it?',
               'labels': ['Add them to my dataset', 'Keep them in a file of their own'], 'checked': 'yes'} and before is True and planned == steps
               and list(t['steps']) == steps and t['steps'].get('columns') == 'current'
               and len(pending) == 1 and pending[0].startswith('The other dataset: not yet chosen. It is chosen at the step') and "Krisis's “Match with another dataset…”" in pending[0]
@@ -4850,7 +4850,7 @@ def match_two_checks(pw, url, tmp):
         counts = (s.get('report') or {}).get('counts') or {}
         step_is('compare', 'done')
         t = track()
-        return (asked_now == ['into-dataset', 'will-publish'] and planned == ['check-a', 'match', 'check-other', 'review', 'apply', 'again', 'compare', 'out']
+        return (asked_now == ['into-dataset', 'will-publish', 'will-mint'] and planned == ['check-a', 'match', 'check-other', 'review', 'apply', 'again', 'compare', 'out']
                 and list(t['steps']) == planned and [counts.get(k) for k in ('changed', 'lost', 'added')] == [0, 0, 1] and t['steps'].get('out') == 'current'), \
             {'asked': asked_now, 'planned': planned, 'compare': counts, 'steps': t['steps']}
     attempt('Match two datasets from a dataset already in a PLATO format: the same two questions, no columns or conversion but a check of it, matched as it is, reviewed, recorded and compared with it (one answer added)', from_plato)
