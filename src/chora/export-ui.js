@@ -301,7 +301,7 @@ export function createExport(root, preview, ctx) {
       Object.assign(st, {
         background: { id: bm().id, kind: (bg || {}).kind || 'none', info: bg?.info || null }, licence: { ok: licence.ok, label: licence.licence.label, refused: licence.refused, raised: licence.raised, templates: licence.templates, words: licence.words },
         labels: out.labels.map((l) => ({ id: l.id, text: l.lines.map((x) => x.text).join(' / '), position: l.position, overlaps: l.overlaps, box: l.box })),
-        overlapping: out.overlapping, size: [out.width, out.height], projection: out.projection, rasterInSvg: out.rasterInSvg, layers: out.layers, scale: out.scale.words,
+        overlapping: out.overlapping, size: [out.width, out.height], bounds: out.bounds, projection: out.projection, rasterInSvg: out.rasterInSvg, layers: out.layers, scale: out.scale.words,
         historical: hist ? { how: hist.how, kind: hist.kind, limited: hist.limited || null } : null, svgLength: out.svg.length,
       });
       showComposed();

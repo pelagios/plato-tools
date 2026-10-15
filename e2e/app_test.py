@@ -2928,6 +2928,7 @@ def main():
             trace_workflow_checks(pw, url, tmp)
             open_map_basemap_checks(pw, url, tmp)
             open_map_compose_checks(pw, url, tmp)
+            open_map_export_checks(pw, url, tmp)
     finally:
         stop(srv)
         stop_fixtures()
@@ -11262,6 +11263,190 @@ def open_map_compose_checks(pw, url, tmp):
         return s['places'] == {'total': 230, 'shown': 200, 'capped': True} and 'first 200' in said and len(pv()['points']) == 200, {'places': s['places'], 'said': said, 'points': len(pv()['points'])}
     attempt('Make an open map: of 230 places in view, the map is made with the first 200, and the panel says so', capped)
     attempt('Make an open map: across the composition checks, nothing asked of another site, and no page error', lambda: (len(web()) > 20 and not foreign() and not errors, {'requests': len(web()), 'foreign': foreign(), 'errors': errors[:5]}))
+    ctx.close()
+
+# ---- Make an open map (#37): the files, read back --------------------------------------------------------
+# The SVG and the PNG downloaded, read as files: the PNG's header (its size), its resolution (pHYs) and its words
+# (tEXt/iTXt), its pixels probed where a place, the sea and the land must be; the SVG's viewBox, attribution and
+# kept settings. The pixels are probed on a test style (Natural Earth's own, its colours flat and loud: the sea
+# blue, the land green), answered by a route for basemap/style.json, so that a probe means one thing. And the
+# backgrounds' licences in the file, the Commons page and its link, and what is refused.
+TEST_STYLE_COLOURS = {'ocean': '#0000ff', 'land': '#00ff00'}
+def test_style():
+    s = json.loads((ROOT / 'public/basemap/style.json').read_text())
+    for l in s['layers']:
+        if l['id'] == 'ocean': l['paint']['background-color'] = TEST_STYLE_COLOURS['ocean']
+        if l['id'] == 'land': l['paint']['fill-color'] = TEST_STYLE_COLOURS['land']
+        if l['id'] == 'lakes': l['paint']['fill-color'] = TEST_STYLE_COLOURS['ocean']
+    s['layers'] = [l for l in s['layers'] if l['id'] in ('ocean', 'land', 'lakes', 'rivers') or l.get('layout', {}).get('visibility') == 'none']
+    return json.dumps(s)
+def png_read(path):
+    from PIL import Image
+    im = Image.open(path); im.load()
+    return im, {k: v for k, v in (im.text or {}).items()}
+
+def open_map_export_checks(pw, url, tmp):
+    base = url.rstrip('/') + '/'; here = urlparse(base).netloc
+    ctx = pw.chromium.launch_persistent_context(str(tmp / 'open-map-export'), headless=True, args=GL, viewport={'width': 1500, 'height': 1000}, reduced_motion='reduce', accept_downloads=True)
+    ctx.add_init_script('window.__plato_forceDownload = true;')
+    ctx.set_default_timeout(T(30) * 1000)
+    requests, errors = [], []
+    ctx.on('request', lambda r: requests.append(r.url))
+    page = ctx.pages[0] if ctx.pages else ctx.new_page()
+    page.on('pageerror', lambda e: errors.append(str(e)[:200]))
+    web = lambda since=0: [u for u in requests[since:] if urlparse(u).scheme in ('http', 'https')]
+    foreign = lambda since=0: sorted({urlparse(u).netloc for u in web(since) if urlparse(u).netloc != here})
+    STYLE = test_style()
+    page.route('**/basemap/style.json', lambda route: route.fulfill(status=200, content_type='application/json', body=STYLE))
+    es = lambda: page.evaluate(EXPORT_STATE) or {}
+    def made():
+        until(page, '() => window.__chora.export && ["ready", "error"].includes(window.__chora.export.phase) && !!document.querySelector("#chora-export-preview-map svg")', 90)
+    def recomposed(change):
+        page.evaluate('() => { const s = document.querySelector("#chora-export-preview-map svg"); if (s) s.dataset.old = "1"; }')
+        change()
+        until(page, '() => { const s = document.querySelector("#chora-export-preview-map svg"); return !!s && !s.dataset.old && ["ready", "error"].includes(window.__chora.export.phase); }', 90)
+    def boot(grants=None, basemap=None, src=ATTICA, name='attica-export.json', relief_on=False):
+        page.goto('about:blank'); chora_boot(page, base)
+        page.evaluate('''([g, b, r]) => { localStorage.setItem("chora-contributor", JSON.stringify({ name: "Ada Mapmaker", orcid: "https://orcid.org/0000-0002-1825-0097" }));
+          if (r) localStorage.setItem("chora-relief", "on"); else localStorage.removeItem("chora-relief");
+          if (g) localStorage.setItem("plato-tools.permissions", JSON.stringify({ version: 1, grants: g })); else localStorage.removeItem("plato-tools.permissions");
+          if (b) localStorage.setItem("chora-basemap", JSON.stringify(b)); else localStorage.removeItem("chora-basemap"); }''', [grants, basemap, relief_on])
+        chora_boot(page, base, [fixture(src, name, tmp)])
+        until(page, '() => window.__chora.phase === "loaded"', 30)
+        if basemap: until(page, 'b => window.__chora.basemap === b && window.__chora_map.isStyleLoaded()', 30, basemap)
+        if relief_on: until(page, '() => !!window.__chora_map.getLayer("chora-relief")', 30)
+        page.evaluate('() => window.__chora_map.jumpTo({ center: [23.6, 37.95], zoom: 8.6 })'); page.evaluate(SETTLE)
+        page.click('#chora-export-open'); made()
+    def get(fmt):
+        with page.expect_download(timeout=T(120) * 1000) as d: page.click(f'#chora-export-{fmt}')
+        p = tmp / f'export-{len(requests)}-{d.value.suggested_filename}'; d.value.save_as(p); return p, d.value.suggested_filename
+    def export_px(ll, s):
+        """Where a place is in the file: on the screen's map, scaled to the file's width (the same view, made wider)."""
+        x, y = page.evaluate('(ll) => { const p = window.__chora_map.project(ll); return [p.x, p.y]; }', ll)
+        k = s['size'][0] / page.evaluate('() => window.__chora_map.getCanvas().clientWidth')
+        return round(x * k), round(y * k)
+    st = {}
+
+    def files_read_back():
+        since = len(requests); boot()
+        s = es()
+        svg_path, svg_name = get('svg'); png_path, png_name = get('png')
+        svg = svg_path.read_text()
+        im, text = png_read(png_path)
+        settings = json.loads(text.get('plato-tools:map') or '{}')
+        # The pixels: Athens (the place's own red), the open sea south of Aegina (the test style's blue), inland Attica (its green).
+        px = lambda ll: im.convert('RGB').getpixel(export_px(ll, s))
+        athens, sea, land = px([23.7267, 37.9715]), px([23.62, 37.55]), px([23.95, 38.2])
+        red = lambda c: c[0] > 140 and c[1] < 80 and c[2] < 80
+        m = re.search(r'viewBox="0 0 (\d+) (\d+)"', svg)
+        st['svg'] = svg
+        return (svg_name == 'Places of Places of Attica (a test fixture).svg' and png_name.endswith('.png')
+                and m and [int(m.group(1)), int(m.group(2))] == s['size'] and list(im.size) == s['size'] and round(im.info.get('dpi', (0,))[0]) == 150
+                and text.get('Title') == 'Places of Places of Attica (a test fixture)' and text.get('Author') == 'Ada Mapmaker' and text.get('Copyright', '').startswith('CC BY 4.0')
+                and settings.get('version') == 1 and settings.get('width') == 1600 and settings.get('view')
+                and 'Map: Ada Mapmaker, CC BY 4.0, made with PLATO tools' in svg and 'Modern coastline: Natural Earth, 50m (public domain)' in svg
+                and '<plato:map' in svg and '@' not in svg.split('<metadata')[0] + svg.split('</metadata>')[1]
+                and red(athens) and sea[2] > 200 and sea[0] < 60 and land[1] > 200 and land[0] < 60
+                and not foreign(since) and any(u.endswith('/basemap/land.geojson') for u in web(since))), {
+            'names': [svg_name, png_name], 'viewBox': m.group(0) if m else None, 'size': s.get('size'), 'png': im.size, 'dpi': im.info.get('dpi'),
+            'text': {k: v[:80] for k, v in text.items()}, 'pixels': {'athens': athens, 'sea': sea, 'land': land}, 'foreign': foreign(since)}
+    attempt('Make an open map: the SVG and the PNG downloaded are the same map: the SVG\'s viewBox and the PNG\'s size the map\'s; the PNG\'s resolution (150 dpi), title, author, licence and settings in its chunks; Athens red, the sea and the land in the test style\'s colours where they are; the attribution and the coastline\'s source written in; nothing asked of another site', files_read_back)
+
+    def page_and_link():
+        page_text = page.input_value('#chora-export-page')
+        link = page.get_attribute('#chora-export-upload-link', 'href') or ''
+        words = page.inner_text('#chora-export-upload-link') if page.is_visible('#chora-export-commons summary') else ''
+        page.click('#chora-export-commons summary')
+        words = page.inner_text('#chora-export-upload-link')
+        from urllib.parse import parse_qs
+        q = parse_qs(urlparse(link).query)
+        return (page_text.startswith('{{Map\n') and '|author = [https://orcid.org/0000-0002-1825-0097 Ada Mapmaker]' in page_text and '{{self|cc-by-4.0}}' in page_text and '{{Natural Earth}}' in page_text
+                and '|projection = Web Mercator (EPSG:3857)' in page_text and '|latitude = ' in page_text and 'pleiades.stoa.org/places/579885' in page_text and '@' not in page_text
+                and link.startswith('https://commons.wikimedia.org/wiki/Special:Upload?') and q.get('wpDestFile') == ['Places of Places of Attica (a test fixture).svg']
+                and q.get('wpLicense') == ['self|cc-by-4.0'] and q.get('wpUploadDescription', [''])[0].startswith('{{Map') and 'sends' in words and 'Wikimedia Commons' in words), {
+            'page': page_text[:300], 'link': link[:160], 'words': words}
+    attempt('Make an open map: the Commons page is the {{Map}} template filled (author by name and ORCID iD, no email, projection, bounds, the Pleiades record), CC BY 4.0 and {{Natural Earth}}; the upload link fills in the file\'s name, description and licence, and says what it sends', page_and_link)
+
+    def equirect():
+        # A wide view, where the two projections differ by many pixels (in a small one, by about one).
+        page.evaluate('() => window.__chora_map.jumpTo({ center: [23.6, 41], zoom: 4.4 })'); page.evaluate(SETTLE)
+        recomposed(lambda: page.click('#chora-export-open'))
+        s0 = es()
+        recomposed(lambda: page.check('input[name="chora-export-projection"][value="equirectangular"]'))
+        s = es()
+        p, _ = get('png'); im, text = png_read(p)
+        # Longitude and latitude each in proportion across the map: Athens where its share of the bounds puts it, red.
+        w, south, e, n = s['bounds']; W, H = s['size']
+        at = lambda lon, lat: (round((lon - w) / (e - w) * W), round((n - lat) / (n - south) * H))
+        athens = im.convert('RGB').getpixel(at(23.7267, 37.9715))
+        page_text = page.input_value('#chora-export-page')
+        return (s['projection'] == 'equirectangular' and s['size'][0] == s0['size'][0] and list(im.size) == s['size'] and athens[0] > 140 and athens[1] < 80
+                and json.loads(text['plato-tools:map'])['projection'] == 'equirectangular' and '|projection = Equirectangular' in page_text), {
+            'before': s0.get('size'), 'after': s.get('size'), 'png': im.size, 'athens': athens, 'bounds': s.get('bounds')}
+    attempt('Make an open map: equirectangular: the same width, the PNG of the map\'s size, Athens where its share of the bounds puts it (longitude and latitude in proportion), and its settings and Commons page saying so', equirect)
+
+    # A raster background: CAWM's tiles, answered here, each one colour (magenta), so that the picture is seen to be them.
+    MAGENTA = None
+    def magenta():
+        nonlocal MAGENTA
+        if MAGENTA is None:
+            from PIL import Image
+            import io
+            b = io.BytesIO(); Image.new('RGB', (256, 256), (255, 0, 255)).save(b, 'PNG'); MAGENTA = b.getvalue()
+        return MAGENTA
+    cawm_hits = []
+    def cawm(route): cawm_hits.append(route.request.url); route.fulfill(status=200, content_type='image/png', body=magenta(), headers={'Access-Control-Allow-Origin': '*'})
+    ctx.route('https://cawm.lib.uiowa.edu/**', cawm)
+    def raster_background():
+        boot({'basemap:cawm': {'state': 'allowed', 'at': '2026-10-15T09:00:00Z'}}, 'cawm')
+        s = es(); h0 = len(cawm_hits)
+        svg_path, _ = get('svg'); svg = svg_path.read_text()
+        p, _ = get('png'); im, _ = png_read(p)
+        sea = im.convert('RGB').getpixel(export_px([23.62, 37.55], s))
+        note = page.inner_text('#chora-export-raster')
+        return (s['background']['kind'] == 'image' and s['rasterInSvg'] and s['licence']['label'] == 'CC BY 4.0' and s['licence']['ok']
+                and '<image x="0" y="0"' in svg and 'Background: Consortium of Ancient World Mappers Map Tiles' in svg and 'Coastline: as the Consortium of Ancient World Mappers draws it' in svg
+                and sea[0] > 200 and sea[1] < 60 and sea[2] > 200 and 'mostly a picture' in note and 'tiles at zoom' in note
+                and 0 < len(cawm_hits) <= 400 + h0), {'state': {k: s.get(k) for k in ('background', 'licence', 'rasterInSvg')}, 'pixel': sea, 'note': note, 'tiles': len(cawm_hits)}
+    attempt('Make an open map: on Ancient World (CAWM), its tiles are fetched (within the budget of 400) and embedded as a picture, the panel says the SVG is mostly a picture, the file credits CAWM and names its coastline as CAWM\'s, CC BY 4.0', raster_background)
+
+    def dare_raises():
+        dare_hits = []
+        ctx.route('https://dh.gu.se/**', lambda route: (dare_hits.append(1), route.fulfill(status=200, content_type='image/png', body=magenta(), headers={'Access-Control-Allow-Origin': '*'})))
+        boot({'basemap:dare': {'state': 'allowed', 'at': '2026-10-15T09:00:00Z'}}, 'dare')
+        s = es(); words = page.inner_text('#chora-export-licence'); page_text = page.input_value('#chora-export-page')
+        return (s['licence']['label'] == 'CC BY-SA 4.0' and s['licence']['ok'] and 'share-alike' in words and 'CC-BY-SA-3.0' in words and '{{self|cc-by-sa-4.0}}' in page_text and dare_hits), {
+            'licence': s.get('licence'), 'words': words, 'tiles': len(dare_hits)}
+    attempt('Make an open map: on Roman Empire (DARE), the map is CC BY-SA 4.0, and the panel and the Commons page say it is because DARE\'s CC BY-SA 3.0 is share-alike', dare_raises)
+
+    def refused():
+        # A source under a licence for no commercial use, and a pasted background: neither may go to Commons.
+        nc = json.loads(ATTICA.read_text())
+        nc['spatialEntities'][1]['attestations'][0]['sources'][0] = {'@id': 'https://example.org/attica/source/nc', 'title': 'A non-commercial atlas', 'licence': 'https://creativecommons.org/licenses/by-nc/4.0/'}
+        f = tmp / 'attica-nc.json'; f.write_text(json.dumps(nc))
+        boot(src=f, name='attica-nc.json')
+        s = es(); words = page.inner_text('#chora-export-licence')
+        disabled = page.evaluate('() => [document.getElementById("chora-export-svg").disabled, document.getElementById("chora-export-png").disabled]')
+        link = page.query_selector('#chora-export-upload-link')
+        # The control: untick the place it is cited for, and the map may go.
+        recomposed(lambda: page.uncheck('#chora-export-places li[data-place$="/eleusis"] input[data-tick]'))
+        s2 = es(); enabled = page.evaluate('() => [document.getElementById("chora-export-svg").disabled, document.getElementById("chora-export-png").disabled]')
+        return (not s['licence']['ok'] and any('A non-commercial atlas' in r['name'] and 'no commercial use' in r['why'] for r in s['licence']['refused']) and 'Not for Wikimedia Commons' in words
+                and disabled == [True, True] and link is None and s2['licence']['ok'] and enabled == [False, False]), {'refused': s['licence'].get('refused'), 'words': words, 'disabled': disabled, 'after': s2.get('licence'), 'enabled after': enabled}
+    attempt('Make an open map: a place cited from a source for no commercial use stops the map going to Commons: the panel names it, the downloads and the upload link are not offered; with that place left out, they are', refused)
+
+    def relief_in_file():
+        page.route('**/basemap/relief.pmtiles', relief_route)
+        try:
+            boot(relief_on=True)
+            s = es(); svg_path, _ = get('svg'); svg = svg_path.read_text()
+            return (s['licence']['ok'] and '{{PD-USGov-NASA-SRTM}}' in s['licence']['templates'] and '{{PD-USGov-USGS}}' in s['licence']['templates']
+                    and '<g id="relief"' in svg and 'Shaded relief from NASA SRTM (public domain); USGS GMTED2010 (public domain)' in svg and s['rasterInSvg']), {
+                'templates': s['licence'].get('templates'), 'relief layer': '<g id="relief"' in svg}
+        finally:
+            page.unroute('**/basemap/relief.pmtiles', relief_route)
+    attempt('Make an open map: with the shaded relief on, the file carries it, credits NASA SRTM and USGS GMTED2010, and the Commons page names their public-domain templates', relief_in_file)
+    attempt('Make an open map: across the file checks, no page error, and only this site, CAWM\'s and DARE\'s asked', lambda: (len(web()) > 20 and not errors and set(foreign()) <= {'cawm.lib.uiowa.edu', 'dh.gu.se'} and 'cawm.lib.uiowa.edu' in foreign(), {'errors': errors[:5], 'foreign': foreign()}))
     ctx.close()
 
 if __name__ == '__main__': main()
