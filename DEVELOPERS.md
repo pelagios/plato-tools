@@ -3082,6 +3082,89 @@ To WHG only: another service is sent nothing of it.
   it was drawn with) is the Scope's: on the live site on 12 October 2026 the check read it a moment before the
   last change was drawn, and failed once (brought out locally by delaying the worker's answers 1.5 s).
 
+### Wikidata items for the places no gazetteer knows (Issue #36; plan #34, item 9)
+
+After a review, the places left with no match (every candidate judged "not this one" or "different
+places", or none found) can be given items in Wikidata, each with the place's names, a description, its
+kind, its point, its country and, from the region review, the region it lies in, and come back as
+identities. Stephen's decisions of 15 October 2026, as built: `src/engine/krisis/wikidata.js` (pure:
+which places qualify, the plan, the QuickStatements text, the licence gate, the work file's `mint`
+section, the Q-ids verified and recorded), `wikidata-search.js` (Wikidata's API, asked through the fetch
+it is given), `mint-section.js` (the shape of `mint`, a leaf that work.js's `readWork` checks with),
+`src/krisis/wikidata-panel.js` (the panel under the review), `plato-tools wikidata search | batch | ids`,
+and the Methodos step `wikidata.items`. The words are `WIKIDATA_WORDS` in words.js.
+
+- **Search first (D2).** Before an item is made the place is searched in Wikidata itself, through api.php on
+  www.wikidata.org, anonymously (`origin=*`, no cookies) and in series: `wbsearchentities` for the label and
+  each other name in its own language (else the dataset's, else English), then CirrusSearch for items with a
+  point within 5 km of the place's (`nearcoord:` with `haswbstatement:P625`, both measured on wikidata.org
+  on 15 October 2026), then `wbgetentities` once for every id found. The hits come back in the gazetteer
+  module's Candidate shape (`entityCandidate`: the labels, aliases, description, classes as `wikidata:Qn`,
+  the point, the country as a code from the vendored table), so `lookup.js mergeAnswers` keeps them as any
+  lookup's candidates, under a lookup of the service `WIKIDATA_SERVICE`, for the ordinary review; a hit has
+  no score and no exact match, so the bulk accept never takes one (guards.js: 'weak'). A request that fails
+  leaves the place `unanswered`, never "no match"; three failures in a row, a 429, a refusal or a stop end the
+  search, the rest `stopped`. Never `wikidata.reconci.link`, which answers by a redirect that the permissions
+  refuse. The permission is `gazetteer:wikidata` (`REGISTRY`: https://www.wikidata.org; the panel's words say
+  it sees the names, the coordinates and, for the Q-ids back, the user name typed); `gazetteerPermission`
+  gives it for any https address on wikidata.org. On the command line the flag is the consent:
+  `--allow-host wikidata`, checked before each request; `--api https://127.0.0.1:…` stands a test service in.
+- **Which places (D6, D8)** (`qualifying`): reviewed (no candidate undecided), matched to nothing, linked by the
+  dataset to no gazetteer's record (`whgIdOf`), searched in Wikidata and answered, with a web address under
+  the dataset's base, a name, a point or a region matched to a Wikidata item in its place, and an attestation
+  citing a source; not kept out of the review (`rowState`) or of minting (`mint.items[iri].excluded`). Each
+  reason is a list of its own, said in the panel and the command line; those never looked up in another
+  gazetteer are counted and warned of, not refused.
+- **The licence gate (D3)** (`mintGate`): the public domain (CC0, the Public Domain Mark, PDDL) passes; a licence
+  asking credit or share-alike (CC BY, BY-SA, ODbL, ODC-By, the OGL) needs the statement *I hold the rights in
+  this dataset, or have the holder's permission, and release these statements under CC0* (`CONSENT`,
+  recorded with the name and the date; never a name with @ in it); no commercial use, no adaptations, a
+  rights statement, no licence or one not known is refused. Per statement, an attestation whose cited source
+  is not free (`attestationLicences` against CC0) contributes nothing, and the plan says so (`leftOut`).
+- **The plan (D6, D7)** (`planItems`, from `mintCollector`'s records, read in the worker (`wikidata-collect`)
+  or by the command line): a label per language and the other names as aliases (a name with no language takes
+  the dataset's, else is left out), the description prefilled "<kind> in <region>, <country>, attested
+  <first>–<last>" (two to twelve words, lower case, no full stop; editable), P31 from the kind (`classOf`:
+  a Wikidata class the dataset names as it is, else kinds.js's AAT concept or word through `CLASSES`, a
+  settlement of no listed kind Q486972, else the user chooses or the place is left out), P625 with as many
+  decimals as `precisionKm` allows (`decimalsFor`), P17 from the country code (`src/vendor/iso-countries.json`,
+  made by `scripts/make-iso-countries.mjs`; CC0, see its NOTICE) and P131 only from a region of the region
+  review matched to a Wikidata item (`regionItem`). No date property. Each statement is a tick-box
+  (`mint.options.statements`).
+- **The batch (D5, D8, D10)** (`quickStatementsV1`): QuickStatements v1 text, downloaded as `<stem>.wikidata.qs.txt`:
+  `CREATE /* PLATO tools: <title>; <place> */`, then `LAST` with Lxx, Axx, Dxx and each statement with the
+  references `S854 "<the place's address>"` and `S813 +<date>T00:00:00Z/11`. A double quote in a text is written
+  as a closing quotation mark and warned of; the title never goes in with an @ in it. At most `MAX_ITEMS`
+  (250) a batch; above it the words point to Wikidata's bot approval and WikiProject Historical Place. An
+  unpublished dataset is warned of, not refused. The batch is recorded (`recordBatch`: q1, q2, …, when, the
+  places in order, the file's SHA-256). These tools never write to Wikidata (D9): the how-to says to log in
+  (autoconfirmed: 50 edits, four days), import V1 commands, run, keep the batch number, and that the batch
+  is an edit group that can be undone whole.
+- **The Q-ids back (D4):** pasted (`readPastedQids`, set against the batch's rows in order, `pairPasted`) or
+  read from the user's own new items since the batch (`readContribs`: `list=usercontribs&ucshow=new`, the
+  user name they typed, kept as `mint.user`), each item fetched (`readEntities`) and matched to the batch's
+  row whose address it carries as a P854 reference (`matchItems`), then verified (`verifyItem`): a label equal
+  in some language, the point within `VERIFY_KM` (1 km) where the row has one, and the reference present.
+  An unverified id is shown, never recorded. `recordMinted` records a verified one as a candidate (the entity
+  address, under a Wikidata lookup with `parameters.minted`) decided 'match', exactMatch, with a basis naming
+  the batch; Finish then writes it as any identity (identity.js, apply.js), citing Wikidata, and the version
+  check must find a pure addition. The attestation's note names `krisis-wikidata 1`.
+- **A PLATO property on Wikidata is later.** `haswbstatement:` cannot search URL statements or references, so
+  our mark on an item is the reference alone until a Wikidata property for PLATO (or w3id) place addresses
+  exists; then it would be written as an external id, searchable.
+- **In Methodos:** `wikidata.items`, interactive, networked (`gazetteer:wikidata`), after the review in Map your
+  data, Match two datasets and Trace a historical map under the question "Will you create Wikidata items for
+  the places no gazetteer knows…?" (`will-mint`, no by default: a yes-or-no question's `default` answers it in
+  the runner too, so a workflow saved before it was asked carries on). The step is done with the review open,
+  whatever the panel recorded (optional); the step that records the decisions takes `wikidata.work ??
+  review.work`. In Trace a historical map it runs under both `will-identify` and `will-mint`: a step's `when`
+  may be a list, every condition of which must hold (recipe.js).
+- **Tests:** `test/krisis-wikidata.test.js` (the engine, on a fixture read by the real pipeline, down to Finish and
+  the version check), `test/krisis-wikidata-search.test.js` (a fake api.php, the permissions),
+  `test/krisis-wikidata-cli.test.js` (the commands against an https stand-in on 127.0.0.1), the Methodos
+  suites, and `krisis_wikidata_case` in `e2e/app_test.py` (a fake Wikidata by `page.route`). The one live read,
+  `test/krisis-wikidata-live.test.js`, runs only with `PLATO_LIVE_WIKIDATA=1`.
+
 ## Workflows (Methodos)
 
 Methodos runs a workflow, a named sequence of the tools' own operations, from a recipe
@@ -3103,7 +3186,9 @@ page's interview and tracker (below); keeping a workflow beyond the tab is phase
   `src/methodos/page.js`; "Chora, the map", above); a map downloaded from Chora's "Make a map" completes the step
   `map.export` (`mapped()`), as a hand-off of its own type, `map`.
 - **Recipes** (`recipes/`) are data: "Map your data", "Publish a dataset", "Places from an edition
-  (TEI)", "Places from Recogito", "Match two datasets", "Trace a historical map" and "Make an open map" (below). A step names an
+  (TEI)", "Places from Recogito", "Match two datasets", "Trace a historical map" and "Make an open map" (below); the
+  first, the fifth and the sixth have the optional step "Create Wikidata items for the places no gazetteer knows"
+  (`wikidata.items`, above) under their question `will-mint`. A step names an
   operation, where each input comes from (a file chosen at the start, `$files`, or an earlier step's
   output, `mint.dataset`, with `??` for "this, or that if it was skipped"), its options (literal or
   from an answer) and the yes-or-no question under which it runs. `recipe.js` checks a recipe

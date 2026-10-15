@@ -30,6 +30,7 @@ import { createLookup, WHG_ENDPOINT, isWhg, whgLang } from './engine/gazetteer/i
 import { languageCombobox } from './krisis/lang-combobox.js';
 import { showTokenView, giveToken, rememberToken, forgetToken, noteInput } from './lib/token-field.js';
 import { runLookup, planLookup, gazetteerPermission, permittedFetch, serviceOf, iriFromTemplate, iriVia, manifestSettings, newWork, defaultChoice, licenceOf, PLACE_CHOICES, WHG_REQUESTS_A_DAY } from './engine/krisis/lookup.js';
+import { mountWikidata } from './krisis/wikidata-panel.js';
 import { candidateSource } from './engine/krisis/identity.js';
 // Krisis: region review (Methodos #28, stages 3 and 4), run on this thread as the lookup is, through the same shared WHG lookup.
 import { runLevel, runPlaces } from './engine/krisis/lookup.js';
@@ -98,6 +99,7 @@ function onMessage({ data }) {
   else if (data.type === 'columns') onColumns(data);
   else if (data.type === 'tei-keys') onTeiKeys(data);
   else if (data.type === 'places') onPlaces(data);   // Krisis: gazetteer lookup
+  else if (data.type === 'wikidata-collect') onCollected(data);   // Krisis: Wikidata items
   else if (data.type === 'error' && placesWaiting) onPlaces({ subjects: null, places: null, reason: data.message });
   else if (data.type === 'preview') onPreview(data);
   else if (data.type === 'cluster') spellings.answer(data);   // Hermes: groups of similar spellings
@@ -1447,6 +1449,7 @@ async function resume(file) {
 function beginReview(w, name, { focus = true } = {}) {
   work = w; workName = name || workName; basisFor = null; findFor = null; allDone = false; unsaved = 0;
   exportedSet = null; earlierSets = []; candidatesStatus('');
+  wikidata.reset();   // Krisis: Wikidata items (#36): a new review, nothing of the last one's kept
   // Krisis: what a Finish does with an earlier answer in a draft, as the review last chose (withdraw.js).
   for (const r of document.querySelectorAll('input[name="draft-answers"]')) r.checked = r.value === (work.draft_answers || 'withdraw');
   order = placeOrder(); lastBulk = null;
@@ -1506,6 +1509,7 @@ function render(focus) {
   $('finish-cites').textContent = LW.cites(citedSources());   // Krisis: gazetteer lookup, one attestation per source
   drawBulk();   // Krisis × Methodos
   drawRegions();   // Krisis: region review
+  wikidata.refresh();   // Krisis: Wikidata items (#36)
   if (!order.length) { box.innerHTML = `<p>${escapeHtml(W.none)}</p>`; return; }
   const iri = order[cursor], place = work.places[iri] || {}, cands = candidatesOf(work, iri);
   const typed = keepTyped(iri), notes = keepNotes(box, document.activeElement);   // Krisis × Methodos: a note half-typed
@@ -1852,6 +1856,40 @@ const lookupOf = (id) => (work.lookups || []).find((l) => l.id === id);
 const scrub = (text) => { const t = token.get(); return t ? String(text).split(t).join('[token]') : String(text); };
 function lookupSay(text, warn = false) { const p = $('lookup-progress'); p.textContent = text; p.classList.toggle('warn', warn); }
 function lookupState(more) { state.lookup = { ...(state.lookup || {}), ...more }; }
+
+// Krisis: Wikidata items for the places no gazetteer knows (Issue #36; src/krisis/wikidata-panel.js). The panel
+// under the review: its searches and reads go through the permissions module (gazetteer:wikidata), on this
+// thread; the dataset's records it plans from come from the worker (wikidata-collect); what it records goes
+// into the work object, which "Save the review" saves and Finish writes.
+let collecting = null;
+function onCollected(data) {
+  const c = collecting; collecting = null;
+  busy = false; buttons(!!looking);
+  c?.resolve(data.records ? { gazetteer: data.gazetteer || {}, records: new Map(data.records) } : null);
+}
+const wikidata = mountWikidata({
+  el: $('wikidata'), state,
+  work: () => reviewWork(), workName: () => workName,
+  places: async () => { const g = await gatherPlaces(); return g?.places ? g : null; },
+  collect: (places) => {
+    if (collecting) return collecting.promise;
+    if (busy || !readable(input)) return Promise.resolve(null);
+    busy = true; buttons(true);
+    let resolve;
+    const promise = new Promise((r) => { resolve = r; });
+    collecting = { promise, resolve };
+    const base = $('base').value.trim() || undefined, cols = isTable(input) && columns ? columnOptions() : undefined;
+    worker.postMessage({ cmd: 'wikidata-collect', subjects: files, places, options: { base, ...(cols ? { columns: cols } : {}) } });
+    return promise;
+  },
+  reviewer: () => reviewer(), askName: () => askName(true, W.nameNeeded),
+  fetch: (controller) => permittedFetch(permissions.fetch, (e) => controller?.abort(e)),
+  needsLine: (el, svc) => needsLine(el, svc), mayAsk: (svc) => mayLookUp(svc),
+  base: () => $('base').value.trim() || undefined, saveBlob: (blob, name) => saveBlob(blob, name),
+  changed: () => { if (!work) return; unsaved++; bulkPlan = null; reorder(); render(false); },
+  rerender: () => { if (work) { bulkPlan = null; reorder(); render(false); } },
+  busy: () => busy || !!looking,
+});
 
 // The places of the dataset, with the links it states, read by the worker (gather()); once per choice of files.
 function gatherPlaces() {

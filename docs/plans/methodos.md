@@ -607,6 +607,33 @@ list had the same gap): its ids are now made from its names, under the base addr
 Greek and Cyrillic put into Latin letters for the id alone (15 October: Ἀθῆναι gives `athenai`). Confirmed by
 Stephen on 15 October, with the locate step kept unconditional.
 
+### 6.5 Wikidata items for the places no gazetteer knows, as built
+
+*15 October 2026 (plan #34, item 9; Issue #36).* Not a workflow of its own: a Krisis action after any review
+(the panel "Wikidata items for the places no gazetteer knows", and `plato-tools wikidata`), and one optional
+step in Map your data, Match two datasets and Trace a historical map, `wikidata.items`, under the question
+"Will you create Wikidata items for the places no gazetteer knows (a batch you run in QuickStatements
+yourself)?" (no unless answered). Stephen's decisions of 15 October 2026, as built (DEVELOPERS.md, "Wikidata
+items for the places no gazetteer knows"):
+
+1. *Where.* All its state is in the review's work file (`mint`): the searches, the consent, the items as edited,
+   the batches, the Q-ids. The step hands the review's work file on; the step that records the decisions takes
+   it in place of the review's, so the Q-ids go into the first release.
+2. *Search first.* Wikidata's own API, by name and near the point, through the permission `gazetteer:wikidata`;
+   every hit is a candidate of the ordinary review, never accepted in bulk.
+3. *The licence.* CC0 passes; CC BY, BY-SA, ODbL and the OGL need the user's statement, recorded with the date;
+   NC, ND, a rights statement or no licence is refused; a statement from a non-free cited source is left out.
+4. *Guards.* 250 items a batch; a place with no address to cite or no source cited is refused; an unpublished
+   dataset is warned; a place with no point needs a region matched to a Wikidata item.
+5. *Statements.* Labels, aliases, a description (prefilled, editable), P31, P625, P17, P131 from the region
+   review only; tick-boxes; no date property. S854 to the place's address, and S813, on every statement.
+6. *The batch.* QuickStatements v1 text, downloaded, run by the user; these tools never write to Wikidata.
+7. *The Q-ids back.* Pasted, or the user's own new items read by their user name; each checked (the label, the
+   point within 1 km, the reference) before it is recorded as an exactMatch decision, which Finish writes.
+8. *In the recipes.* A step may run under several conditions (`when` as a list): in Trace a historical map the
+   step runs under both the lookup and the question. A yes-or-no question's default answers it in the runner,
+   so a workflow saved before the question was asked carries on.
+
 ## 7. Persistence
 
 **What is kept:** one small JSON record per workflow: the recipe key, version and digest; the

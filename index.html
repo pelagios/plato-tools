@@ -395,6 +395,40 @@
       <button id="review-next" type="button">Next <kbd>j</kbd></button>
     </div>
     <p class="note review-keys">Keys: <kbd>a</kbd> same place (or <kbd>1</kbd>–<kbd>9</kbd> for that candidate), <kbd>n</kbd> not this one, <kbd>d</kbd> different places, <kbd>s</kbd> skip, <kbd>j</kbd> next, <kbd>k</kbd> previous. They act on the highlighted candidate, and do nothing while you are typing.</p>
+    <!-- Krisis: Wikidata items for the places no gazetteer knows (Issue #36; src/krisis/wikidata-panel.js; the words are words.js WIKIDATA_WORDS). -->
+    <details id="wikidata" class="lookup wikidata" data-tools="match" hidden>
+      <summary>Wikidata items for the places no gazetteer knows</summary>
+      <p id="wikidata-intro" class="note"></p>
+      <h4 id="wikidata-search-h"></h4>
+      <p id="wikidata-search-status" aria-live="polite"></p>
+      <p id="wikidata-hits" class="warn"></p>
+      <p id="wikidata-permission" hidden></p>
+      <div class="wikidata-actions"><button id="wikidata-search" type="button" class="primary" hidden></button><button id="wikidata-stop" type="button" hidden>Stop</button></div>
+      <h4 id="wikidata-gate-h"></h4>
+      <p id="wikidata-gate"></p>
+      <label id="wikidata-consent-row" hidden><input id="wikidata-consent" type="checkbox"> <span id="wikidata-consent-text"></span></label>
+      <p id="wikidata-consented" class="note"></p>
+      <h4 id="wikidata-items-h"></h4>
+      <fieldset id="wikidata-statements"></fieldset>
+      <label><span id="wikidata-lang-label"></span> <input id="wikidata-lang" type="text" autocomplete="off" spellcheck="false" size="6" maxlength="3"></label>
+      <p id="wikidata-items-status" aria-live="polite"></p>
+      <div id="wikidata-items" class="wikidata-items"></div>
+      <h4 id="wikidata-batch-h"></h4>
+      <p id="wikidata-volume"></p>
+      <p id="wikidata-warnings" class="warn" hidden></p>
+      <button id="wikidata-download" type="button" class="primary" disabled></button>
+      <p id="wikidata-batches" class="note" aria-live="polite"></p>
+      <ol id="wikidata-howto"></ol>
+      <p id="wikidata-links" class="note"></p>
+      <h4 id="wikidata-ids-h"></h4>
+      <label><span id="wikidata-paste-label"></span> <textarea id="wikidata-qids" rows="4" cols="40" spellcheck="false"></textarea></label>
+      <button id="wikidata-check" type="button"></button>
+      <label><span id="wikidata-user-label"></span> <input id="wikidata-user" type="text" autocomplete="off" spellcheck="false" size="24"></label>
+      <button id="wikidata-read" type="button"></button>
+      <p id="wikidata-ids-status" aria-live="polite"></p>
+      <ul id="wikidata-ids" class="wikidata-ids"></ul>
+      <button id="wikidata-record" type="button" class="primary" hidden></button>
+    </details>
     <div class="review-end">
       <button id="save-review" type="button">Save the review</button>
       <small>Saves your decisions so far, to carry on later with <em>Resume a review</em>.</small>

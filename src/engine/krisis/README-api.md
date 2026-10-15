@@ -277,3 +277,32 @@ words them all.
   for the certainty select, `regionDomId` for heading ids,
   `wouldClear` for the in-page confirmation, `priorOf`/`restorePrior` for Undo with invalidate's snapshot), drawn and
   run by `src/app.js` (`drawRegions`, `regionRun`); its words are `REGION_PAGE` in words.js.
+## Wikidata items for the places no gazetteer knows (Issue #36)
+
+- `src/engine/krisis/wikidata.js` (light; the page runs it on its main thread): `qualifying(work, places?, { records?, base? })
+  -> { ready: [iri], leftOut: { <reason>: [iri] }, whgNotSearched }` (LEFT_OUT lists the reasons), `planItems({ work, places,
+  records, options: { statements, lang, base, only } }) -> { items, left, gate, statements, count, whgNotSearched }`,
+  `quickStatementsV1(items, { date, title, statements }) -> text`, `batchName(stem)`, `mintGate(gazetteer) -> { kind: 'free' |
+  'consent' | 'refused', licence, why }`, `consentRecord({ by, at, licence })` (refuses a name with @), `mintCollector(places?)`
+  (a sink for run(); `.result() -> { gazetteer, records: Map }`), `classOf(place, chosen?)`, `CLASSES`, `countryOf(code)`,
+  `codeOfCountry(qid)`, `describe`, `tidyDescription`, `decimalsFor(precisionKm)`, `regionItem(work, iri)`, `searchState(work, iri)`,
+  `mintOf(work)` (the mint section, made if absent), `recordBatch(work, { items, name, sha256, at?, statements })`,
+  `readPastedQids(text)`, `pairPasted(qids, items)`, `verifyItem(entity, item) -> { ok, label, distanceKm, near, reference }`,
+  `matchItems(entities, items) -> { matched, unmatched, twice }`, `recordMinted(work, iri, qid, { batch, reviewer, how, verified, at?,
+  label?, point? }) -> candidate` (throws unless verified), `entityCandidate(entity, { lang, foundBy })` (the gazetteer module's
+  Candidate shape), the request addresses `searchUrl`, `nearUrl`, `entitiesUrl`, `contribsUrl`, and the constants
+  `WIKIDATA_SERVICE`, `WIKIDATA_PERMISSION`, `ENTITY`, `ALGORITHM` (`krisis-wikidata 1`), `MAX_ITEMS` (250), `VERIFY_KM` (1),
+  `CONSENT`, `STATEMENTS`, `DEFAULT_STATEMENTS`, `QUICKSTATEMENTS`, `BOT_REQUESTS`, `WIKIPROJECT`, `EDIT_GROUPS`.
+- `src/engine/krisis/mint-section.js` (a leaf): `checkMint(w, bad)` (readWork calls it), `QID`, `CONSENT`, `STATEMENTS`,
+  `DEFAULT_STATEMENTS`, `MINT_VERSION`, `wdLang(tag)`.
+- `src/engine/krisis/wikidata-search.js` (light; every request through the fetch given): `searchRequests(place, options)`,
+  `searchPreview(places, options)`, `searchPlace({ fetch, place, options, signal }) -> { lists, requests }`,
+  `runWikidataSearch({ fetch, work, places, options, reviewer, signal, onBatch, now }) -> { work, record, stopped }` (as runLookup's;
+  the lookup record's service is WIKIDATA_SERVICE), `readContribs({ fetch, user, since, signal }) -> { items, requests }`,
+  `readEntities({ fetch, ids, signal }) -> { entities, requests }`, `getJson`, `WikidataError`, `SEARCH_DEFAULTS`, `HEADERS`.
+- `lookup.js gazetteerPermission(endpoint)` gives `'wikidata'` for an https address on wikidata.org.
+- Work file (any version), OPTIONAL: `mint: { version: 1, consent, options: { statements, lang }, items: { <iri>: { description?,
+  kind?, excluded? } }, batches: [{ id: 'q1', at, places, name, sha256, statements, items }], qids: { <iri>: { qid, how, batch, at,
+  verified } }, user? }`; a lookup of WIKIDATA_SERVICE with `parameters.minted: true` holds the Q-ids as candidates decided 'match'.
+- Words: `WIKIDATA_WORDS` in words.js. Page: `src/krisis/wikidata-panel.js` `mountWikidata(host)`. Worker: `cmd: 'wikidata-collect'`
+  `{ subjects, places: [iri] | null, options: { base, columns? } } -> { type: 'wikidata-collect', gazetteer, records: [[iri, rec]…] | null, reason }`.

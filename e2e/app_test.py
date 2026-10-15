@@ -1855,6 +1855,190 @@ def krisis_lookup_pattern(page, tmp, url):
           on.get('sent') == 1 and on.get('places') == ['https://pleiades.stoa.org/places/423025', 'https://pleiades.stoa.org/places/579885']
           and off.get('sent') == 1 and len(off.get('places') or []) == 2 and not any('pleiades' in x for x in off['places']), {'on': on, 'off': off})
 
+# Krisis: Wikidata items for the places no gazetteer knows (Issue #36; src/krisis/wikidata-panel.js). Wikidata's
+# api.php is never called: page.route answers for www.wikidata.org (a search by name and near a point, the
+# entities, the user's contributions) and records every request.
+def wikidata_entity(id, label, lon, lat, reference=None):
+    refs = [{'snaks': {'P854': [{'datavalue': {'value': reference, 'type': 'string'}}]}}] if reference else []
+    return {'id': id, 'type': 'item', 'labels': {'en': {'language': 'en', 'value': label}}, 'descriptions': {'en': {'language': 'en', 'value': 'a village'}}, 'aliases': {},
+            'claims': {'P31': [{'mainsnak': {'snaktype': 'value', 'property': 'P31', 'datavalue': {'value': {'id': 'Q532'}, 'type': 'wikibase-entityid'}}, 'references': refs}],
+                       'P625': [{'mainsnak': {'snaktype': 'value', 'property': 'P625', 'datavalue': {'value': {'latitude': lat, 'longitude': lon}, 'type': 'globecoordinate'}}}],
+                       'P17': [{'mainsnak': {'snaktype': 'value', 'property': 'P17', 'datavalue': {'value': {'id': 'Q145'}, 'type': 'wikibase-entityid'}}}]}}
+
+def krisis_wikidata_case(page, tmp, url):
+    """Krisis, Wikidata items: not allowed, the panel shows one line to Permissions and sends nothing; allowed, the
+    search sends (by name, and near each point) and its hit goes into the review; the licence gate asks the consent
+    statement; the batch downloaded is the QuickStatements text, line by line; pasted Q-ids are checked in (the fake)
+    Wikidata and recorded; Finish writes them as identities citing Wikidata."""
+    import re
+    a = 'https://w3id.org/e2e-mint/place/'
+    src = {'@id': 'https://w3id.org/e2e-mint/source/survey', 'title': 'The 1296 survey', 'authorityType': 'source'}
+    def place(id, label, lon, lat, **more):
+        return {'@id': a + id, 'label': label, 'ccodes': ['GB'], 'attestations': [{'contributor': {'name': 'A. Editor'}, 'created': '2026-10-15T12:00:00Z', 'names': [{'toponym': label, 'language': 'en'}], 'types': [{'label': 'village'}],
+                'geometries': [{'geojson': {'type': 'Point', 'coordinates': [lon, lat]}}], 'citations': [{'source': src}], **more}]}
+    dataset = tmp / 'mint.json'
+    dataset.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': 'https://w3id.org/e2e-mint/', 'uriSpace': 'https://w3id.org/e2e-mint/', 'title': 'Lost places of the Trent', 'licence': 'https://creativecommons.org/licenses/by/4.0/', 'status': 'published', 'creator': [{'name': 'A. Editor'}]},
+        'spatialEntities': [place('newstead', 'Newstead', -1.193, 53.081, timespans=[{'startEarliest': '1296', 'endLatest': '1540'}]), place('kirkby', 'Kirkby', -1.25, 53.1),
+                            place('linby', 'Linby', -1.2, 53.05, identities=[{'subject': a + 'linby', 'object': 'https://sws.geonames.org/2644510/', 'identityType': 'exactMatch'}])]}))
+    # The review after a WHG lookup that found nothing (so that no place is left "never looked up in WHG"), as the page saves one.
+    places = {a + 'newstead': {'label': 'Newstead', 'names': ['Newstead'], 'point': [-1.193, 53.081], 'ccodes': ['GB'], 'types': ['village']},
+              a + 'kirkby': {'label': 'Kirkby', 'names': ['Kirkby'], 'point': [-1.25, 53.1], 'ccodes': ['GB'], 'types': ['village']},
+              a + 'linby': {'label': 'Linby', 'names': ['Linby'], 'point': [-1.2, 53.05], 'ccodes': ['GB'], 'types': ['village']}}
+    work = tmp / 'mint.krisis.json'
+    work.write_text(json.dumps({'krisis': 3, 'generated_at': '2026-10-15T12:00:00Z', 'algorithm_version': 'krisis-lookup 1', 'match_parameters': {}, 'subjects': {'title': 'Lost places of the Trent', 'uri': 'https://w3id.org/e2e-mint/', 'files': []}, 'others': None,
+        'places': places, 'regions': {}, 'candidates': [], 'reviewer': {'name': 'Lu Reviewer'}, 'cursor': 0,
+        'lookups': [{'id': 'l1', 'service': {'endpoint': 'https://whgazetteer.org/reconcile/', 'title': 'World Historical Gazetteer', 'uri': 'https://whgazetteer.org/'}, 'started_at': '2026-10-15T12:00:00Z', 'finished_at': '2026-10-15T12:00:00Z', 'algorithm_version': 'krisis-lookup 1', 'parameters': {}, 'attribution': None, 'counts': {}, 'stopped': None,
+                      'queries': {k: {'state': 'answered', 'sent': [v['label']], 'found': 0, 'added': 0} for k, v in places.items()}}]}))
+    # Q11 is an existing item near Newstead (a hit to decide); Q77 and Q78 are the items the batch "made", each carrying our reference.
+    entities = {'Q11': wikidata_entity('Q11', 'Newstead', -1.19, 53.08), 'Q77': wikidata_entity('Q77', 'Newstead', -1.193, 53.081, a + 'newstead'), 'Q78': wikidata_entity('Q78', 'Kirkby', -1.25, 53.1, a + 'kirkby')}
+    calls, asked, consoled = [], [], []
+    def fake_wikidata(route):
+        req = route.request
+        u = urllib.parse.urlparse(req.url); p = urllib.parse.parse_qs(u.query)
+        calls.append({'url': req.url, 'headers': req.all_headers(), 'action': (p.get('action') or [None])[0], 'list': (p.get('list') or [None])[0], 'search': (p.get('search') or p.get('srsearch') or [None])[0], 'ids': (p.get('ids') or [None])[0]})
+        if req.method == 'OPTIONS': return route.fulfill(status=204, headers={'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'api-user-agent, accept', 'Access-Control-Allow-Methods': 'GET, OPTIONS'})
+        json_ok = lambda o: route.fulfill(status=200, headers={'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json'}, body=json.dumps(o))
+        action = calls[-1]['action']
+        if action == 'wbsearchentities': return json_ok({'search': [{'id': 'Q11', 'label': 'Newstead'}] if calls[-1]['search'] == 'Newstead' else []})
+        if action == 'query' and calls[-1]['list'] == 'search': return json_ok({'query': {'search': []}})
+        if action == 'wbgetentities': return json_ok({'entities': {i: entities.get(i, {'id': i, 'missing': ''}) for i in calls[-1]['ids'].split('|')}})
+        if action == 'query' and calls[-1]['list'] == 'usercontribs': return json_ok({'query': {'usercontribs': [{'title': 'Q78', 'timestamp': '2026-10-15T13:00:00Z', 'comment': ''}]}})
+        route.fulfill(status=404, headers={'Access-Control-Allow-Origin': '*'}, body='{}')
+    wd = re.compile(r'^https?://([^/]*\.)?wikidata\.org/')
+    page.route(wd, fake_wikidata)
+    page.on('request', lambda r: asked.append(r.url) if 'wikidata.org' in r.url else None)
+    page.on('console', lambda m: consoled.append(m.text))
+    PERM = '#wikidata-permission'
+    def step(fn, default={}):
+        try: return fn()
+        except Exception as e: return {**default, 'error': str(e).split('\n')[0][:200]}
+    def grants(allow):
+        g = {'gazetteer:whg': {'state': 'allowed', 'at': '2026-10-04T10:00:00Z'}}
+        if allow: g['gazetteer:wikidata'] = {'state': 'allowed', 'at': '2026-10-15T10:00:00Z'}
+        page.goto(NOTOOLS if PROVE else url)
+        page.evaluate("(g) => { localStorage.setItem('plato-tools.permissions', JSON.stringify({ version: 1, grants: g })); localStorage.setItem('plato-tools.reviewer', JSON.stringify({ name: 'Lu Reviewer' })); sessionStorage.clear(); }", g)
+        page.goto(NOTOOLS if PROVE else url)
+        return wait_state(page, lambda s: s.get('phase') == 'ready' and s.get('canary') in ('enforced', 'not-enforced'), T(30), 'ready')
+    def open_review():
+        page.set_input_files('#picker', [str(dataset)])
+        s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), 60, 'detection')
+        if s.get('phase') != 'detected': raise RuntimeError(f'not detected: {s.get("phase")}')
+        page.set_input_files('#workfile', [str(work)])
+        s = wait_state(page, lambda s: s.get('phase') == 'reviewing', 30, 'review')
+        if s.get('phase') != 'reviewing': raise RuntimeError('the review did not open')
+        if not page.evaluate("() => document.getElementById('wikidata').open"): page.click('#wikidata > summary')
+        return wait_state(page, lambda s: (s.get('wikidata') or {}).get('ready') is not None, 60, 'the panel')
+    def not_allowed():
+        r = grants(False)
+        s = open_review()
+        page.wait_for_function("() => !document.getElementById('wikidata-permission').hidden", timeout=10_000)
+        before = len(calls) + len(asked)
+        page.evaluate("() => document.getElementById('wikidata-search').click()")   # hidden: a script's click, which must send nothing
+        page.wait_for_timeout(1000)
+        return {'canary': r.get('canary'), 'policy': page.evaluate('() => (window.__platoCsp || {}).origins || null'), 'line': page.inner_text(PERM), 'search shown': page.is_visible('#wikidata-search'),
+                'status': page.inner_text('#wikidata-search-status'), 'gate': page.inner_text('#wikidata-gate'), 'sent': len(calls) + len(asked) - before, 'searchable': (s.get('wikidata') or {}).get('searchable'),
+                'left': (s.get('wikidata') or {}).get('left'), 'ready': (s.get('wikidata') or {}).get('ready')}
+    na = step(not_allowed)
+    check('Wikidata items, not allowed: the panel opens on the review, counts the places to search, shows ONE line "Needs permission: Wikidata" in place of Search, and a click sends nothing',
+          na.get('canary') == 'enforced' and 'https://www.wikidata.org' not in (na.get('policy') or []) and na.get('line', '').startswith('Needs permission: Wikidata') and na.get('search shown') is False
+          and na.get('searchable') == 2 and 'Would search 2 places in Wikidata: 2 names, and items within 5 km of 2 points' in na.get('status', '') and na.get('sent') == 0 and not calls and not asked, na)
+    check('Wikidata items: before the search, the two places are "not yet searched" and the linked one is left out; the licence gate asks the consent statement for CC BY',
+          sorted((na.get('left') or {}).get('notSearched') or []) == [a + 'kirkby', a + 'newstead'] and (na.get('left') or {}).get('linked') == [a + 'linby'] and na.get('ready') == []
+          and 'under CC-BY-4.0, which asks credit' in na.get('gate', '') and 'release these statements under CC0' in na.get('gate', ''), na)
+
+    def allowed_search():
+        r = grants(True)
+        open_review()
+        page.wait_for_function("() => { const b = document.getElementById('wikidata-search'); return !b.hidden && !b.disabled; }", timeout=30_000)
+        before = len(calls)
+        page.click('#wikidata-search')
+        s = wait_state(page, lambda s: (s.get('wikidata') or {}).get('searching') is False and (s.get('wikidata') or {}).get('searched'), 60, 'search')
+        return {'canary': r.get('canary'), 'policy': page.evaluate('() => (window.__platoCsp || {}).origins || null'), 'sent': len(calls) - before, 'actions': [c['action'] + (f":{c['list']}" if c['list'] else '') for c in calls[before:]],
+                'agent': [c['headers'].get('api-user-agent') for c in calls[before:] if c['action']], 'origin': all('origin=*' in c['url'] for c in calls[before:] if c['action']),
+                'searched': (s.get('wikidata') or {}).get('searched'), 'status': page.inner_text('#wikidata-search-status'), 'hits': page.inner_text('#wikidata-hits'),
+                'cands': [(c['candidate_source'], c['candidate_candidate']) for c in (s.get('work') or {}).get('candidates', [])], 'lookups': [l['service']['title'] for l in (s.get('work') or {}).get('lookups', [])]}
+    al = step(allowed_search)
+    check('Wikidata items, allowed: the search sends (the control for "nothing sent" above): each name, then near each point, then the entities once; anonymous (origin=*), named (Api-User-Agent)',
+          al.get('canary') == 'enforced' and 'https://www.wikidata.org' in (al.get('policy') or []) and al.get('actions') == ['wbsearchentities', 'query:search', 'wbgetentities', 'wbsearchentities', 'query:search']
+          and al.get('origin') is True and all(x and x.startswith('plato-tools/') for x in al.get('agent') or []), al)
+    check('Wikidata items: the search is a lookup of Wikidata in the review, its hit a candidate of the place (Newstead: Q11), the other place answered with nothing; the hit is to decide before the batch',
+          al.get('lookups') == ['World Historical Gazetteer', 'Wikidata'] and al.get('cands') == [(a + 'newstead', 'http://www.wikidata.org/entity/Q11')]
+          and (al.get('searched') or {}).get('answered') == 2 and (al.get('searched') or {}).get('notFound') == 1 and '1 place has a Wikidata hit still to decide' in al.get('hits', ''), al)
+
+    def decide_and_consent():
+        page.keyboard.press('n')   # the one candidate, Newstead's hit: not this one
+        s = wait_state(page, lambda s: (s.get('wikidata') or {}).get('ready') and len((s.get('wikidata') or {}).get('ready')) == 2, 30, 'the plan')
+        page.check('#wikidata-consent')
+        s = wait_state(page, lambda s: (s.get('wikidata') or {}).get('consent') is True, 10, 'consent')
+        page.wait_for_function("() => !document.getElementById('wikidata-download').disabled", timeout=30_000)
+        return {'ready': (s.get('wikidata') or {}).get('ready'), 'consented': page.inner_text('#wikidata-consented'), 'volume': page.inner_text('#wikidata-volume'), 'items': page.eval_on_selector_all('#wikidata-items [data-description]', 'els => els.map((e) => e.value)'),
+                'consent in work': (s.get('work') or {}).get('mint', {}).get('consent'), 'statements': page.eval_on_selector_all('#wikidata-statements input', 'els => els.map((e) => e.checked)')}
+    dc = step(decide_and_consent)
+    check('Wikidata items: the hit decided "not this one", both places qualify; the consent ticked is recorded in the work file with the name and the date, and the download is offered',
+          sorted(dc.get('ready') or []) == [a + 'kirkby', a + 'newstead'] and 'Confirmed by Lu Reviewer on' in dc.get('consented', '') and (dc.get('consent in work') or {}).get('by', {}).get('name') == 'Lu Reviewer'
+          and '2 items, 10 statements.' in dc.get('volume', '') and 'village in United Kingdom, attested 1296–1540' in (dc.get('items') or []) and dc.get('statements') == [True] * 7, dc)
+
+    def batch():
+        with page.expect_download(timeout=30_000) as d: page.click('#wikidata-download')
+        d.value.save_as(tmp / 'mint.wikidata.qs.txt'); text = (tmp / 'mint.wikidata.qs.txt').read_text()
+        s = wait_state(page, lambda s: (s.get('wikidata') or {}).get('batches'), 10, 'batch')
+        return {'name': d.value.suggested_filename, 'text': text, 'batches': (s.get('wikidata') or {}).get('batches'), 'said': page.inner_text('#wikidata-batches'), 'howto': page.inner_text('#wikidata-howto')}
+    b = step(batch)
+    lines = (b.get('text') or '').split('\n')
+    ref = f'\tS854\t"{a}newstead"\tS813\t+'
+    check('Wikidata items: the batch downloaded is QuickStatements v1 text: CREATE with its comment, LAST with the label, the description and P31, P625, P17 each referenced to the place and the date; recorded as q1, with the how-to',
+          b.get('name') == 'mint.wikidata.qs.txt' and lines[0] == f'CREATE /* PLATO tools: Lost places of the Trent; {a}newstead */' and lines[1] == 'LAST\tLen\t"Newstead"'
+          and lines[2] == 'LAST\tDen\t"village in United Kingdom, attested 1296–1540"' and lines[3].startswith('LAST\tP31\tQ532' + ref) and lines[4].startswith('LAST\tP625\t@53.081/-1.193' + ref) and lines[5].startswith('LAST\tP17\tQ145' + ref)
+          and lines[6].startswith(f'CREATE /* PLATO tools: Lost places of the Trent; {a}kirkby */') and b.get('batches') == ['q1'] and 'Batch q1 written: mint.wikidata.qs.txt (2 items)' in b.get('said', '')
+          and 'Open QuickStatements' in b.get('howto', '') and 'autoconfirmed' in b.get('howto', ''), {k: v for k, v in b.items() if k != 'text'} | {'lines': lines[:7]})
+
+    def ids_back():
+        before = len(calls)
+        page.fill('#wikidata-qids', 'Q77\nQ4242\n')
+        page.click('#wikidata-check')
+        s = wait_state(page, lambda s: (s.get('wikidata') or {}).get('checked') is not None, 30, 'check')
+        pasted = {'checked': (s.get('wikidata') or {}).get('checked'), 'status': page.inner_text('#wikidata-ids-status'), 'list': page.inner_text('#wikidata-ids'), 'actions': [c['action'] for c in calls[before:]], 'ids': [c['ids'] for c in calls[before:]]}
+        page.fill('#wikidata-user', 'Lu Reviewer')
+        before = len(calls)
+        page.click('#wikidata-read')
+        s = wait_state(page, lambda s: ((s.get('wikidata') or {}).get('checked') or [{}])[0].get('qid') == 'Q78', 30, 'read')
+        mine = {'checked': (s.get('wikidata') or {}).get('checked'), 'status': page.inner_text('#wikidata-ids-status'), 'actions': [c['action'] + (f":{c['list']}" if c['list'] else '') for c in calls[before:]], 'urls': [c['url'] for c in calls[before:]]}
+        page.click('#wikidata-record')
+        s = wait_state(page, lambda s: (s.get('wikidata') or {}).get('recorded'), 10, 'record')
+        # Then the pasted one, checked again (the check is of what is pasted now) and recorded too.
+        page.fill('#wikidata-qids', 'Q77\n'); page.click('#wikidata-check')
+        wait_state(page, lambda s: ((s.get('wikidata') or {}).get('checked') or [{}])[0].get('qid') == 'Q77', 30, 'check again')
+        page.click('#wikidata-record')
+        s = wait_state(page, lambda s: (s.get('wikidata') or {}).get('recorded') == 2, 10, 'record again')
+        qids = ((s.get('work') or {}).get('mint') or {}).get('qids') or {}
+        return {'pasted': pasted, 'mine': mine, 'recorded': (s.get('wikidata') or {}).get('recorded'), 'qids': {k: (v.get('qid'), v.get('how')) for k, v in qids.items()},
+                'decisions': [(c['candidate_candidate'], (c.get('decision') or {}).get('kind'), (c.get('decision') or {}).get('identityType')) for c in (s.get('work') or {}).get('candidates', []) if 'Q7' in c['candidate_candidate']], 'status': page.inner_text('#wikidata-ids-status')}
+    ib = step(ids_back)
+    pasted, mine = ib.get('pasted') or {}, ib.get('mine') or {}
+    check('Wikidata items: pasted Q-ids are checked in Wikidata (one read of both) before anything is recorded: Q77 verified for Newstead, Q4242 not an item',
+          pasted.get('actions') == ['wbgetentities'] and sorted((pasted.get('ids') or [''])[0].split('|')) == ['Q4242', 'Q77'] and pasted.get('checked') == [{'qid': 'Q77', 'iri': a + 'newstead', 'ok': True}, {'qid': 'Q4242', 'iri': a + 'kirkby', 'ok': False}]
+          and 'Verified: the label, the point (0 km away), and the reference to this place.' in pasted.get('list', '') and 'there is no such item in Wikidata' in pasted.get('list', ''), pasted)
+    check("Wikidata items: the user's own new items are read by their name since the batch (the name goes to Wikidata only), matched to the batch's rows by the reference each carries, and verified",
+          mine.get('actions') == ['query:usercontribs', 'wbgetentities'] and 'ucuser=Lu+Reviewer' in (mine.get('urls') or [''])[0] and 'ucshow=new' in (mine.get('urls') or [''])[0]
+          and mine.get('checked') == [{'qid': 'Q78', 'iri': a + 'kirkby', 'ok': True}] and '1 new item since the batch was written; 1 of them carries a reference' in mine.get('status', ''), mine)
+    check('Wikidata items: the verified Q-ids are recorded in the review as decisions (exactMatch), each the item made for its place',
+          ib.get('recorded') == 2 and ib.get('qids') == {a + 'kirkby': ('Q78', 'contribs'), a + 'newstead': ('Q77', 'pasted')}
+          and sorted(ib.get('decisions') or []) == [('http://www.wikidata.org/entity/Q77', 'match', 'exactMatch'), ('http://www.wikidata.org/entity/Q78', 'match', 'exactMatch')] and '1 identity recorded in the review' in ib.get('status', ''), ib)
+
+    def finish():
+        cites = page.inner_text('#finish-cites')
+        page.check('input[name="review-output"][value="attestations"]'); page.click('#finish')
+        s = wait_state(page, lambda s: s.get('action') == 'apply' and s.get('phase') in ('done', 'error'), 120, 'finish')
+        out = json.loads(download(page, s['outputs'][0]['name'], tmp / 'mint-attestations.json').read_text()) if s.get('phase') == 'done' and s.get('outputs') else {}
+        return {'cites': cites, 'out': out, 'phase': s.get('phase'), 'report': s.get('report')}
+    f = step(finish)
+    atts = (f.get('out') or {}).get('attestations', [])
+    ids = sorted((x['about'], i['object'], i['identityType'], (x.get('citations') or [{}])[0].get('source', {}).get('title')) for x in atts for i in x.get('identities', []))
+    check('Wikidata items: Finish writes one attestation per place, its identity to the new item, citing Wikidata, with no address with @ in it anywhere',
+          'Wikidata (https://www.wikidata.org/)' in f.get('cites', '') and ids == [(a + 'kirkby', 'http://www.wikidata.org/entity/Q78', 'exactMatch', 'Wikidata'), (a + 'newstead', 'http://www.wikidata.org/entity/Q77', 'exactMatch', 'Wikidata')]
+          and '@example' not in json.dumps(f.get('out')) and all('krisis-wikidata 1' in x.get('notes', '') for x in atts), {k: f.get(k) for k in ('cites', 'phase', 'report', 'error')} if not atts else ids)
+    page.unroute(wd)
+
 # Krisis: region review (Methodos #28, stages 3 and 4). WHG is never called: page.route answers for it
 # (as WHG answers a filtered query: `scope`, and for Hoxne within Suffolk a filter it could not apply,
 # which it answers with nothing: failed closed; and, asked for areas only (area_only), as WHG's place#323 does:
@@ -2910,6 +3094,8 @@ def main():
             krisis_regions_case(page, tmp, url)
             # The lookup panel's token and language fields (Issue #33, points 6 and 7); nothing is sent.
             lookup_panel_case(page, tmp, url)
+            # Wikidata items for the places no gazetteer knows (Issue #36): a fake Wikidata (page.route), never the real one.
+            krisis_wikidata_case(page, tmp, url)
             ctx.close()
             front = pw.chromium.launch(headless=True)
             try: front_page_checks(front, url); card_chosen_checks(front, url, pw); theme_checks(front, url); methodos_page_checks(front, url); layout_checks(front, url)

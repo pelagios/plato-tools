@@ -403,6 +403,17 @@ kbd { font: .8em var(--font-mono); border: 1px solid var(--line); border-bottom-
 .candidate-export { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; }
 .candidate-export small { flex-basis: 100%; color: var(--muted); }
 #candidates-status { flex-basis: 100%; margin: 0; }
+/* Krisis: Wikidata items (#36): the panel under the review, laid out as the lookup's; its items a list each with its own fields. */
+.wikidata[hidden] { display: none; }
+.wikidata h4 { margin: .8rem 0 .2rem; font-family: var(--font-headings); }
+.wikidata textarea { font: inherit; padding: .3rem .4rem; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); max-width: 100%; display: block; }
+.wikidata-actions { display: flex; gap: .5rem; align-items: center; }
+.wikidata-items ul, .wikidata-ids { list-style: none; padding: 0; margin: .3rem 0; }
+.wikidata-items li { border-top: 1px solid var(--line); padding: .4rem 0; }
+.wikidata-items li.excluded { color: var(--muted); }
+.wikidata-items input[type=text] { max-width: 100%; }
+.wikidata .iri { color: var(--muted); font-size: .85rem; word-break: break-all; }
+#wikidata-hits:empty, #wikidata-consented:empty, #wikidata-batches:empty, #wikidata-ids-status:empty, #wikidata-volume:empty { display: none; }
 #candidates-status[hidden] { display: none; }
 @media (max-width: 34rem) { #review { padding: .85rem .8rem; } .candidate .acts button { flex: 1 1 auto; } }
 /* ---- Chora, the map (src/chora/app.js): its panel and its map --------------------------------------
