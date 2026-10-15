@@ -10172,7 +10172,8 @@ def trace_map_checks(pw, url, tmp):
         key, a = show('annotation-ink.json')
         page.click(f'#chora-overlay-list li[data-overlay="{key}"] button[data-trace-new]')
         until(page, '() => !!document.getElementById("chora-trace-form")', 10)
-        page.fill('#chora-tset-base', TRACE_BASE); page.click('#chora-trace-form button[type=submit]')
+        # Traced into the dataset open (the one saved above): its base address is its own, fixed, not to be typed.
+        page.click('#chora-trace-form button[type=submit]')
         until(page, 'k => window.__chora.trace?.key === k && window.__chora.phase === "loaded"', 30, key)
         page.click('#chora-draw-tools button[data-trace="area"]')
         [xy] = to_screen(a['id'], [(520, 210)])
@@ -10214,6 +10215,70 @@ def trace_map_checks(pw, url, tmp):
                 and len(cstate(page)['overlays']) >= 1), {
             'visibility': [shown_before, hidden, back], 'errors while paused': paused_errors, 'errors drawn unpaused (the control)': len(control), 'page errors': errors[before:][:3]}
     attempt('Chora: left with its historical maps shown, they are not drawn while it is hidden, and drawn again then nothing is thrown (drawn unpaused, the renderer throws: the control); back on the map, they are drawn again', hidden_and_back)
+
+    # A dataset of someone else's, not made from a map nor saved from a tracing, open under a base address of its own
+    # that Options' is not: traced into, its places are its own, under its uriSpace (Agora would refuse any outside it).
+    ELSEWHERE = 'https://example.org/elsewhere/'
+    TRACE_FIELDS = '''() => { const b = document.getElementById('chora-tset-base'), t = document.getElementById('chora-tset-title'), r = document.getElementById('chora-trace-refused');
+      return { base: b ? b.value : null, readOnly: b ? b.readOnly : null, help: document.getElementById('chora-tset-base-fixed')?.textContent || null, title: t ? t.value : null,
+        refused: r && !r.closest('[hidden]') && (r.offsetWidth || r.offsetHeight) ? r.textContent : null, form: !!document.getElementById('chora-trace-form') }; }'''
+    def open_file(path, places, title):
+        page.set_input_files('#picker', []); page.set_input_files('#picker', [str(path)])
+        until(page, '([n, t]) => window.__chora.phase === "loaded" && window.__chora.places === n && document.querySelector("#chora-dataset .dataset-title")?.textContent === t', 60, [places, title])
+    def into_another():
+        f = tmp / 'elsewhere.json'
+        f.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': ELSEWHERE, 'title': 'Elsewhere', 'uriSpace': ELSEWHERE, 'status': 'draft'},
+                                 'spatialEntities': [krisis_place(ELSEWHERE + 'place/old-mill', 'Old Mill', 0.12, 52.2)]}))
+        open_file(f, 1, 'Elsewhere')
+        key = st['key']; li = f'#chora-overlay-list li[data-overlay="{key}"]'
+        options = page.input_value('#base')
+        offered = page.inner_text(f'{li} button[data-trace-new]')
+        page.click(f'{li} button[data-trace-new]')
+        until(page, '() => !!document.getElementById("chora-trace-form")', 10)
+        form = page.evaluate(TRACE_FIELDS)
+        page.click('#chora-trace-form button[type=submit]')
+        until(page, 'k => window.__chora.trace?.key === k && !window.__chora.trace.seed', 30, key)
+        [xy] = to_screen(grid_id, [(300, 300)])
+        draw(page, 'point', [tuple(xy)]); page.click('#chora-draw-tools button[data-mode="static"]')
+        until(page, '() => !!window.__chora.naming?.draftId', 10)
+        name_it('Fen Ditton', 'village')
+        until(page, '() => window.__chora.lastNamed?.label === "Fen Ditton" && !window.__chora.naming', 15)
+        named = ts()['lastNamed']
+        page.evaluate('() => { window.__tio_prev = window.__chora.lastSave || null; }')
+        page.click('#chora-save')
+        until(page, '() => (window.__chora.lastSave && window.__chora.lastSave !== window.__tio_prev) || window.__chora.phase === "error"', 120)
+        ls = cstate(page)['lastSave'] or {}
+        if not ls.get('passed'): return False, {'form': form, 'named': named, 'save': ls}
+        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#chora-save-result button.primary')
+        out = tmp / 'elsewhere-traced.json'; d.value.save_as(out)
+        doc = json.loads(out.read_text())
+        ids = [p['@id'] for p in doc['spatialEntities']]
+        # The save let go, its file (two places) is the one open: the next check opens one of one place, so that its wait cannot be met by this one.
+        page.click('#chora-save-result [data-clear]')
+        until(page, '() => window.__chora.phase === "loaded" && window.__chora.places === 2', 60)
+        return (options == TRACE_BASE and offered == 'Trace it into the dataset open' and form['base'] == ELSEWHERE and form['readOnly'] is True
+                and (form['help'] or '').startswith("The dataset open's own base address (its uriSpace)") and form['title'] == 'Elsewhere'
+                and named['placeId'] == ELSEWHERE + 'place/fen-ditton' and ls.get('added') == 1 and (ls.get('mneme') or {}).get('passed')
+                and ids == [ELSEWHERE + 'place/old-mill', ELSEWHERE + 'place/fen-ditton'] and doc['gazetteer'].get('uriSpace') == ELSEWHERE), {
+            'Options base': options, 'offered': offered, 'form': form, 'named': named, 'save': {k: ls.get(k) for k in ('passed', 'added')}, 'ids': ids}
+    attempt('Chora trace: traced into a dataset open under a base of its own (not Options\'), the settings show its base fixed, read-only; the place named is minted under it, and saved there', into_another)
+
+    def refused_no_base():
+        f = tmp / 'nobase.json'
+        f.write_text(json.dumps({'profile': 'place-centric', 'gazetteer': {'@id': 'https://example.org/nobase', 'title': 'No base'},
+                                 'spatialEntities': [krisis_place('https://example.org/nobase/old-mill', 'Old Mill', 0.12, 52.2)]}))
+        open_file(f, 1, 'No base')
+        key = st['key']; li = f'#chora-overlay-list li[data-overlay="{key}"]'
+        offered = page.inner_text(f'{li} button[data-trace-new]')
+        page.click(f'{li} button[data-trace-new]')
+        until(page, '() => !!document.getElementById("chora-trace-refused")', 10)
+        said = page.evaluate(TRACE_FIELDS)
+        tracing = ts()['trace']
+        page.click('#chora-tset-cancel')
+        until(page, '() => !document.getElementById("chora-trace-refused")', 10)
+        return (offered == 'Trace it into the dataset open' and (said['refused'] or '').startswith('“No base” does not say under what address its places are published (it has no uriSpace)')
+                and 'Give the dataset its base address' in (said['refused'] or '') and not said['form'] and tracing['key'] is None), {'offered': offered, 'said': said, 'trace': tracing}
+    attempt('Chora trace: a dataset open with no base address of its own (no uriSpace) is not traced into: refused in words that say what to do, with no settings form', refused_no_base)
     attempt('Chora trace: across these checks, no page error', lambda: (len(st) >= 2 and not errors, {'errors': errors[:5], 'checks reached': list(st)}))
     ctx.close()
     stop_fixtures()

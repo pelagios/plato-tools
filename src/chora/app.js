@@ -204,7 +204,8 @@ async function open(list, { traceKey: carried = null } = {}) {
   mapApi.setOverview(ov.geojson);
   mapApi.setPlace(null); mapApi.setContext(null); showDrafts(visibleDrafts()); $('map-key').hidden = true;
   if (traceKey) $('draw-tools').hidden = false;
-  renderTrace(); renderTraced();
+  // The maps' list too: what each map's button offers (into this dataset, or a new one) is the dataset's.
+  renderTrace(); renderTraced(); if (layers) renderMaps();
   if (ov.capped || ov.geojson?.capped) $('dataset').insertAdjacentHTML('beforeend', `<p class="muted">The map shows the first ${n(ov.geojson.features.length)} places; find others by name.</p>`);
   if (dataset.bbox) mapApi.fit(dataset.bbox, 8);
   $('places').hidden = false;
@@ -624,6 +625,10 @@ const settingsOf = (key) => (key ? tracings.maps[key] || null : null);
 const mapEntry = (key) => layers?.entries.find((e) => e.key === key) || null;
 /** Whether the dataset open is the one made from a map, not yet saved. */
 const isSeedOpen = () => !!traceKey && !!tracings.seeds[traceKey];
+/** Whether the map `key`, its settings given, is traced into the dataset open (not one made from it): as traceSubmitted decides. */
+const intoOpen = (key) => !!dataset && !isSeedOpen() && !tracings.seeds[key] && traceKey !== key;
+/** The base address of the dataset open (its uriSpace), or null: the only one a place traced into it is given its address under. */
+const openBase = () => traced.datasetBase(dataset?.header);
 /** The workflow's step at hand, when it is one done in Chora (host.step: Methodos's), else null. */
 const workflowStep = () => { try { return host.step?.() || null; } catch { return null; } };
 /** A feature traced now, with no place chosen: a new place, named next (decision 2), given the map's defaults (decision 6). */
@@ -644,12 +649,21 @@ function renderTrace() {
   const shown = layers ? layers.entries : [];
   const lines = [];
   if (step?.op === 'trace') lines.push(`<p class="note" id="chora-trace-step">${esc(CHORA_TRACE.workflowStep)}</p>`);
+  state.traceRefused = null;
   if (traceEditing) {
-    const s = settingsOf(traceEditing) || traced.defaultSettings(defaultsFor(traceEditing));
     // Fixed once the dataset traced into exists (the one made from the map, or one opened): its address space and
-    // title are its file's, written when it was made; changed here they would not be the file's.
-    const started = traceKey === traceEditing && !!dataset;
-    body.innerHTML = lines.join('') + traced.settingsForm(s, { started, fileTitle: started ? dataset.header?.title || null : null,
+    // title are its file's, written when it was made; changed here they would not be the file's. Traced into the
+    // dataset open, its base is its own uriSpace, never Options' (refused in words when it has none).
+    const started = traceKey === traceEditing && !!dataset, into = intoOpen(traceEditing);
+    state.traceRefused = into && !openBase() ? CHORA_TRACE.noOpenBase(dataset.header?.title || dataset.input?.name || '') : null;
+    if (state.traceRefused) {
+      body.innerHTML = lines.join('') + `<p class="warn" id="chora-trace-refused">${esc(state.traceRefused)}</p><p><button type="button" id="chora-tset-cancel">Cancel</button></p>`;
+      publishTrace();
+      return;
+    }
+    const was = settingsOf(traceEditing) || traced.defaultSettings(defaultsFor(traceEditing));
+    const s = (started || into) && openBase() ? { ...was, base: openBase() } : was;
+    body.innerHTML = lines.join('') + traced.settingsForm(s, { started, into, fileTitle: started || into ? dataset.header?.title || null : null,
       identify: step?.op === 'trace' && step.answers?.['will-identify'] === true });
     publishTrace();
     return;
@@ -719,7 +733,10 @@ async function traceSubmitted(e) {
     pointRole: v('tset-point-role'), pointPrecision: v('tset-point-precision'), lineRole: v('tset-line-role'), linePrecision: v('tset-line-precision'),
     areaRole: v('tset-area-role'), areaPrecision: v('tset-area-precision'), precisionKm: v('tset-km'), outline: !!$('tset-outline')?.checked };
   const was = settingsOf(key) || traced.defaultSettings(defaultsFor(key));
-  const r = traced.settingsFrom(values, was);
+  // Into the dataset open, or that one traced into already: its own base, whatever the field (or Options) says.
+  const into = intoOpen(key);
+  if (into && !openBase()) return;   // refused in words in the panel, with no form to submit
+  const r = traced.settingsFrom(values, was, { fixedBase: (into || traceKey === key) && dataset ? openBase() : null });
   if (r.error) { Object.assign($('tset-error'), { hidden: false, textContent: r.error }); state.traceError = r.error; return; }
   state.traceError = null;
   tracings.maps[key] = r.settings; tracings.current = key; keepTracings();
@@ -727,8 +744,8 @@ async function traceSubmitted(e) {
   host.setBase?.(r.settings.base);
   traceEditing = null;
   if (traceKey === key) { renderTrace(); renderTraced(); renderMaps(); return; }   // the settings changed, the tracing goes on
-  // Into the dataset open (one saved from a tracing before, opened again): traced into from now.
-  if (dataset && !isSeedOpen() && !tracings.seeds[key]) {
+  // Into the dataset open (one saved from a tracing before, opened again, or any other): traced into from now, under its own base.
+  if (into) {
     traceKey = key; tracings.open[fp] = key; keepTracings();
     $('draw-tools').hidden = false; renderTrace(); renderTraced(); renderMaps(); await outlineScope(key);
     return;
@@ -841,11 +858,14 @@ async function namingSubmitted(e) {
   const label = $('name-label').value.trim() || toponym;
   const kind = $('name-kind').value.trim();
   const s = settingsOf(d.mapKey || traceKey);
-  // Its address, minted under the base address once (decision 8), by the address scheme, distinct from every other.
+  // Its address, minted under the base address once (decision 8), by the address scheme, distinct from every other:
+  // the dataset traced into's own (its uriSpace; the seed's is the settings' base), never the settings' or Options'.
   if (!d.placeId) {
+    const base = dataset ? openBase() : s?.base;
+    if (!base) { namingError(CHORA_TRACE.noOpenBase(dataset?.header?.title || dataset?.input?.name || '')); return; }
     try {
       const taken = drafts.filter((x) => x.kind === 'feature' && x.placeId).map((x) => x.placeId);
-      d.placeId = (await request({ cmd: 'chora-mint', base: s?.base, label, romanized: romanized || undefined, taken }, 'chora-minted')).id;
+      d.placeId = (await request({ cmd: 'chora-mint', base, label, romanized: romanized || undefined, taken }, 'chora-minted')).id;
     } catch (err) { namingError(err.message); return; }
   }
   d.names = [traced.nameOf({ toponym, language, script: scriptOf(language) ? script : '', romanized })];
@@ -1492,7 +1512,7 @@ function renderMaps() {
       <p class="overlay-controls"><label>Opacity <input type="range" min="0" max="100" step="5" value="${Math.round(o.opacity * 100)}" data-opacity></label>
       <label><input type="checkbox" data-show${o.visible ? ' checked' : ''}> Show</label>
       <button type="button" data-fit>Fit</button> <button type="button" data-remove-map>Remove</button></p>
-      ${traceKey === o.key ? `<p class="note" data-tracing>${esc(CHORA_TRACE.tracingThis)}</p>` : `<p><button type="button" data-trace-new>${esc(traceKey || !dataset || isSeedOpen() ? CHORA_TRACE.button : CHORA_TRACE.intoOpen)}</button></p>`}
+      ${traceKey === o.key ? `<p class="note" data-tracing>${esc(CHORA_TRACE.tracingThis)}</p>` : `<p><button type="button" data-trace-new>${esc(intoOpen(o.key) ? CHORA_TRACE.intoOpen : CHORA_TRACE.button)}</button></p>`}
       ${editorShown() ? `<p><a href="${esc(ov.editorUrl(e.manifestUrl, e.g.imageServiceId))}" target="_blank" rel="noopener noreferrer" data-editor>${esc(ov.EDITOR_LINK_TEXT)}</a></p>` : ''}</li>`;
   }).join('');
 }

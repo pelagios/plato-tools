@@ -2313,8 +2313,14 @@ wired in `app.js`.
   kept with the settings until it is first saved, so that the very file, and the drawings kept under its
   fingerprint (`drafts.js`), can be opened again: at a workflow's step `trace` with nothing open at once,
   elsewhere from "Go on tracing …". It is chosen in "Choose your data" (`host.choose`) and kept there as the
-  user's own choice is (`host.keep`). A dataset saved from a tracing, opened again, can be traced into
-  ("Trace it into the dataset open").
+  user's own choice is (`host.keep`). A dataset open that is not the seed, saved from a tracing and opened
+  again or any other, can be traced into ("Trace it into the dataset open"): the places traced are new
+  places of that dataset (`save.js` `newPlaces`), so their addresses are minted under its own base address,
+  its `uriSpace` (`traced.js` `datasetBase`, from the header Chora's load gives), shown fixed in the settings
+  with its title, and never the base in Options or in the map's settings, which Agora's mint would refuse as
+  `place-outside-base`. A dataset open with no `uriSpace` is refused in words (`CHORA_TRACE.noOpenBase`):
+  give it one, or trace into a new dataset with none open. The minting itself takes the dataset open's base
+  too (the seed's is the settings' base), so settings kept from before cannot send a place elsewhere.
 - **A feature** is a draft of its own kind (`kind: 'feature'`): a drawing made with no place chosen, or a
   shape from the map's ink accepted with none, while a map is traced. It opens the name form over the map
   (`#chora-name-panel`): the name as the map writes it, the place's label (a display form, not evidence: the

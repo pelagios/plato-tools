@@ -310,7 +310,7 @@ export async function load(input, env, db, { name } = {}) {
   store.finish();
   const g = (store.header && typeof store.header.gazetteer === 'object' && store.header.gazetteer) || {};
   const header = {};
-  for (const k of ['@id', 'title', 'status', 'version', 'licence', 'isVersionOf', 'previousVersion']) if (typeof g[k] === 'string') header[k] = g[k];
+  for (const k of ['@id', 'title', 'status', 'version', 'licence', 'isVersionOf', 'previousVersion', 'uriSpace']) if (typeof g[k] === 'string') header[k] = g[k];
   const places = store.one('SELECT COUNT(*) FROM p');
   const withGeometry = store.one('SELECT COUNT(*) FROM p WHERE w IS NOT NULL');
   let bbox = null;

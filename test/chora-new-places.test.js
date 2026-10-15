@@ -19,6 +19,9 @@ import { gather } from '../src/engine/krisis/match.js';
 import { areaCheck, MAX_AREA_POINTS } from '../src/engine/krisis/scope.js';
 import { res } from './engine.js';
 import { PLATO_REPO } from './paths.js';
+import { load } from '../src/engine/chora/store.js';
+import { publish } from '../src/engine/agora/index.js';
+import * as tracedPage from '../src/chora/traced.js';
 
 const fx = (f) => JSON.parse(readFileSync(f, 'utf8'));
 const ROCQUE_A = fx('test/fixtures/georef/bpl-rocque-annotation.json'), ROCQUE_M = fx('test/fixtures/georef/bpl-rocque-manifest.json');
@@ -336,4 +339,40 @@ test('the misfit not known (a draft kept without its figures): the sentence is l
   const tps = await trace.traceFor(rocque, { type: 'Point', coordinates: await at(rocque, 5000, 4000) }, { key: 'r', title: 'r' });
   const pt = trace.featureParts([{ trace: { ...tps, record: { ...tps.record, controlPointMisfitKm: null } }, role: 'RepresentativePoint', geometry: { type: 'Point', coordinates: [0, 0] }, zoom: 9 }]);
   assert.ok(pt.notes.includes('passes through its control points exactly'));
+});
+
+// Traced into a dataset open that is not the seed (src/chora/app.js intoOpen, 15 October 2026): its new places are
+// that dataset's, so their addresses are minted under its own base (its uriSpace, as Chora's load gives it in the
+// header: traced.js datasetBase), never the base in Options, which may be another. Before the fix the header had no
+// uriSpace and the settings' base was Options': the place was minted outside the dataset, and Agora refused it.
+test('traced into an opened dataset whose base is not the one in Options: the places are minted under the dataset\'s own uriSpace, saved, and Agora mints them', async () => {
+  const OPEN = 'https://example.org/elsewhere/', OPTIONS = BASE;
+  const own = { '@id': OPEN + 'place/old-mill', label: 'Old Mill', attestations: [{ names: [{ toponym: 'Old Mill' }], sources: [{ title: 'A survey' }] }] };
+  const text = JSON.stringify({ profile: 'place-centric', gazetteer: { '@id': OPEN, title: 'Elsewhere', uriSpace: OPEN, status: 'draft' }, spatialEntities: [own] });
+  const e = env();
+  const store = await load(await detect([textFile(text, 'elsewhere.json')]), e, await e.openDb());
+  const header = store.loaded.header;
+  store.close();
+  assert.equal(header.title, 'Elsewhere', 'the header is read at all');
+  assert.equal(tracedPage.datasetBase(header), OPEN, "the dataset open's base, from the header Chora's load gives");
+  const was = tracedPage.defaultSettings({ key: 'm', title: rocque.title, base: OPTIONS });
+  // The control: from the form alone (the field, Options' base), the settings would be under Options' base.
+  assert.equal(tracedPage.settingsFrom({ base: OPTIONS }, was).settings.base, OPTIONS);
+  const s = tracedPage.settingsFrom({ base: OPTIONS }, was, { fixedBase: tracedPage.datasetBase(header) }).settings;
+  assert.equal(s.base, OPEN, "the dataset's own base, whatever the field says");
+  const id = mintPlaceId(s.base, 'Fort 1');
+  assert.equal(id, OPEN + 'place/fort-1');
+  const fresh = [newPlaceRecord({ id, label: 'Fort 1', attestations: [await traced(rocque, [[3037, 3011]], { names: [{ toponym: 'Fort 1', language: 'en' }] })] })];
+  const r = await saved(textFile(text, 'elsewhere.json'), fresh);
+  assert.equal(r.report.errors, 0, JSON.stringify(r.report.items));
+  assert.ok(r.mneme?.passed, JSON.stringify(r.mneme?.reasons));
+  assert.deepEqual(JSON.parse(r.text).spatialEntities.map((p) => p['@id']), [OPEN + 'place/old-mill', OPEN + 'place/fort-1']);
+  const mint = async (t) => { const me = env(); const i = await detect([textFile(t, 'm.json')]); return (await publish({ part: 'mint', input: i, options: { name: 'm.json' } }, me)).report; };
+  const minted = await mint(r.text);
+  assert.ok(minted.counts && !minted.items.some((x) => x.kind === 'place-outside-base'), JSON.stringify(minted.items));
+  assert.equal(minted.errors, 0, JSON.stringify(minted.items));
+  // The control: the same place minted under Options' base, as before the fix, is one Agora refuses.
+  const stray = [newPlaceRecord({ ...fresh[0], id: mintPlaceId(OPTIONS, 'Fort 1') })];
+  const before = await mint((await saved(textFile(text, 'elsewhere.json'), stray)).text);
+  assert.ok(before.items.some((x) => x.kind === 'place-outside-base'), JSON.stringify(before.items));
 });

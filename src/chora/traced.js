@@ -65,10 +65,12 @@ export function defaultSettings({ key, title, manifest, rights, base }) {
 
 /**
  * The settings form's values (`v`, as the page reads them: strings, and booleans for its boxes) made a map's
- * settings, from `was`: { settings } or { error } in words. The base address is needed (decision 8).
+ * settings, from `was`: { settings } or { error } in words. The base address is needed (decision 8); traced
+ * into a dataset open, it is that dataset's own (`fixedBase`, from datasetBase), never the form's.
  */
-export function settingsFrom(v, was) {
-  const base = normaliseBase(String(v.base || '').trim());
+export function settingsFrom(v, was, { fixedBase = null } = {}) {
+  // Traced into a dataset open, its own base (datasetBase), whatever the form's field says.
+  const base = normaliseBase(fixedBase || String(v.base || '').trim());
   if (!base) return { error: CHORA_TRACE.needBase };
   const language = String(v.language || '').trim();
   if (language && !/^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{1,8})*$/.test(language)) return { error: CHORA_TRACE.badLanguage(language) };
@@ -79,6 +81,13 @@ export function settingsFrom(v, was) {
     language, script: scriptOf(language) ? String(v.script || '') : '', defaults: { point: shape('point'), line: shape('line'), area: shape('area') },
     precisionKm: km ? +km : null, outline: !!v.outline }) };
 }
+
+/**
+ * The base address of the dataset open (its header, as Chora's load gives it): its uriSpace, normalised, or null
+ * when it has none. The places traced into it are given their addresses under it, and only under it, since
+ * Agora mints a dataset's addresses under its uriSpace and refuses a place outside it (place-outside-base).
+ */
+export const datasetBase = (header) => normaliseBase(header?.uriSpace) || null;
 
 /** The dataset a tracing begins with, as a file: from the map's settings (seed.js seedDataset), named for the map. */
 export function seedFile(settings, { now = Date.now() } = {}) {
@@ -170,7 +179,9 @@ export function scriptChoice(id, language, chosen) {
  * it, the language of the names (the script where it implies one), the defaults for points, lines and areas,
  * an uncertainty radius of the user's own, and in a workflow that looks the places up, the outline as its Scope.
  */
-export function settingsForm(s, { started = false, identify = false, fileTitle = null } = {}) {
+export function settingsForm(s, { started = false, into = false, identify = false, fileTitle = null } = {}) {
+  // Traced into the dataset open (`into`), its base address and title are its file's, fixed as once one is made.
+  const fixed = started || into;
   const shapes = SHAPES.map(([k, words]) => `<fieldset class="trace-shape" data-shape="${k}"><legend>${esc(words)}</legend>
       <label>What it marks <select id="chora-tset-${k}-role">${opt(ROLES.filter((r) => r !== 'LabelAnchor'), s.defaults[k].role, roleWords)}</select></label>
       <label>How well known <select id="chora-tset-${k}-precision">${opt(PRECISIONS, s.defaults[k].precision, (p) => p.replace('_', ' '))}</select></label></fieldset>`).join('');
@@ -178,11 +189,11 @@ export function settingsForm(s, { started = false, identify = false, fileTitle =
     <p class="trace-map">${esc(CHORA_TRACE.settingsFor(s.mapTitle))}</p>
     ${s.rightsWords ? `<p class="${/^Free to reuse/.test(s.rightsWords) ? 'muted' : 'note'}" id="chora-trace-rights">${esc(s.rightsWords)}</p>` : ''}
     <label for="chora-tset-base">${esc(CHORA_TRACE.baseQuestion)}</label>
-    <input id="chora-tset-base" type="url" required aria-required="true" autocomplete="url" spellcheck="false" value="${esc(s.base)}"${started ? ' readonly aria-describedby="chora-tset-base-fixed"' : ' aria-describedby="chora-tset-base-help"'}>
-    <p class="muted" id="${started ? 'chora-tset-base-fixed' : 'chora-tset-base-help'}">${esc(started ? CHORA_TRACE.baseFixed : CHORA_TRACE.baseHelp)}</p>
+    <input id="chora-tset-base" type="url" required aria-required="true" autocomplete="url" spellcheck="false" value="${esc(s.base)}"${fixed ? ' readonly aria-describedby="chora-tset-base-fixed"' : ' aria-describedby="chora-tset-base-help"'}>
+    <p class="muted" id="${fixed ? 'chora-tset-base-fixed' : 'chora-tset-base-help'}">${esc(into ? CHORA_TRACE.baseOfOpen : started ? CHORA_TRACE.baseFixed : CHORA_TRACE.baseHelp)}</p>
     <label for="chora-tset-title">${esc(CHORA_TRACE.titleQuestion)}</label>
-    <input id="chora-tset-title" value="${esc(started && fileTitle ? fileTitle : s.datasetTitle)}" autocomplete="off"${started ? ' readonly aria-describedby="chora-tset-title-fixed"' : ''}>
-    ${started ? `<p class="muted" id="chora-tset-title-fixed">${esc(CHORA_TRACE.titleFixed)}</p>` : ''}
+    <input id="chora-tset-title" value="${esc(fixed && fileTitle ? fileTitle : s.datasetTitle)}" autocomplete="off"${fixed ? ' readonly aria-describedby="chora-tset-title-fixed"' : ''}>
+    ${fixed ? `<p class="muted" id="chora-tset-title-fixed">${esc(CHORA_TRACE.titleFixed)}</p>` : ''}
     <label for="chora-tset-date">${esc(CHORA_TRACE.dateQuestion)}</label>
     <input id="chora-tset-date" value="${esc(s.date)}" autocomplete="off" placeholder="1764" aria-describedby="chora-tset-date-help">
     <p class="muted" id="chora-tset-date-help">${esc(CHORA_TRACE.dateHelp)}</p>
@@ -199,7 +210,7 @@ export function settingsForm(s, { started = false, identify = false, fileTitle =
     </details>
     ${identify ? `<label><input type="checkbox" id="chora-tset-outline"${s.outline ? ' checked' : ''}> ${esc(CHORA_TRACE.outlineQuestion)}</label>` : ''}
     <p id="chora-tset-error" class="warn" hidden></p>
-    <p><button class="primary" type="submit">${esc(started ? CHORA_TRACE.keepSettings : CHORA_TRACE.begin)}</button> <button type="button" id="chora-tset-cancel">Cancel</button></p>
+    <p><button class="primary" type="submit">${esc(started ? CHORA_TRACE.keepSettings : into ? CHORA_TRACE.beginInto : CHORA_TRACE.begin)}</button> <button type="button" id="chora-tset-cancel">Cancel</button></p>
   </form>`;
 }
 
