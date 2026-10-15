@@ -53,6 +53,8 @@ export function searchRequests(place, options = {}) {
     const lang = wdLang(tag) ?? wdLang(o.lang) ?? 'en';
     out.push({ kind: 'name', text: t, lang, url: searchUrl(t, lang, { limit: o.limit }) });
   }
+  // A place with no name is not searched at all (as no lookup sends an address as a name): its point alone names nothing.
+  if (!out.length) return out;
   const p = place.point;
   if (o.nearKm > 0 && Array.isArray(p) && p.length === 2 && Math.abs(p[0]) <= 180 && Math.abs(p[1]) <= 90) out.push({ kind: 'near', km: o.nearKm, url: nearUrl(p, o.nearKm, { limit: o.limit }) });
   return out;
@@ -62,7 +64,7 @@ export function searchPreview(places, options = {}) {
   let names = 0, near = 0, withoutName = 0;
   for (const p of places) { const r = searchRequests(p, options); const n = r.filter((x) => x.kind === 'name').length; if (!n) withoutName++; names += n; near += r.length - n; }
   const looked = places.length - withoutName;
-  return { places: looked, withoutName, names, near, requests: names + near + looked, nearKm: options.nearKm ?? SEARCH_DEFAULTS.nearKm, lang: wdLang(options.lang) ?? null };
+  return { places: looked, withoutName, names, queries: names, near, requests: names + near + looked, nearKm: options.nearKm ?? SEARCH_DEFAULTS.nearKm, lang: wdLang(options.lang) ?? null };
 }
 
 /**
@@ -177,6 +179,8 @@ export async function runWikidataSearch({ fetch, work, places, options = {}, rev
     const stamp = now();
     try { mergeAnswers(work, record, place, r.lists, { now: stamp, maxDistanceKm: o.maxDistanceKm }); }
     catch (e) { stopRest(i); record.stopped = { kind: 'fault', status: null, message: null }; throw e; }
+    // Each hit says which software found it (the attestation's note names it): this search's, not the gazetteer lookup's.
+    for (const c of work.candidates) if (c.lookup === record.id && c.algorithm_version !== ALGORITHM) c.algorithm_version = ALGORITHM;
     failures = r.lists.some((l) => l.unanswered) ? failures + 1 : 0;
     done++;
     onBatch?.({ done, total: plan.chunks.length, record, work });
