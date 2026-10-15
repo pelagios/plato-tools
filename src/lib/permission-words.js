@@ -20,6 +20,8 @@ export const SERVICE_NAMES = {
   'basemap:osm': 'OpenStreetMap',
   // Its tiles are served by the University of Iowa Libraries, which sees the part of the world looked at (the category's words).
   'basemap:cawm': 'Consortium of Ancient World Mappers',
+  // Its tiles are served by the University of Gothenburg, which sees the part of the world looked at.
+  'basemap:dare': 'Digital Atlas of the Roman Empire',
   'basemap:carto': 'CARTO',
   'allmaps:allmaps': 'Allmaps',
   'gazetteer:whg': 'World Historical Gazetteer',

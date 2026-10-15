@@ -24,6 +24,8 @@ import { serialQueue, pageRequest, answers } from './queue.js';
 import * as permissions from '../lib/permissions.js';
 import { RELOAD_LOSES, REFUSED as PERMISSION_REFUSED, NEEDS, REMEMBERED_BASEMAP } from '../lib/permission-words.js';
 import * as ov from './overlays.js';
+// The shaded relief over Natural Earth (#37): whether this site has it, and its words.
+import * as relief from './relief.js';
 import * as remote from './remote.js';
 import * as georef from '../engine/georef/index.js';
 import * as tracing from '../engine/chora/trace.js';
@@ -1256,6 +1258,7 @@ function renderBasemaps() {
     + '<div id="chora-basemap-needs"></div>' + [...groups].map(([g, bs]) => `<fieldset><legend>${esc(g)}</legend>${bs.map((b) => `<label class="${b.disabled ? 'disabled' : ''}">
       <input type="radio" name="basemap" value="${esc(b.id)}"${b.id === (waiting || cur).id ? ' checked' : ''}${b.disabled ? ' disabled' : ''}> ${esc(b.name)}${b.disabled ? ` <small>(${esc(b.disabled)})</small>` : ''}${b.note ? ` <small class="basemap-note">${esc(b.note)}</small>` : ''}
       ${b.group === 'Pasted' ? ` <button type="button" class="link" data-unpaste="${esc(b.id)}">remove</button>` : ''}</label>`).join('')}</fieldset>`).join('')
+    + reliefOptions(cur)
     + `<form id="chora-paste-form"><label for="chora-paste">Paste a style address or a tile template</label>
       <input id="chora-paste" type="url" placeholder="https://…/style.json or https://…/{z}/{x}/{y}.png" autocomplete="off">
       <button type="submit">Add</button> <span id="chora-paste-error" class="warn"></span></form>`
@@ -1279,7 +1282,33 @@ function want(b) {
   if (basemaps.permitted(b)) useBasemap(b);
   else { $('basemaps').open = true; renderBasemaps(); }
 }
+// ---- The shaded relief over Natural Earth (src/chora/relief.js) ----------------------------------------
+// A tick in the chooser, under Natural Earth's own group, kept in this browser ('chora-relief'): a viewer's
+// convenience, nothing more. Shown only on Natural Earth; where the site has no relief file it says so, unticked.
+let reliefWant = (() => { try { return localStorage.getItem('chora-relief') === 'on'; } catch { return false; } })();
+function reliefOptions(cur) {
+  if (!cur?.local) return '';
+  const r = state.relief || {}, off = r.available === false;
+  return `<fieldset id="chora-relief-options"><legend>Over Natural Earth</legend><label${off ? ' class="disabled"' : ''}><input type="checkbox" id="chora-relief"${reliefWant && !off ? ' checked' : ''}${off ? ' disabled' : ''}> Shaded relief
+    <small class="basemap-note">${esc(`From NASA SRTM and USGS GMTED2010, in the public domain; it covers ${relief.RELIEF.coverage}.`)}</small></label>
+    ${off ? `<p class="muted" id="chora-relief-status">${esc(`Shaded relief is not available: ${r.why}.`)}</p>` : ''}</fieldset>`;
+}
+/** The relief on the map where it is wanted and Natural Earth is shown, once the site is known to have it; else off. */
+async function applyRelief() {
+  const onNe = basemaps.byId(state.basemap)?.local;
+  if (!reliefWant || !onNe) { mapApi.setRelief(false); state.relief = { ...(state.relief || {}), on: false }; return; }
+  const a = await relief.available();
+  state.relief = { on: a.ok, available: a.ok, why: a.ok ? null : a.why };
+  mapApi.setRelief(a.ok);
+  if (!a.ok) renderBasemaps();
+}
 function basemapChanged(e) {
+  if (e.target.id === 'chora-relief') {
+    reliefWant = e.target.checked;
+    try { localStorage.setItem('chora-relief', reliefWant ? 'on' : 'off'); } catch { /* not kept: this load only */ }
+    applyRelief();
+    return;
+  }
   if (e.target.name !== 'basemap') return;
   const b = listed.get(e.target.value);
   if (b && !b.disabled) want(b);
@@ -1328,6 +1357,7 @@ async function useBasemap(b) {
   }
   if (!b.local || basemaps.wanted()?.local) basemaps.choose(b);
   state.basemap = b.id;
+  applyRelief();   // before the style loads: the relief goes in with it, on Natural Earth only
   mapApi.setStyle(style);
   renderBasemaps();
 }

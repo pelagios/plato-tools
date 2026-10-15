@@ -2926,6 +2926,7 @@ def main():
             iiif_checks(pw, url, tmp)
             trace_map_checks(pw, url, tmp)
             trace_workflow_checks(pw, url, tmp)
+            open_map_basemap_checks(pw, url, tmp)
     finally:
         stop(srv)
         stop_fixtures()
@@ -10993,5 +10994,149 @@ def ink_checks(page, base, tmp, h):
                 and cstate(page)['pendingCount'] == before and any(r['status'] == 403 for r in at_origin(rows, A)) and at_origin(rows, B) == []), {
             'ink': s['ink'].get('lastError'), 'panel': panel[:200], 'statuses': sorted({r['status'] for r in at_origin(rows, A)})}
     attempt('Chora ink: a server that refuses the map\'s pixels (403) is said so in words (IIIF Auth is not supported), and nothing is drawn', refused_403)
+
+# ---- Make an open map (#37): the backgrounds a map may be made on -------------------------------------
+# The shaded relief over Natural Earth (src/chora/relief.js), and the Digital Atlas of the Roman Empire's tiles.
+# The relief file is never the real one (322 MB, on pelagios.org only once its release exists): this site's
+# own address for it is answered by a route with test/fixtures/chora/relief/relief-fixture.pmtiles, honouring
+# the range each request asks (206, Content-Range), as the reader needs; where the route is not set, the build
+# has no relief file, as a build before the release asset exists has none. DARE's tiles are answered by a route.
+RELIEF_FX = (ROOT / 'test/fixtures/chora/relief/relief-fixture.pmtiles').read_bytes()
+def relief_route(route):
+    """The fixture, as a static host serves a file asked for in ranges."""
+    n = len(RELIEF_FX); rng = route.request.headers.get('range') or ''
+    m = re.match(r'bytes=(\d+)-(\d*)$', rng)
+    if not m: route.fulfill(status=200, body=RELIEF_FX, headers={'Content-Type': 'application/octet-stream', 'Accept-Ranges': 'bytes'}); return
+    a = int(m.group(1)); b = min(int(m.group(2)) if m.group(2) else n - 1, n - 1)
+    if a >= n: route.fulfill(status=416, headers={'Content-Range': f'bytes */{n}'}); return
+    route.fulfill(status=206, body=RELIEF_FX[a:b + 1], headers={'Content-Type': 'application/octet-stream', 'Accept-Ranges': 'bytes', 'Content-Range': f'bytes {a}-{b}/{n}'})
+# The fixture's tiles at zoom 7: a tile's left half flat, its upper right quarter in shadow, its lower right lit.
+def tile_corner(x, y, z):
+    import math
+    n = 2 ** z
+    return [x / n * 360 - 180, math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * y / n))))]
+
+def open_map_basemap_checks(pw, url, tmp):
+    base = url.rstrip('/') + '/'; here = urlparse(base).netloc
+    ctx = pw.chromium.launch_persistent_context(str(tmp / 'open-map-basemaps'), headless=True, args=GL, viewport={'width': 1400, 'height': 900}, reduced_motion='reduce')
+    ctx.set_default_timeout(T(30) * 1000)
+    requests, errors = [], []
+    ctx.on('request', lambda r: requests.append(r.url))
+    page = ctx.pages[0] if ctx.pages else ctx.new_page()
+    page.on('pageerror', lambda e: errors.append(str(e)[:200]))
+    web = lambda since=0: [u for u in requests[since:] if urlparse(u).scheme in ('http', 'https')]
+    foreign = lambda since=0: sorted({urlparse(u).netloc for u in web(since) if urlparse(u).netloc != here})
+    relief_asked = lambda since=0: [u for u in web(since) if u.endswith('/basemap/relief.pmtiles')]
+    RELIEF_STATE = '''() => { const m = window.__chora_map, box = document.getElementById('chora-relief');
+      return { option: !!box, ticked: !!box?.checked, disabled: !!box?.disabled, status: document.getElementById('chora-relief-status')?.textContent || null,
+        layer: !!m.getLayer('chora-relief'), loaded: !!m.getSource('chora-relief') && m.isSourceLoaded('chora-relief'), state: window.__chora.relief || null }; }'''
+    def boot(relief=None):
+        page.goto('about:blank')
+        chora_boot(page, base)
+        page.evaluate('(r) => { if (r) localStorage.setItem("chora-relief", r); else localStorage.removeItem("chora-relief"); }', relief)
+        chora_boot(page, base)
+        page.evaluate("() => { document.getElementById('chora-basemaps').open = true; }")
+        until(page, '() => window.__chora_map.getStyle()?.name?.includes("Natural Earth") && window.__chora_map.isStyleLoaded()', 30)
+    def tick():
+        page.evaluate("() => { document.getElementById('chora-basemaps').open = true; }")
+        page.check('#chora-relief')
+    # The chooser, open, lies over the map: closed before the map is looked at.
+    shut = lambda: page.evaluate("() => { document.getElementById('chora-basemaps').open = false; }")
+
+    def not_available():
+        boot(); since = len(requests)
+        before = page.evaluate(RELIEF_STATE)
+        tick()
+        said = soon(page, '() => !!document.getElementById("chora-relief-status")', 20)
+        after = page.evaluate(RELIEF_STATE)
+        # It was asked of this site, and of no other.
+        return (before['option'] and not before['ticked'] and not before['layer'] and said and after['disabled'] and not after['ticked'] and not after['layer']
+                and after['status'] == 'Shaded relief is not available: the relief file is not on this site.' and relief_asked(since) and not foreign(since)), {
+            'before': before, 'after': after, 'asked': relief_asked(since)[:2], 'foreign': foreign(since)}
+    attempt('Make an open map: on a build without the relief file, "Shaded relief" ticked says it is not available, and draws nothing; the file was asked of this site alone', not_available)
+
+    def available():
+        page.route('**/basemap/relief.pmtiles', relief_route)
+        try:
+            boot(); since = len(requests)
+            page.evaluate('() => window.__chora_map.jumpTo({ center: [24, 38], zoom: 6 })'); page.evaluate(SETTLE)
+            # Three points of one tile of zoom 7 (drawn 256 pixels wide at zoom 6): flat, in shadow, lit.
+            corner = tile_corner(72, 49, 7)
+            c = page.evaluate('(ll) => { const p = window.__chora_map.project(ll); return [p.x, p.y]; }', corner)
+            pts = {'flat': [c[0] + 60, c[1] + 128], 'shadow': [c[0] + 192, c[1] + 64], 'lit': [c[0] + 192, c[1] + 192]}
+            shut(); page.evaluate(SETTLE)
+            off = {k: map_pixel(page, p) for k, p in pts.items()}
+            tick()
+            on = soon(page, '() => !!window.__chora_map.getLayer("chora-relief") && window.__chora_map.isSourceLoaded("chora-relief")', 30)
+            shut(); page.evaluate(SETTLE)
+            with_relief = {k: map_pixel(page, p) for k, p in pts.items()}
+            st = page.evaluate(RELIEF_STATE)
+            darker = sum(off['shadow']) - sum(with_relief['shadow']); lighter = sum(with_relief['lit']) - sum(off['lit'])
+            flat = max(abs(a - b) for a, b in zip(off['flat'], with_relief['flat']))
+            kept = page.evaluate('() => localStorage.getItem("chora-relief")')
+            # Below the basemap's rivers and Chora's own layers.
+            order = page.evaluate('() => { const ids = window.__chora_map.getStyle().layers.map((l) => l.id); return [ids.indexOf("land"), ids.indexOf("chora-relief"), ids.indexOf("rivers"), ids.indexOf("chora-overview-clusters")]; }')
+            return (on and st["ticked"] and darker > 60 and lighter >= 15 and flat <= 4 and kept == 'on' and order[0] < order[1] < order[2] < order[3]
+                    and relief_asked(since) and not foreign(since)), {
+                'shown': on, 'state': st, 'shadow darker by': darker, 'lit lighter by': lighter, 'flat changed by': flat, 'kept': kept, 'order': order,
+                'asked': len(relief_asked(since)), 'foreign': foreign(since)}
+        finally:
+            page.unroute('**/basemap/relief.pmtiles', relief_route)
+    attempt('Make an open map: with the relief file on this site, "Shaded relief" draws it over the land and under the rivers: a shadow darker, a lit slope lighter, flat ground as it was; asked of this site alone, and remembered', available)
+
+    def only_on_ne():
+        page.route('**/basemap/relief.pmtiles', relief_route)
+        page.route('https://cawm.lib.uiowa.edu/**', lambda route: route.fulfill(status=200, content_type='image/png', body=__import__('base64').b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='), headers={'Access-Control-Allow-Origin': '*'}))
+        try:
+            page.goto('about:blank'); chora_boot(page, base)
+            page.evaluate('''() => { localStorage.setItem('chora-relief', 'on'); localStorage.setItem('chora-basemap', JSON.stringify('cawm'));
+              localStorage.setItem('plato-tools.permissions', JSON.stringify({ version: 1, grants: { 'basemap:cawm': { state: 'allowed', at: '2026-10-15T09:00:00Z' } } })); }''')
+            chora_boot(page, base)
+            on_cawm = soon(page, '() => window.__chora.basemap === "cawm" && window.__chora_map.isStyleLoaded()', 30)
+            page.wait_for_timeout(500)
+            st = page.evaluate(RELIEF_STATE)
+            page.evaluate("() => { document.getElementById('chora-basemaps').open = true; }")
+            page.check('input[name="basemap"][value="natural-earth"]')
+            back = soon(page, '() => window.__chora.basemap === "natural-earth" && !!window.__chora_map.getLayer("chora-relief")', 30)
+            return on_cawm and not st['layer'] and not st['option'] and back, {'on CAWM': on_cawm, 'state on CAWM': st, 'back on Natural Earth with relief': back}
+        finally:
+            page.unroute('**/basemap/relief.pmtiles', relief_route)
+            page.evaluate('() => { localStorage.removeItem("chora-relief"); localStorage.removeItem("chora-basemap"); localStorage.removeItem("plato-tools.permissions"); }')
+    attempt('Make an open map: the relief is over Natural Earth only: offered and drawn there, neither on Ancient World (CAWM); back on Natural Earth it is drawn again', only_on_ne)
+
+    DARE = 'https://dh.gu.se'
+    hits = {'dare': 0}
+    PNG = __import__('base64').b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==')
+    def dare(route): hits['dare'] += 1; route.fulfill(status=200, content_type='image/png', body=PNG, headers={'Access-Control-Allow-Origin': '*'})
+    ATTRIB = '''() => { const a = document.querySelector('#chora-map .maplibregl-ctrl-attrib-inner'); return a ? { text: a.textContent, links: [...a.querySelectorAll('a')].map((x) => x.href) } : null; }'''
+    def dare_basemap():
+        ctx.route(DARE + '/**', dare)
+        try:
+            page.goto('about:blank'); chora_boot(page, base)
+            page.evaluate('() => { localStorage.removeItem("plato-tools.permissions"); localStorage.removeItem("chora-basemap"); }')
+            chora_boot(page, base); since = len(requests)
+            page.evaluate("() => { document.getElementById('chora-basemaps').open = true; }")
+            page.check('input[name="basemap"][value="dare"]')
+            line = page.inner_text('[data-permission="basemap:dare"]') if page.is_visible('[data-permission="basemap:dare"]') else ''
+            asked_before = hits['dare'] + len([u for u in requests[since:] if u.startswith(DARE)])
+            page.click('[data-permission="basemap:dare"] button')
+            until(page, '() => document.getElementById("permissions-panel")?.open', 10)
+            page.check('#permissions-panel fieldset.perm[data-key="basemap:dare"] input[value="allowed"]')
+            with page.expect_navigation(timeout=60_000): page.click('#permissions-panel [data-reload]')
+            until(page, '() => window.__chora && window.__chora.mapReadyCount >= 1 && window.__chora.canary !== "pending"', 60)
+            since = len(requests)
+            used = soon(page, '() => window.__chora.basemap === "dare" && window.__chora_map.isSourceLoaded("basemap")', 30)
+            page.evaluate('() => window.__chora_map.jumpTo({ center: [12.49, 41.89], zoom: 5 })'); page.evaluate(SETTLE)
+            zooms = sorted({int(m.group(1)) for u in requests[since:] for m in [re.match(re.escape(DARE) + r'/tiles/imperium/(\d+)/\d+/\d+\.png$', u)] if m})
+            attrib = page.evaluate(ATTRIB) or {}
+            return ('Needs permission: Digital Atlas of the Roman Empire' in line and asked_before == 0 and used and hits['dare'] > 0 and zooms and all(3 <= z <= 11 for z in zooms)
+                    and foreign(since) == ['dh.gu.se'] and 'Digital Atlas of the Roman Empire' in (attrib.get('text') or '') and 'CC BY-SA 3.0' in (attrib.get('text') or '')), {
+                'line': line, 'asked before allowed': asked_before, 'used': used, 'tiles': hits['dare'], 'zooms': zooms, 'sites': foreign(since), 'attribution': attrib}
+        finally:
+            ctx.unroute(DARE + '/**', dare)
+            page.evaluate('() => { localStorage.removeItem("plato-tools.permissions"); localStorage.removeItem("chora-basemap"); }')
+    attempt('Make an open map: Roman Empire (DARE) chosen asks nothing and says "Needs permission"; allowed and reloaded, its tiles (zooms 3 to 11) are asked of dh.gu.se and no other site, with its CC BY-SA 3.0 attribution', dare_basemap)
+    attempt('Make an open map: across the background checks, no page error', lambda: (len(web()) > 20 and not errors, {'requests': len(web()), 'errors': errors[:5]}))
+    ctx.close()
 
 if __name__ == '__main__': main()

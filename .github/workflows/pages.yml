@@ -53,6 +53,27 @@ jobs:
         # page, where anyone can read it. Unset, the CARTO basemaps show as not yet available.
         env:
           VITE_CARTO_API_KEY: ${{ vars.VITE_CARTO_API_KEY }}
+      # Chora's shaded relief (src/chora/relief.js): one PMTiles file of 322 MB, too large for the repository, kept as
+      # the asset relief.pmtiles of the release relief-v1 and put into the site here, at basemap/relief.pmtiles,
+      # checked against the sha256 committed beside it (public/basemap/relief.pmtiles.sha256): a file that differs
+      # fails the build. While that release has no such asset (404), the site is built without it and says so here;
+      # the relief then says, in Chora, that it is not available. Any other failure to fetch it fails the build.
+      - name: Shaded relief, from the release asset, checked against its sha256
+        shell: bash
+        run: |
+          url="https://github.com/${{ github.repository }}/releases/download/relief-v1/relief.pmtiles"
+          code=$(curl -sSL --retry 3 -o relief.pmtiles -w '%{http_code}' "$url" || true)
+          if [ "$code" = 404 ]; then
+            rm -f relief.pmtiles
+            echo "::notice::The release relief-v1 has no asset relief.pmtiles yet: the site is built without the shaded relief, which says in Chora that it is not available."
+            exit 0
+          fi
+          [ "$code" = 200 ] || { echo "::error::The relief could not be fetched from $url (HTTP $code)."; exit 1; }
+          want=$(cut -d' ' -f1 public/basemap/relief.pmtiles.sha256)
+          got=$(sha256sum relief.pmtiles | cut -d' ' -f1)
+          [ "$got" = "$want" ] || { echo "::error::relief.pmtiles from relief-v1 has sha256 $got, not the $want committed in public/basemap/relief.pmtiles.sha256."; exit 1; }
+          mv relief.pmtiles dist/basemap/relief.pmtiles
+          echo "The shaded relief is in the site: dist/basemap/relief.pmtiles, $(stat -c %s dist/basemap/relief.pmtiles) bytes, sha256 $got."
       - name: The vendored files are the pinned commit's
         run: |
           node -e "const v=require('./dist/plato/VERSION.json'), p=require('./package.json'); if (v.commit !== p.plato.commit) { console.error('vendored', v.commit, 'pinned', p.plato.commit); process.exit(1) }"

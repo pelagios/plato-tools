@@ -29,7 +29,7 @@ what Chora's `transformRequest` allows by default. The font folder's name has sp
 
 | File | Size (bytes) | What it is |
 |---|---:|---|
-| `style.json` | 5,546 | the MapLibre style (hand-written; see below) |
+| `style.json` | 6,868 | the MapLibre style (hand-written; see below) |
 | `land.geojson` | 837,144 | land polygons (Natural Earth 50m land) |
 | `countries.geojson` | 1,154,081 | countries, for a faint tint: `iso`, `name`, `tint` (1–7, Natural Earth's MAPCOLOR7) |
 | `boundaries.geojson` | 266,156 | country borders on land: `kind` (`international`, `disputed`, `control`, `indefinite`), `min_zoom` |
@@ -38,6 +38,9 @@ what Chora's `transformRequest` allows by default. The font folder's name has sp
 | `rivers.geojson` | 358,297 | rivers and lake centre-lines: `name`, `rank`, `min_zoom` |
 | `places.geojson` | 1,134,070 | 7,342 populated places (10m): `name`, `min_zoom`, `rank` (scalerank, 0 most important), `cap` (1 for a national capital), `iso` |
 | `country-labels.geojson` | 36,882 | Natural Earth's label point per country: `name`, `iso`, `min_zoom`, `max_zoom` |
+| `marine-labels.geojson` | 17,277 | the names of seas, gulfs, bays and straits (Natural Earth 50m marine polygons, each a point inside it): `name` (English), `kind`, `min_zoom`; layer `marine-labels`, hidden unless asked for |
+| `physical-labels.geojson` | 47,396 | the names of mountain ranges, deserts, plains, peninsulas and the like (Natural Earth 50m geographic regions, the physical kinds only, each a point inside it): `name`, `kind`, `min_zoom`; layer `physical-labels`, hidden unless asked for |
+| `relief.pmtiles.sha256` | 81 | the sha256 of the shaded relief, `relief.pmtiles`, which is not here (below) |
 | `ccodes.json` | 8,010 | a bounding box for each ISO 3166-1 alpha-2 code (below) |
 | `glyphs/Noto Sans Regular/*.pbf` | 781,564 | glyphs for 8 ranges: 0-255, 256-511, 512-767, 768-1023, 1024-1279, 7680-7935, 7936-8191, 8192-8447 (Latin, Latin Extended, Greek with polytonic, Cyrillic, punctuation) |
 | `glyphs/Noto Sans Regular/OFL.txt` | 4,301 | the font's licence |
@@ -65,6 +68,19 @@ with no code at all (Somaliland, Northern Cyprus, Siachen Glacier) are left out.
   `[-180,-90,180,-60.52]`.
 - Rounded outwards to 0.01 degree.
 
+## The names of seas and of regions, and the shaded relief
+
+A map made from Chora's view (#37, "Make a map") may name the seas and the physical regions (mountains,
+deserts, peninsulas), each off unless asked for: their layers are in `style.json` with `visibility: none`,
+and the export draws them when its options say so. Their names are Natural Earth's English ones; seas are
+italic in the export's SVG (`metadata["plato-tools:italic"]`), which the map on screen, having one font,
+does not show.
+
+The shaded relief over Natural Earth (`relief.pmtiles`, 322 MB, built by `scripts/relief/`) is too large
+for the repository. The Pages workflow puts it here at build time from the release asset
+`relief-v1/relief.pmtiles`, checked against `relief.pmtiles.sha256`; without it, Chora's "Shaded relief"
+says it is not available. It is read by range requests (src/chora/relief.js).
+
 ## Sources and licences
 
 - **Natural Earth**, public domain: <https://www.naturalearthdata.com/>, from the official mirror
@@ -72,7 +88,7 @@ with no code at all (Somaliland, Northern Cyprus, Siachen Glacier) are left out.
   `ca96624a56bd078437bca8184e78163e5039ad19`, its `geojson/` folder: `ne_50m_land`,
   `ne_50m_admin_0_countries`, `ne_50m_admin_0_map_units`, `ne_50m_admin_0_boundary_lines_land`,
   `ne_50m_admin_1_states_provinces_lines`, `ne_50m_lakes`, `ne_50m_rivers_lake_centerlines`,
-  `ne_10m_populated_places_simple`. The sha256 of each is in the script and in `sources.json`.
+  `ne_10m_populated_places_simple`, `ne_50m_geography_marine_polys`, `ne_50m_geography_regions_polys`. The sha256 of each is in the script and in `sources.json`.
 - **Noto Sans**, SIL Open Font License 1.1 (`glyphs/Noto Sans Regular/OFL.txt`): OpenMapTiles'
   glyph build of Klokan Technologies' patched Noto Sans ("Klokantech Noto Sans Regular"), from
   [openmaptiles/fonts](https://github.com/openmaptiles/fonts), PBFs from the `gh-pages` branch at

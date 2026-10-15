@@ -128,7 +128,7 @@ test('a stored pasted basemap is read from its address alone: local, provider, g
   permissions.resetForTests();
   const a = fromPaste('https://attacker.example.net/style.json'), b = fromPaste('https://attacker.example.net/{z}/{x}/{y}.png');
   localStorage.setItem('chora-basemaps', JSON.stringify([
-    { id: a.id, name: 'Natural Earth (this site)', group: 'This site', kind: 'style', url: 'https://attacker.example.net/style.json', local: true },
+    { id: a.id, name: 'Natural Earth (this site)', group: 'This site', kind: 'style', url: 'https://attacker.example.net/style.json', local: true, export: { licence: { iri: 'https://creativecommons.org/publicdomain/zero/1.0/' }, vector: true } },
     { id: b.id, name: 'OpenStreetMap standard', group: 'OpenStreetMap', kind: 'raster', tiles: 'https://attacker.example.net/{z}/{x}/{y}.png', provider: 'osm', origins: ['https://attacker.example.net', '*', 'javascript:x'] },
     { id: 'natural-earth', kind: 'style', url: 'https://attacker.example.net/ne.json' },
     { id: 'pasted-other', kind: 'style', url: 'https://attacker.example.net/style.json' },
@@ -143,7 +143,8 @@ test('a stored pasted basemap is read from its address alone: local, provider, g
     assert.equal(automatic(b), false, `${b.id} is not automatic`);
     assert.equal(permitted(b), false, `${b.id} needs its site allowed`);
   }
-  assert.deepEqual(got[0], { id: a.id, name: 'Your style from attacker.example.net', group: 'Pasted', kind: 'style', url: 'https://attacker.example.net/style.json' });
+  // Nor what a map made from it may do (#37): a pasted basemap's licence is not known, whatever storage says.
+  assert.deepEqual(got[0], { id: a.id, name: 'Your style from attacker.example.net', group: 'Pasted', kind: 'style', url: 'https://attacker.example.net/style.json', export: { licence: null } });
   assert.equal(got[1].name, 'Your tiles from attacker.example.net'); assert.equal(got[1].kind, 'raster');
   assert.equal(got[1].origins, undefined, 'a tile template names no further sites: none carried');
   localStorage.setItem('chora-basemaps', JSON.stringify([{ ...a, origins: ['https://attacker.example.net', '*', 'javascript:x'] }]));
@@ -186,4 +187,50 @@ test('the Ancient World (CAWM) basemap: its own group, one site under basemap:ca
   // The control: OpenStreetMap's source, through the same wrapper, has no minzoom and its own maxzoom, as before.
   const osm = (await styleFor(all.find((x) => x.id === 'osm'))).sources.basemap;
   assert.deepEqual([osm.minzoom, osm.maxzoom], [undefined, 19]);
+});
+
+// What a map made from Chora's view may do with each basemap (#37; Stephen's decisions of 14 October 2026): every
+// preset says, in the licence shape CAWM's has; CARTO is refused; OpenStreetMap's data is ODbL beside its look.
+test('every basemap says what a map made from it may do: its licence as { iri, credit, confirmed }, or why it is refused', async () => {
+  const { licenceTerms } = await import('../src/engine/agora/licence.js');
+  const all = builtIn();
+  assert.ok(all.length >= 10, all.map((b) => b.id).join());
+  for (const b of all) {
+    assert.ok(b.export && typeof b.export === 'object', `${b.id} has no export field`);
+    if (b.export.refused) { assert.equal(b.export.licence, null, b.id); assert.match(b.export.refused, /CARTO/); continue; }
+    const l = b.export.licence;
+    assert.deepEqual(Object.keys(l).sort(), ['confirmed', 'credit', 'iri'], b.id);
+    assert.ok(licenceTerms(l.iri), `${b.id}: ${l.iri} is a licence the tools know`);
+    assert.equal(l.confirmed, true, b.id);
+    assert.ok(typeof b.export.coastline === 'string' && b.export.coastline, `${b.id} names its coastline's source`);
+  }
+  const by = (id) => all.find((b) => b.id === id).export;
+  assert.equal(by('natural-earth').vector, true); assert.deepEqual(by('natural-earth').templates, ['{{Natural Earth}}']);
+  assert.match(by('natural-earth').coastline, /Natural Earth, 50m/);
+  assert.equal(licenceTerms(by('osm').licence.iri).id, 'CC-BY-SA-2.0'); assert.equal(licenceTerms(by('osm').data.iri).id, 'ODbL-1.0');
+  assert.equal(licenceTerms(by('ofm-liberty').licence.iri).id, 'CC-BY-4.0'); assert.equal(licenceTerms(by('ofm-liberty').data.iri).id, 'ODbL-1.0');
+  assert.equal(licenceTerms(by('dare').licence.iri).id, 'CC-BY-SA-3.0');
+  assert.deepEqual(['carto-positron', 'carto-voyager', 'carto-dark-matter'].map((id) => !!by(id).refused), [true, true, true]);
+  assert.deepEqual(fromPaste('https://tiles.example.org/{z}/{x}/{y}.png').export, { licence: null }, 'a pasted one: not known');
+});
+
+test('the Roman Empire (DARE) basemap: its own group, one site under basemap:dare, CC BY-SA 3.0 recorded, zooms 3 to 11 on its source', async () => {
+  const all = builtIn(), b = all.find((x) => x.id === 'dare');
+  assert.ok(b, `offered among ${all.map((x) => x.id).join(', ')}`);
+  assert.equal(b.name, 'Roman Empire (DARE)');
+  assert.equal(all.filter((x) => x.group === b.group).map((x) => x.id).join(), 'dare', 'a group of its own');
+  assert.equal(b.tiles, 'https://dh.gu.se/tiles/imperium/{z}/{x}/{y}.png');
+  assert.deepEqual(originsOf(b), ['https://dh.gu.se']);
+  assert.deepEqual(subjectsOf(b), [['basemap', 'dare']]);
+  assert.equal(automatic(b), true);
+  assert.match(b.attribution, /Digital Atlas of the Roman Empire/); assert.match(b.attribution, /href="https:\/\/imperium\.ahlfeldt\.se"/); assert.match(b.attribution, /CC BY-SA 3\.0/);
+  assert.deepEqual(b.licence, b.export.licence);
+  const src = (await styleFor(b)).sources.basemap;
+  assert.deepEqual([src.minzoom, src.maxzoom, src.tiles], [3, 11, [b.tiles]]);
+  const words = await import('../src/lib/permission-words.js');
+  assert.equal(words.nameOf('basemap', 'dare'), 'Digital Atlas of the Roman Empire');
+  // The control: the policy admits its site only once allowed.
+  assert.deepEqual(originsFor('basemap', 'dare'), ['https://dh.gu.se']);
+  assert.equal(policyFor([]).includes('dh.gu.se'), false);
+  assert.ok(policyFor(['https://dh.gu.se']).includes('dh.gu.se'));
 });

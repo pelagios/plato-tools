@@ -25,6 +25,10 @@ const NE = {
   ne_50m_lakes: 'd350b75978b26fe839b797c2c529b2fb8f47fb3983c03f4964e36d5df9378a52',
   ne_50m_rivers_lake_centerlines: 'f286e0ce978fde999ca2d7a78c764be08542e19b63cded52b05c12d5173ccc51',
   ne_10m_populated_places_simple: 'fd3fa867a320cbd5c5b6bb5bc550afeec2939fb2cef688e508007282a55ac42f',
+  // The names of seas and of physical regions (mountains, deserts, peninsulas), for a map made from Chora's view
+  // (#37): each a label at a point inside its polygon, drawn only when asked for.
+  ne_50m_geography_marine_polys: '6fe58083e0cc5c7fad9e396970e28a8580bbd8770cfa4d1d7b5a34423e912f97',
+  ne_50m_geography_regions_polys: '33396643d8f0eed408e80bf5ca43dcdb7993f790fdc4eadae311660f8b91fe76',
 };
 // Glyphs: OpenMapTiles' build of Noto Sans (SIL OFL 1.1), Klokan Technologies' patched Noto Sans,
 // which unlike Open Sans has polytonic Greek (7936-8191). The PBFs are on the gh-pages branch; the
@@ -129,6 +133,22 @@ for (const name of names) {
   { stdio: ['ignore', 'inherit', 'pipe'] });
 }
 
+// --- The names of seas and of physical regions: a point inside each polygon (mapshaper's -points inner, the
+// point furthest inside it), its English name, its class and the zoom from which Natural Earth labels it. Of
+// the regions, the physical kinds only: not the continents, the islands (modern names, as the towns' are), the
+// coasts or the "geographic areas" (Siberia), which are not features of the land's shape.
+const PHYSICAL = new Set(['Range/mtn', 'Plain', 'Basin', 'Pen/cape', 'Desert', 'Plateau', 'Isthmus', 'Peninsula', 'Valley', 'Foothills', 'Delta', 'Wetlands', 'Lowland', 'Gorge', 'Tundra']);
+const labelLayers = {
+  'marine-labels': pick(src.ne_50m_geography_marine_polys, (p) => ({ name: p.name_en || p.name || '', kind: p.featurecla, min_zoom: Math.round(Number(p.min_label ?? 0) * 10) / 10 })),
+  'physical-labels': fc(pick(src.ne_50m_geography_regions_polys, (p) => ({ name: p.NAME_EN || p.NAME || '', kind: p.FEATURECLA, min_zoom: Math.round(Number(p.MIN_LABEL ?? 0) * 10) / 10 }))
+    .features.filter((f) => PHYSICAL.has(f.properties.kind))),
+};
+for (const [name, col] of Object.entries(labelLayers)) {
+  await writeFile(`${work}/${name}.json`, JSON.stringify(fc(col.features.filter((f) => f.properties.name))));
+  execFileSync('npx', ['-y', MAPSHAPER, `${work}/${name}.json`, '-points', 'inner', '-o', `${work}/${name}.out.json`, 'format=geojson', 'geojson-type=FeatureCollection', 'precision=0.0001'],
+    { stdio: ['ignore', 'inherit', 'pipe'] });
+}
+
 // --- Places: points, so no simplification; the 10m set, because 50m has too few for zoom 6+.
 const places = fc(src.ne_10m_populated_places_simple.features.map((f) => {
   const p = f.properties;
@@ -221,6 +241,11 @@ for (const name of names) {
   await put(`${name}.geojson`, dump(col));
 }
 await put('places.geojson', dump(places));
+for (const name of Object.keys(labelLayers)) {
+  const col = JSON.parse(await readFile(`${work}/${name}.out.json`, 'utf8'));
+  col.features.sort((a, b) => a.properties.min_zoom - b.properties.min_zoom || a.properties.name.localeCompare(b.properties.name, 'en'));
+  await put(`${name}.geojson`, dump(col));
+}
 await put('country-labels.geojson', dump(countryLabels));
 await put('ccodes.json', '{\n' + Object.entries(ccodes).map(([k, v]) => `${JSON.stringify(k)}:${JSON.stringify(v)}`).join(',\n') + '\n}\n');
 for (const [range, buf] of Object.entries(glyphs)) await put(`glyphs/${FONT}/${range}.pbf`, buf);

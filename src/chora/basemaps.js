@@ -2,8 +2,9 @@
 // that by default nothing leaves the browser. Every other basemap is fetched from its provider, who
 // then sees which part of the world is being looked at (never the files: those stay in the tab). So
 // each is used only once its provider is allowed in Permissions (src/lib/permissions.js): a built-in
-// one's as basemap:<provider> (openfreemap, osm, cawm, carto, each with every site it asks, in the
-// permissions' REGISTRY), a pasted one's as basemap:<site> for each site it asks.
+// one's as basemap:<provider> (openfreemap, osm, cawm, dare, carto, each with every site it asks, in the
+// permissions' REGISTRY), a pasted one's as basemap:<site> for each site it asks. Each says what a map made from
+// Chora's view may do with it (`export`, below), and Natural Earth may carry a shaded relief (src/chora/relief.js).
 //
 // Kept in this browser: which basemap was chosen last (localStorage 'chora-basemap'), and any pasted
 // basemap ('chora-basemaps'), keys and all. A pasted address is sent to nowhere but its own provider,
@@ -29,6 +30,28 @@ const OSM_ATTRIBUTION = '© <a href="https://www.openstreetmap.org/copyright">Op
 const CAWM_ATTRIBUTION = '© <a href="https://cawm.lib.uiowa.edu">Consortium of Ancient World Mappers</a> (<a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>)';
 const CAWM_NOTE = 'Made for the ancient Mediterranean and Middle East: elsewhere its coasts, rivers and lakes may be missing or wrong.';
 const CAWM_CREDIT = 'Consortium of Ancient World Mappers Map Tiles. The Consortium of Ancient World Mappers and the Digital Scholarship & Publishing Studio at the University of Iowa, 2022, https://cawm.lib.uiowa.edu.';
+// The Digital Atlas of the Roman Empire's tiles (https://imperium.ahlfeldt.se, checked 14 and 15 October 2026):
+// 256-pixel PNG, XYZ, zooms 3 to 11 (lower zooms are not there, 404), CORS open, under CC BY-SA 3.0 as its terms
+// say (info_api.php, info_about.php), with the credit its terms ask.
+const DARE_ATTRIBUTION = '© <a href="https://imperium.ahlfeldt.se">Digital Atlas of the Roman Empire</a>, Johan Åhlfeldt, Centre for Digital Humanities, University of Gothenburg (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC BY-SA 3.0</a>)';
+const DARE_NOTE = 'The Roman Empire about AD 200: its coasts, roads and provinces.';
+const DARE_CREDIT = '© Digital Atlas of the Roman Empire (https://imperium.ahlfeldt.se), Johan Åhlfeldt, Centre for Digital Humanities, University of Gothenburg.';
+
+// What a map made from Chora's view (#37, "Make an open map") may do with each basemap: `export` on every preset,
+// in the licence shape CAWM's `licence` has ({ iri, credit, confirmed }), read by the export's licence
+// (src/engine/chora/export/licence.js): `licence`, the basemap's look; `data`, a licence its data is under apart
+// from that (OpenStreetMap's ODbL); `templates`, Commons templates it carries; `refused`, why a map cannot be
+// made from it at all; `vector`, drawn as true vectors in the SVG (else embedded as a picture); `coastline`, the
+// words that name the source of the coastline the map shows. Stephen's decisions of 14 October 2026.
+const PD_MARK = 'https://creativecommons.org/publicdomain/mark/1.0/';
+const OSM_DATA = { iri: 'https://opendatacommons.org/licenses/odbl/1-0/', credit: '© OpenStreetMap contributors', confirmed: true };
+const NE_EXPORT = { licence: { iri: PD_MARK, credit: 'Natural Earth (public domain), https://www.naturalearthdata.com', confirmed: true }, templates: ['{{Natural Earth}}'], vector: true,
+  coastline: 'Modern coastline: Natural Earth, 50m (public domain)' };
+const coastOf = (name) => `Coastline: as ${name} draws it`;
+const OFM_EXPORT = { licence: { iri: 'https://creativecommons.org/licenses/by/4.0/', credit: '© OpenMapTiles © OpenStreetMap contributors', confirmed: true }, data: OSM_DATA };
+const CARTO_EXPORT = { licence: null, refused: "CARTO's basemaps are under CARTO's own commercial terms, which do not let a freely licensed map be made from them" };
+/** The export field of a pasted basemap: its licence is not known, so a map made on it cannot go to Commons. */
+export const PASTED_EXPORT = Object.freeze({ licence: null });
 
 /**
  * Each basemap: {id, name, group, kind: 'style' | 'raster', url (a style address) or tiles (a tile
@@ -42,17 +65,24 @@ const CAWM_CREDIT = 'Consortium of Ancient World Mappers Map Tiles. The Consorti
  */
 export function builtIn() {
   const carto = (name, label) => ({
-    id: `carto-${name}`, name: `CARTO ${label}`, group: 'CARTO', kind: 'style', provider: 'carto',
+    id: `carto-${name}`, name: `CARTO ${label}`, group: 'CARTO', kind: 'style', provider: 'carto', export: CARTO_EXPORT,
     url: `https://basemaps.cartocdn.com/gl/${name}-gl-style/style.json${CARTO_KEY ? `?api_key=${encodeURIComponent(CARTO_KEY)}` : ''}`,
     disabled: CARTO_KEY ? null : 'needs an API key: not yet configured',
   });
-  const ofm = (name, label) => ({ id: `ofm-${name}`, name: `OpenFreeMap ${label}`, group: 'OpenFreeMap', kind: 'style', provider: 'openfreemap', url: `https://tiles.openfreemap.org/styles/${name}` });
+  const ofm = (name, label) => ({ id: `ofm-${name}`, name: `OpenFreeMap ${label}`, group: 'OpenFreeMap', kind: 'style', provider: 'openfreemap', url: `https://tiles.openfreemap.org/styles/${name}`,
+    export: { ...OFM_EXPORT, coastline: coastOf(`OpenFreeMap ${label}`) } });
   return [
-    { id: 'natural-earth', name: 'Natural Earth (this site)', group: 'This site', kind: 'style', url: NE_STYLE, local: true },
+    { id: 'natural-earth', name: 'Natural Earth (this site)', group: 'This site', kind: 'style', url: NE_STYLE, local: true, export: NE_EXPORT },
     ofm('liberty', 'Liberty'), ofm('bright', 'Bright'), ofm('positron', 'Positron'),
     { id: 'cawm', name: 'Ancient World (CAWM)', group: 'Ancient World', kind: 'raster', provider: 'cawm', tiles: 'https://cawm.lib.uiowa.edu/tiles/{z}/{x}/{y}.png',
-      attribution: CAWM_ATTRIBUTION, minzoom: 1, maxzoom: 11, note: CAWM_NOTE, licence: { iri: 'https://creativecommons.org/licenses/by/4.0/', credit: CAWM_CREDIT, confirmed: true } },
-    { id: 'osm', name: 'OpenStreetMap standard', group: 'OpenStreetMap', kind: 'raster', provider: 'osm', tiles: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: OSM_ATTRIBUTION, maxzoom: 19 },
+      attribution: CAWM_ATTRIBUTION, minzoom: 1, maxzoom: 11, note: CAWM_NOTE, licence: { iri: 'https://creativecommons.org/licenses/by/4.0/', credit: CAWM_CREDIT, confirmed: true },
+      export: { licence: { iri: 'https://creativecommons.org/licenses/by/4.0/', credit: CAWM_CREDIT, confirmed: true }, coastline: coastOf('the Consortium of Ancient World Mappers') } },
+    { id: 'dare', name: 'Roman Empire (DARE)', group: 'Roman Empire', kind: 'raster', provider: 'dare', tiles: 'https://dh.gu.se/tiles/imperium/{z}/{x}/{y}.png',
+      attribution: DARE_ATTRIBUTION, minzoom: 3, maxzoom: 11, note: DARE_NOTE, licence: { iri: 'https://creativecommons.org/licenses/by-sa/3.0/', credit: DARE_CREDIT, confirmed: true },
+      export: { licence: { iri: 'https://creativecommons.org/licenses/by-sa/3.0/', credit: DARE_CREDIT, confirmed: true }, coastline: coastOf('the Digital Atlas of the Roman Empire') } },
+    // OpenStreetMap's cartography is CC BY-SA 2.0, its data ODbL (its copyright page; Stephen, 14 October 2026).
+    { id: 'osm', name: 'OpenStreetMap standard', group: 'OpenStreetMap', kind: 'raster', provider: 'osm', tiles: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: OSM_ATTRIBUTION, maxzoom: 19,
+      export: { licence: { iri: 'https://creativecommons.org/licenses/by-sa/2.0/', credit: '© OpenStreetMap contributors', confirmed: true }, data: OSM_DATA, coastline: coastOf('OpenStreetMap') } },
     carto('positron', 'Positron'), carto('voyager', 'Voyager'), carto('dark-matter', 'Dark Matter'),
   ];
 }
@@ -93,8 +123,8 @@ export function fromPaste(text) {
   if (u.protocol !== 'https:') return null;
   const raster = /\{z\}/.test(s) && /\{x\}/.test(s) && /\{y\}/.test(s);
   const id = 'pasted-' + [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(36);
-  return raster ? { id, name: `Your tiles from ${u.host}`, group: 'Pasted', kind: 'raster', tiles: s, attribution: `Tiles from ${u.host}` }
-    : { id, name: `Your style from ${u.host}`, group: 'Pasted', kind: 'style', url: s };
+  return raster ? { id, name: `Your tiles from ${u.host}`, group: 'Pasted', kind: 'raster', tiles: s, attribution: `Tiles from ${u.host}`, export: PASTED_EXPORT }
+    : { id, name: `Your style from ${u.host}`, group: 'Pasted', kind: 'style', url: s, export: PASTED_EXPORT };
 }
 export function addPasted(b) { put('chora-basemaps', [...pasted().filter((x) => x.id !== b.id), b]); }
 export function removePasted(id) { put('chora-basemaps', pasted().filter((x) => x.id !== id)); }

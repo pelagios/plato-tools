@@ -36,6 +36,7 @@ export const REGISTRY = {
     openfreemap: { origins: ['https://tiles.openfreemap.org'] },
     osm: { origins: ['https://tile.openstreetmap.org'] },
     cawm: { origins: ['https://cawm.lib.uiowa.edu'] },
+    dare: { origins: ['https://dh.gu.se'] },
     carto: { origins: ['https://basemaps.cartocdn.com', 'https://tiles.basemaps.cartocdn.com', 'https://tiles-a.basemaps.cartocdn.com', 'https://tiles-b.basemaps.cartocdn.com', 'https://tiles-c.basemaps.cartocdn.com', 'https://tiles-d.basemaps.cartocdn.com'] },
   },
   iiif: {},

@@ -15,9 +15,12 @@ import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter';
 import { transformRequest, blobWorkerUrl } from '../lib/permissions.js';
 import { STATUS_COLOURS } from './card.js';
 import { PRECISIONS, MARK_SIZE, drawMark, markImage, isPrecision, LINE_DASHES, LINE_CASING, LINE_WHITE, INK, CASING } from './vague.js';
+// The shaded relief over Natural Earth (#37): its tiles through a protocol of the page's own (relief.js).
+import * as relief from './relief.js';
 
 // A worker made from a blob: takes the page's policy; one made from this site's address would not.
 maplibregl.setWorkerUrl(blobWorkerUrl(mapWorkerUrl));
+relief.register(maplibregl);
 
 // Colours of the statuses: the card's (card.js), so the same in the card and on the map.
 const status = (fallback) => ['match', ['get', 'status'], ...Object.entries(STATUS_COLOURS).flat(), fallback];
@@ -182,9 +185,11 @@ export function createMap(container, { state, onPlaceClick, onStyleError, polygo
 
   let styleVersion = 0;
   const styleHooks = [];
+  let reliefOn = false;   // the shaded relief wanted on this style (the page says when: Natural Earth only)
   map.on('style.load', () => {
     styleLoading = false;
     addOwnLayers();
+    if (reliefOn) relief.add(map);
     // The historical maps' layer goes in here, below Chora's own layers and above the basemap.
     for (const fn of styleHooks) { try { fn(map); } catch (e) { console.warn('Map:', e); } }
     startDraw();
@@ -208,6 +213,13 @@ export function createMap(container, { state, onPlaceClick, onStyleError, polygo
       map.setStyle(style, { diff: false });
     },
     get styleVersion() { return styleVersion; },
+    /** The shaded relief on the map, or off (relief.js): kept across a change of style, put back on the next. */
+    setRelief(on) {
+      reliefOn = !!on;
+      if (!map.getLayer('chora-overview-clusters')) return;   // no style yet: style.load adds it
+      if (reliefOn) relief.add(map); else relief.remove(map);
+    },
+    get relief() { return reliefOn; },
     /** Call fn(map) whenever a style has loaded, after Chora's own layers are added (and now, if one has). */
     onStyleLoad(fn) { styleHooks.push(fn); if (map.isStyleLoaded() && map.getLayer('chora-overview-clusters')) fn(map); },
     setOverview(fc) { data.overview = fc || EMPTY; map.getSource('chora-overview')?.setData(data.overview); },

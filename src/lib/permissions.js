@@ -250,6 +250,9 @@ export async function fetch(url, { cat, subj, ...init } = {}) {
 export function transformRequest(subjects, { onBlocked } = {}) {
   return (url) => {
     if (/^(data|blob):/i.test(url)) return { url };
+    // Chora's shaded relief (src/chora/relief.js): a protocol of the page's own, whose tiles it reads from this site's
+    // own relief file and nowhere else. Only that protocol, and only an address of tiles.
+    if (/^plato-relief:\/\/\d+\/\d+\/\d+$/.test(url)) return { url };
     let origin;
     try { origin = new URL(url, location.href).origin; } catch { origin = 'null'; }
     if (origin === location.origin) return { url };

@@ -10,3 +10,6 @@ src/build-info.json
 # Secrets belong in ~/.config/plato-tools/secrets.env; never in the checkout
 secrets.env
 *.secrets.env
+
+# The shaded relief (322 MB): put into the site at build time from a release asset, never committed (DEVELOPERS.md)
+public/basemap/relief.pmtiles
