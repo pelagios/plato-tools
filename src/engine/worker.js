@@ -22,6 +22,8 @@ import { preview, previewLine, PREVIEW_LIMIT } from './hermes/preview.js';
 import { load as choraLoad } from './chora/store.js';
 import { save as choraSave } from './chora/save.js';
 import { mintPlaceId } from './chora/seed.js';
+// A map made from Chora's view (#37): each place in it, as the export reads it.
+import { exportPlace, PLACE_CAP } from './chora/export/places.js';
 
 let resources = null, pool = null, runs = 0, poolName = null;
 // A take-up of the main page's pool is under way (unpauseVfs): it is not to be let go meanwhile.
@@ -442,5 +444,14 @@ async function choraCommand(data) {
     let id;
     for (;;) { id = mintPlaceId(data.base, data.label, taken, { romanized: data.romanized }); if (!session.store.has(id)) break; taken.add(id); }
     postMessage({ type: 'chora-minted', id });
+  } else if (data.cmd === 'chora-export-places') {
+    // The places of a map made from Chora's view (src/engine/chora/export/places.js): at most PLACE_CAP, each by its key.
+    const ids = Array.isArray(data.ids) ? data.ids.filter((x) => typeof x === 'string').slice(0, PLACE_CAP) : [];
+    const places = [];
+    for (const id of ids) {
+      const rec = session.store.record(id);
+      if (rec) places.push(exportPlace(rec, { id, withdrawn: session.store.withdrawnOf(rec), brief: session.store.brief(id), identities: session.store.identitiesOf(id) }));
+    }
+    postMessage({ type: 'chora-export-places', places });
   } else throw new Error(`Unknown command: ${data.cmd}`);
 }

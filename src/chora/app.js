@@ -26,6 +26,8 @@ import { RELOAD_LOSES, REFUSED as PERMISSION_REFUSED, NEEDS, REMEMBERED_BASEMAP 
 import * as ov from './overlays.js';
 // The shaded relief over Natural Earth (#37): whether this site has it, and its words.
 import * as relief from './relief.js';
+// Making a map of the view to share (#37, "Make a map"): its panel and its preview (src/chora/export-ui.js).
+import { createExport } from './export-ui.js';
 import * as remote from './remote.js';
 import * as georef from '../engine/georef/index.js';
 import * as tracing from '../engine/chora/trace.js';
@@ -82,6 +84,8 @@ const html = () => `<div class="chora-panel" id="chora-panel">
 
     <section id="chora-adopt" class="adopt" aria-labelledby="adopt-h" hidden></section>
 
+    <section id="chora-export" class="chora-export" aria-labelledby="chora-export-h" hidden></section>
+
     <section id="chora-saving" aria-labelledby="chora-saving-h" hidden>
       <h2 id="chora-saving-h"><span class="step">3</span> Save</h2>
       <p id="chora-pending-total"></p>
@@ -104,6 +108,8 @@ const html = () => `<div class="chora-panel" id="chora-panel">
 
   <div class="chora-mapwrap">
     <div id="chora-map" class="chora-map" aria-label="Map"></div>
+    <!-- The map made of this view, as it will be written (src/chora/export-ui.js): over the map, closed at first. -->
+    <div class="export-preview" id="chora-export-preview" role="region" aria-label="The map made of this view" hidden></div>
     <div class="map-tools" id="chora-draw-tools" role="toolbar" aria-label="Draw" hidden>
       <button type="button" data-mode="point" data-tip="Draw a point">Point</button>
       <button type="button" data-mode="linestring" data-tip="Draw a line: click each vertex, and click the last one again to finish">Line</button>
@@ -137,6 +143,8 @@ const $ = (id) => root.querySelector(`#chora-${id}`);
 const PAGE = 50;
 let showing = false;   // true while the drawings shown are being replaced
 let worker, files = [], fp = null, dataset = null, drafts = [], view = null, total = 0, query = '';
+let overview = null;   // the overview's points (the worker's chora-overview), which "Make a map" takes the places in view from
+let exporter = null;   // "Make a map" (export-ui.js)
 let starts = [0], nextAfter = null;   // where each page of the list shown so far begins (after which place), and where the next would
 let offered = null;    // the button that saves the file last written, while the drawings are those it holds
 let handed = null;     // the file the last save wrote, as handed to the page (host.saved): chosen there, and not to be removed while it is
@@ -178,7 +186,8 @@ async function open(list, { traceKey: carried = null } = {}) {
   files = [...list];
   if (!files.length) return;
   Object.assign(state, { phase: 'opening', placeId: null, lastSave: null, vague: { marks: 0, circles: 0 } });
-  for (const id of ['places', 'card', 'saving']) $(id).hidden = true;
+  for (const id of ['places', 'card', 'saving', 'export']) $(id).hidden = true;
+  exporter?.reset(); overview = null;
   adopt.close();
   $('save-result').innerHTML = ''; offered = handed = null;
   $('dataset').hidden = false;
@@ -203,7 +212,7 @@ async function open(list, { traceKey: carried = null } = {}) {
   if (carried) { tracings.open[fp] = carried; keepTracings(); }
   traceKey = tracings.open[fp] ?? null; tracedAt = 0;
   const ov = await request({ cmd: 'chora-overview' }, 'chora-overview');
-  mapApi.setOverview(ov.geojson);
+  mapApi.setOverview(ov.geojson); overview = ov.geojson;
   mapApi.setPlace(null); mapApi.setContext(null); showDrafts(visibleDrafts()); $('map-key').hidden = true;
   if (traceKey) $('draw-tools').hidden = false;
   // The maps' list too: what each map's button offers (into this dataset, or a new one) is the dataset's.
@@ -214,6 +223,7 @@ async function open(list, { traceKey: carried = null } = {}) {
   query = ''; $('q').value = '';
   await search('first');
   showSaving();
+  $('export').hidden = false;
   Object.assign(state, { phase: 'loaded', places: dataset.places, pendingCount: drafts.length });
   if (drafts.length) $('dataset').insertAdjacentHTML('beforeend', `<p class="note">${n(drafts.length)} unsaved drawing${drafts.length === 1 ? ' was' : 's were'} kept from last time, and ${drafts.length === 1 ? 'is' : 'are'} shown with ${drafts.length === 1 ? 'its place' : 'their places'}.</p>`);
 }
@@ -964,6 +974,16 @@ function askContributor() {
   $('c-name').focus();
 }
 let saveAfterAsking = false;
+// "Make a map" asks the same form before the first download (the map's author is the contributor): it waits here.
+let contributorWaiter = null;
+function contributorFor() {
+  return new Promise((resolve) => {
+    contributorWaiter?.(null);
+    contributorWaiter = resolve;
+    $('saving').hidden = false; askContributor();
+    $('contributor-form').scrollIntoView({ block: 'nearest' });
+  });
+}
 function contributorGiven(e) {
   e.preventDefault();
   const c = contributors.fromForm($('c-name').value, $('c-orcid').value);
@@ -971,9 +991,10 @@ function contributorGiven(e) {
   contributors.remember(c);
   $('contributor-form').hidden = true;
   showSaving();
+  if (contributorWaiter) { const w = contributorWaiter; contributorWaiter = null; w(c); }
   if (saveAfterAsking) { saveAfterAsking = false; saveDataset(); }
 }
-const contributorCancelled = () => { saveAfterAsking = false; $('contributor-form').hidden = true; showSaving(); };
+const contributorCancelled = () => { saveAfterAsking = false; $('contributor-form').hidden = true; showSaving(); if (contributorWaiter) { const w = contributorWaiter; contributorWaiter = null; w(null); } };
 function saveClicked() {
   if (!contributors.load()) { saveAfterAsking = true; askContributor(); return; }
   saveDataset();
@@ -1769,6 +1790,9 @@ export function mountChora(rootEl, context = {}) {
   });
   initMaps();
   updateTraceButtons();
+  exporter = createExport($('export'), $('export-preview'), {
+    mapApi, state, request, layers, dataset: () => dataset, overview: () => overview, saveFile, host, askContributor: contributorFor,
+  });
   adopt = createAdopt({ root: $('adopt'), mapApi, state, addAdoption, armConsult: (c) => { consultArmed = c; state.consultArmed = c ? c.record : null; },
     adopted: (placeId) => drafts.filter((d) => d.kind === 'adoption' && d.placeId === placeId),
     // The workflow's Scope (Issue #33), as Methodos keeps it; none outside a workflow.

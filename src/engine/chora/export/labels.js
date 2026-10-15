@@ -127,7 +127,8 @@ const anchorOf = (pos) => (pos.startsWith('centre') ? 'middle' : /left$/.test(po
  *
  * Returns [{ id, position ('dragged' or one of POSITIONS, or an area's), anchor ('start' | 'middle' |
  * 'end'), x (where the text is anchored), lines: [{ text, size, x, y (its baseline), spacing }], box, cls,
- * overlaps (true when no position was free) }], in the order of `items`; a hidden label is left out.
+ * overlaps (true when no position was free), point (the point it is placed round, from which a dragged label's
+ * offset is kept) }], in the order of `items`; a hidden label is left out.
  */
 export function placeLabels(items, { obstacles = [], bounds: [W, H], measure, margin = 2 } = {}) {
   const placed = [], byId = new Map();
@@ -164,7 +165,7 @@ export function placeLabels(items, { obstacles = [], bounds: [W, H], measure, ma
       y += l.size * LINE;
       return { text: l.text, size: l.size, x: ax, y: baseline, spacing: l.spacing };
     });
-    const r = { id: it.id, position: pos, anchor, x: ax, lines: out, box, cls: it.cls || 'settlement', overlaps: over };
+    const r = { id: it.id, position: pos, anchor, x: ax, lines: out, box, cls: it.cls || 'settlement', overlaps: over, point: [it.x, it.y] };
     placed.push(r); byId.set(it.id, r);
   }
   return items.map((it) => byId.get(it.id)).filter(Boolean);

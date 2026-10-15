@@ -482,6 +482,23 @@ ol.adopt-candidates li.denied .cand-name { color: var(--muted); }
 .name-panel input, .name-panel select { width: 100%; box-sizing: border-box; }
 .name-panel .name-what { font-weight: 700; margin: .2rem 0; }
 .name-panel .name-buttons { display: flex; flex-wrap: wrap; gap: .3rem; margin: .5rem 0 .2rem; }
+/* "Make a map" (src/chora/export-ui.js): its panel, and the map it makes shown over Chora's own. */
+.chora-export fieldset { border: 1px solid var(--line); border-radius: 6px; margin: .5rem 0; padding: .2rem .6rem .4rem; }
+.chora-export label { margin-right: .5rem; }
+.chora-export input:not([type]), .chora-export textarea { max-width: 100%; box-sizing: border-box; }
+.chora-export textarea { width: 100%; font-family: ui-monospace, monospace; font-size: .8rem; }
+.chora-export .file-link input[type="file"] { font-size: .8rem; max-width: 14rem; }
+.export-places { list-style: none; padding: 0; margin: .3rem 0; max-height: 18rem; overflow-y: auto; font-size: .86rem; }
+.export-places li { padding: .2rem 0; border-bottom: 1px solid var(--line); }
+.export-places li .name { font-weight: 600; }
+.export-places li select, .export-places li input[data-note] { font-size: .8rem; max-width: 11rem; margin: .1rem .2rem 0 0; }
+.export-hist { border-left: 3px solid var(--line); padding-left: .5rem; }
+.export-preview { position: absolute; inset: .4rem; z-index: 4; display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 2px 8px rgb(0 0 0 / .2); }
+.export-preview[hidden] { display: none; }
+.export-preview-bar { display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .3rem .6rem; font-size: .88rem; border-bottom: 1px solid var(--line); }
+.export-preview-map { flex: 1; overflow: auto; padding: .4rem; }
+.export-preview-svg { display: block; width: 100%; height: auto; max-height: 100%; }
+.export-preview-svg text[data-place] { cursor: grab; }
 .chora-trace { border-top: 1px solid var(--line); margin-top: .8rem; padding-top: .3rem; }
 .chora-trace label { display: block; margin: .35rem 0 .05rem; }
 .chora-trace input[type="url"], .chora-trace input:not([type]), .chora-trace select { width: 100%; box-sizing: border-box; }

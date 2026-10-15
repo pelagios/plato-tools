@@ -2927,6 +2927,7 @@ def main():
             trace_map_checks(pw, url, tmp)
             trace_workflow_checks(pw, url, tmp)
             open_map_basemap_checks(pw, url, tmp)
+            open_map_compose_checks(pw, url, tmp)
     finally:
         stop(srv)
         stop_fixtures()
@@ -11137,6 +11138,130 @@ def open_map_basemap_checks(pw, url, tmp):
             page.evaluate('() => { localStorage.removeItem("plato-tools.permissions"); localStorage.removeItem("chora-basemap"); }')
     attempt('Make an open map: Roman Empire (DARE) chosen asks nothing and says "Needs permission"; allowed and reloaded, its tiles (zooms 3 to 11) are asked of dh.gu.se and no other site, with its CC BY-SA 3.0 attribution', dare_basemap)
     attempt('Make an open map: across the background checks, no page error', lambda: (len(web()) > 20 and not errors, {'requests': len(web()), 'errors': errors[:5]}))
+    ctx.close()
+
+# ---- Make an open map (#37): the composition panel, "Make a map" in Chora -----------------------------
+# The places of test/fixtures/chora/export/attica.json (five, with names attested in Greek and Latin, an area,
+# a gulf), made into a map of the view: what the panel says and what the preview draws, read from the preview's
+# own SVG (the file as it will be written) and from window.__chora.export. Every absence beside a presence.
+ATTICA = ROOT / 'test/fixtures/chora/export/attica.json'
+EXPORT_STATE = '() => JSON.parse(JSON.stringify(window.__chora.export || null))'
+PREVIEW = '''() => { const svg = document.querySelector('#chora-export-preview-map svg'); if (!svg) return null;
+  const by = (sel) => [...svg.querySelectorAll(sel)];
+  return { shown: !document.getElementById('chora-export-preview').hidden, viewBox: svg.getAttribute('viewBox'),
+    labels: Object.fromEntries(by('text[data-place]').map((t) => [t.dataset.place.split('/').pop(), { text: [...t.querySelectorAll('tspan')].map((s) => s.textContent),
+      italic: t.getAttribute('font-style') === 'italic', spacing: t.getAttribute('letter-spacing'), size: Number(t.querySelector('tspan')?.getAttribute('font-size')) }])),
+    points: by('#points circle[data-place]').map((c) => c.dataset.place.split('/').pop()).sort(), areas: by('#areas path').length, circles: by('#uncertainty path').length,
+    ids: by('[id]').map((e) => e.id), marks: by('#precision-marks g').length }; }'''
+
+def open_map_compose_checks(pw, url, tmp):
+    base = url.rstrip('/') + '/'; here = urlparse(base).netloc
+    ctx = pw.chromium.launch_persistent_context(str(tmp / 'open-map-compose'), headless=True, args=GL, viewport={'width': 1500, 'height': 1000}, reduced_motion='reduce', accept_downloads=True)
+    ctx.add_init_script('window.__plato_forceDownload = true;')
+    ctx.set_default_timeout(T(30) * 1000)
+    requests, errors = [], []
+    ctx.on('request', lambda r: requests.append(r.url))
+    page = ctx.pages[0] if ctx.pages else ctx.new_page()
+    page.on('pageerror', lambda e: errors.append(str(e)[:200]))
+    web = lambda since=0: [u for u in requests[since:] if urlparse(u).scheme in ('http', 'https')]
+    foreign = lambda since=0: sorted({urlparse(u).netloc for u in web(since) if urlparse(u).netloc != here})
+    es = lambda: page.evaluate(EXPORT_STATE) or {}
+    pv = lambda: page.evaluate(PREVIEW) or {}
+    def made(timeout=60):
+        until(page, '() => window.__chora.export && ["ready", "error"].includes(window.__chora.export.phase) && !!document.querySelector("#chora-export-preview-map svg")', timeout)
+    def recomposed(change):
+        """Do `change`, and wait for the map to be made again (the preview's SVG replaced)."""
+        page.evaluate('() => { const s = document.querySelector("#chora-export-preview-map svg"); if (s) s.dataset.old = "1"; }')
+        change()
+        until(page, '() => { const s = document.querySelector("#chora-export-preview-map svg"); return !!s && !s.dataset.old && window.__chora.export.phase === "ready"; }', 60)
+    def boot(name='attica.json', src=ATTICA):
+        page.goto('about:blank'); chora_boot(page, base)
+        page.evaluate('() => { localStorage.setItem("chora-contributor", JSON.stringify({ name: "Ada Mapmaker", orcid: "https://orcid.org/0000-0002-1825-0097" })); localStorage.removeItem("chora-relief"); }')
+        chora_boot(page, base, [fixture(src, name, tmp)])
+        until(page, '() => window.__chora.phase === "loaded"', 30)
+        page.evaluate(SETTLE)
+        page.click('#chora-export-open'); made()
+    st = {}
+
+    def opens():
+        since = len(requests); boot()
+        s, p = es(), pv()
+        st['p'] = p
+        labels = {k: v['text'][0] for k, v in p.get('labels', {}).items()}
+        return (s['phase'] == 'ready' and s['places'] == {'total': 5, 'shown': 5, 'capped': False} and p['shown']
+                and labels == {'athens': 'Athens', 'eleusis': 'Eleusis', 'piraeus': 'Piraeus', 'attica': 'ATTICA', 'saronic': 'Saronic Gulf'}
+                and p['labels']['saronic']['italic'] and float(p['labels']['attica']['spacing'] or 0) > 0 and not p['labels']['athens']['italic']
+                and p['points'] == ['athens', 'eleusis', 'piraeus', 'saronic'] and p['areas'] == 1 and p['circles'] == 1 and 'precision-marks' not in p['ids'] and 'key' not in p['ids']
+                and s['background']['kind'] == 'vector' and s['licence']['ok'] and s['licence']['label'] == 'CC BY 4.0' and '{{Natural Earth}}' in s['licence']['templates']
+                and s['overlapping'] == 0 and 'scale-bar' in p['ids'] and 'attribution' in p['ids']
+                and any('/basemap/land.geojson' in u for u in web(since)) and not foreign(since)), {
+            'state': {k: s.get(k) for k in ('phase', 'places', 'background', 'licence', 'overlapping')}, 'labels': labels, 'points': p.get('points'), 'ids': p.get('ids', [])[:30], 'foreign': foreign(since)}
+    attempt('Make an open map: "Make a map of this view" makes the five places in view into a map: each labelled with its preferred label, a region in spaced capitals, water in italic, its point, area and circle drawn, no marks without the key; on Natural Earth as vectors, CC BY 4.0; nothing asked of another site', opens)
+
+    def names():
+        recomposed(lambda: page.select_option('#chora-export-rule', 'grc'))
+        greek = {k: v['text'][0] for k, v in pv()['labels'].items()}
+        lang = page.input_value('#chora-export-lang')
+        li = '#chora-export-places li[data-place="https://example.org/attica/place/athens"]'
+        value = page.eval_on_selector(f'{li} select[data-name]', 'el => [...el.options].find((o) => o.textContent.startsWith("Athenae")).value')
+        recomposed(lambda: page.select_option(f'{li} select[data-name]', value))
+        athens = pv()['labels']['athens']['text'][0]
+        svg = page.evaluate('() => document.querySelector("#chora-export-preview-map svg").getAttribute("xml:lang")')
+        return (greek == {'athens': 'Ἀθῆναι', 'eleusis': 'Ἐλευσίς', 'piraeus': 'Πειραιεύς', 'attica': 'ἈΤΤΙΚΉ', 'saronic': 'Saronic Gulf'} and lang == 'grc' and svg == 'grc'
+                and athens == 'Athenae'), {'greek': greek, 'lang': lang, 'svg lang': svg, 'athens chosen': athens}
+    attempt('Make an open map: the whole map\'s rule "the name in grc where one is attested" labels each place in Greek, the preferred label where none is, and makes Greek the file\'s language; one label\'s own choice (Athenae) overrides it', names)
+
+    def edit_label():
+        li = lambda k: f'#chora-export-places li[data-place="https://example.org/attica/place/{k}"]'
+        before = pv()['labels']
+        recomposed(lambda: page.select_option(f'{li("piraeus")} select[data-cls]', 'water'))
+        recomposed(lambda: page.select_option(f'{li("eleusis")} select[data-size]', 'large'))
+        recomposed(lambda: (page.fill(f'{li("eleusis")} input[data-note]', 'the Mysteries'), page.press(f'{li("eleusis")} input[data-note]', 'Tab')))
+        recomposed(lambda: page.check(f'{li("saronic")} input[data-hide]'))
+        p = pv()
+        return (p['labels']['piraeus']['italic'] and not before['piraeus']['italic'] and p['labels']['eleusis']['size'] > before['eleusis']['size']
+                and p['labels']['eleusis']['text'] == ['Ἐλευσίς', 'the Mysteries'] and 'saronic' not in p['labels'] and 'saronic' in p['points']), {
+            'piraeus': p['labels'].get('piraeus'), 'eleusis': p['labels'].get('eleusis'), 'labels': sorted(p['labels']), 'points': p['points']}
+    attempt('Make an open map: a label re-classed as water is italic, made larger is larger, given a note has it on a second line, and hidden is gone while its place\'s point stays', edit_label)
+
+    def drag_label():
+        t = '#chora-export-preview-map svg text[data-place="https://example.org/attica/place/athens"]'
+        box = page.locator(t).bounding_box()
+        before = next(l for l in es()['labels'] if l['id'].endswith('/athens'))
+        def move():
+            page.mouse.move(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2); page.mouse.down()
+            page.mouse.move(box['x'] + box['width'] / 2 + 30, box['y'] + box['height'] / 2 + 25, steps=5); page.mouse.up()
+        recomposed(move)
+        after = next(l for l in es()['labels'] if l['id'].endswith('/athens'))
+        kept = page.evaluate('() => document.querySelector("#chora-export-places li[data-place$=\'/athens\'] [data-reset]") !== null')
+        recomposed(lambda: page.click('#chora-export-places li[data-place$="/athens"] [data-reset]'))
+        back = next(l for l in es()['labels'] if l['id'].endswith('/athens'))
+        moved = [after['box'][0] - before['box'][0], after['box'][1] - before['box'][1]]
+        return (before['position'] != 'dragged' and after['position'] == 'dragged' and moved[0] > 20 and moved[1] > 15 and kept
+                and back['position'] == before['position'] and back['box'] == before['box']), {'before': before, 'after': after, 'moved': moved, 'reset offered': kept, 'back': back}
+    attempt('Make an open map: a label dragged in the preview stays where it was dropped (its place kept), and "put it back" returns it to where the placement put it', drag_label)
+
+    def untick_and_key():
+        recomposed(lambda: page.uncheck('#chora-export-places li[data-place$="/piraeus"] input[data-tick]'))
+        p = pv(); words = page.inner_text('#chora-export-count')
+        recomposed(lambda: page.check('#chora-export-key'))
+        k = pv()
+        recomposed(lambda: page.uncheck('#chora-export-key'))
+        nk = pv()
+        return ('piraeus' not in p['points'] and 'piraeus' not in p['labels'] and 'athens' in p['points'] and words.startswith('4 of the 5 places')
+                and 'key' in k['ids'] and k['marks'] >= 3 and 'key' not in nk['ids'] and nk['marks'] == 0 and 'athens' in nk['points']), {
+            'points': p['points'], 'words': words, 'with key': {'key': 'key' in k['ids'], 'marks': k['marks']}, 'without': {'key': 'key' in nk['ids'], 'marks': nk['marks']}}
+    attempt('Make an open map: a place unticked is left out of the map (the others stay); the key, ticked, draws the marks of how well each place is known and their key, and neither otherwise', untick_and_key)
+
+    def capped():
+        many = {'profile': 'place-centric', 'gazetteer': {'@id': 'https://example.org/many/', 'title': 'Many places'}, 'spatialEntities': [
+            {'@id': f'https://example.org/many/p{i}', 'label': f'Place {i}', 'attestations': [{'geometries': [{'geojson': {'type': 'Point', 'coordinates': [23 + (i % 20) * 0.05, 37.5 + (i // 20) * 0.05]}}]}]} for i in range(230)]}
+        f = tmp / 'many.json'; f.write_text(json.dumps(many))
+        boot('many.json', f)
+        s = es(); said = page.inner_text('#chora-export-said')
+        return s['places'] == {'total': 230, 'shown': 200, 'capped': True} and 'first 200' in said and len(pv()['points']) == 200, {'places': s['places'], 'said': said, 'points': len(pv()['points'])}
+    attempt('Make an open map: of 230 places in view, the map is made with the first 200, and the panel says so', capped)
+    attempt('Make an open map: across the composition checks, nothing asked of another site, and no page error', lambda: (len(web()) > 20 and not foreign() and not errors, {'requests': len(web()), 'foreign': foreign(), 'errors': errors[:5]}))
     ctx.close()
 
 if __name__ == '__main__': main()

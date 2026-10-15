@@ -1,0 +1,62 @@
+{
+  "$schema": "https://w3id.org/plato/schemas/place-centric.schema.json",
+  "profile": "place-centric",
+  "gazetteer": {
+    "@id": "https://example.org/attica/",
+    "title": "Places of Attica (a test fixture)",
+    "description": "Five places of ancient Attica for the browser checks of making an open map (#37): names attested in Greek and Latin, a location known exactly, one approximately with a circle of 12 km, an area, a gulf. Constructed, not a source.",
+    "licence": "https://creativecommons.org/licenses/by/4.0/",
+    "status": "draft",
+    "uriSpace": "https://example.org/attica/"
+  },
+  "spatialEntities": [
+    {
+      "@id": "https://example.org/attica/place/athens",
+      "label": "Athens",
+      "attestations": [
+        { "sources": [{ "@id": "https://example.org/attica/source/pleiades", "title": "Pleiades", "licence": "https://creativecommons.org/licenses/by/3.0/" }],
+          "names": [{ "toponym": "Ἀθῆναι", "language": "grc", "script": "Grek" }, { "toponym": "Athenae", "language": "la", "script": "Latn" }],
+          "geometries": [{ "geojson": { "type": "Point", "coordinates": [23.7267, 37.9715] }, "spatialPrecision": ["exact"] }],
+          "identities": [{ "subject": "https://example.org/attica/place/athens", "object": "https://pleiades.stoa.org/places/579885", "identityType": "exactMatch" }] }
+      ]
+    },
+    {
+      "@id": "https://example.org/attica/place/eleusis",
+      "label": "Eleusis",
+      "attestations": [
+        { "sources": [{ "@id": "https://example.org/attica/source/pleiades", "title": "Pleiades", "licence": "https://creativecommons.org/licenses/by/3.0/" }],
+          "names": [{ "toponym": "Ἐλευσίς", "language": "grc", "script": "Grek" }, { "toponym": "Eleusis", "language": "la", "script": "Latn" }],
+          "geometries": [{ "geojson": { "type": "Point", "coordinates": [23.5417, 38.0389] }, "spatialPrecision": ["approximate"], "precisionKm": [12] }] }
+      ]
+    },
+    {
+      "@id": "https://example.org/attica/place/piraeus",
+      "label": "Piraeus",
+      "attestations": [
+        { "sources": [{ "@id": "https://example.org/attica/source/pleiades", "title": "Pleiades", "licence": "https://creativecommons.org/licenses/by/3.0/" }],
+          "names": [{ "toponym": "Πειραιεύς", "language": "grc", "script": "Grek" }],
+          "geometries": [{ "geojson": { "type": "Point", "coordinates": [23.6466, 37.9429] }, "spatialPrecision": ["exact"] }] }
+      ]
+    },
+    {
+      "@id": "https://example.org/attica/place/attica",
+      "label": "Attica",
+      "attestations": [
+        { "sources": [{ "@id": "https://example.org/attica/source/drawn", "title": "Drawn for this fixture" }],
+          "types": [{ "label": "region" }],
+          "names": [{ "toponym": "Ἀττική", "language": "grc", "script": "Grek" }, { "toponym": "Attica", "language": "la", "script": "Latn" }],
+          "geometries": [{ "geojson": { "type": "Polygon", "coordinates": [[[23.35, 37.65], [24.1, 37.65], [24.1, 38.35], [23.35, 38.35], [23.35, 37.65]]] }, "spatialPrecision": ["historical_approximate"] }] }
+      ]
+    },
+    {
+      "@id": "https://example.org/attica/place/saronic",
+      "label": "Saronic Gulf",
+      "attestations": [
+        { "sources": [{ "@id": "https://example.org/attica/source/drawn", "title": "Drawn for this fixture" }],
+          "types": [{ "label": "gulf" }],
+          "names": [{ "toponym": "Saronicus Sinus", "language": "la", "script": "Latn" }],
+          "geometries": [{ "geojson": { "type": "Point", "coordinates": [23.45, 37.7] }, "spatialPrecision": ["approximate"] }] }
+      ]
+    }
+  ]
+}
