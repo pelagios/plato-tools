@@ -106,7 +106,9 @@ export function createExport(root, preview, ctx) {
     return [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
   }
   function historicalDefaults(e) {
-    const year = Number(String(manifestNavDate(e.manifest) || '').slice(0, 4));
+    // The year its manifest dates it, or none (NaN, not 0: an undated map pre-selects nothing).
+    const date = String(manifestNavDate(e.manifest) || '');
+    const year = /^-?\d{1,4}/.test(date) ? Number(date.match(/^-?\d{1,4}/)[0]) : NaN;
     const statement = e.rights?.free === true ? null : suggestedStatement(year);
     return { key: e.key, opacity: e.opacity ?? 1, statement, over: 'basemap' };
   }

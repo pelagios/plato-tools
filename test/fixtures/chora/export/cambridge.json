@@ -1,0 +1,30 @@
+{
+  "$schema": "https://w3id.org/plato/schemas/place-centric.schema.json",
+  "profile": "place-centric",
+  "gazetteer": {
+    "@id": "https://example.org/cambridge/",
+    "title": "Two places under the synthetic grid (a test fixture)",
+    "description": "Two places inside the georeferenced grid over Cambridge (test/fixtures/chora-iiif/annotation.json), for the browser checks of a map made on a historical map (#37). Constructed, not a source.",
+    "licence": "https://creativecommons.org/licenses/by/4.0/",
+    "status": "draft",
+    "uriSpace": "https://example.org/cambridge/"
+  },
+  "spatialEntities": [
+    {
+      "@id": "https://example.org/cambridge/place/bridge",
+      "label": "Great Bridge",
+      "attestations": [
+        { "sources": [{ "@id": "https://example.org/cambridge/source/drawn", "title": "Drawn for this fixture" }],
+          "geometries": [{ "geojson": { "type": "Point", "coordinates": [0.1185, 52.2105] } }] }
+      ]
+    },
+    {
+      "@id": "https://example.org/cambridge/place/barnwell",
+      "label": "Barnwell",
+      "attestations": [
+        { "sources": [{ "@id": "https://example.org/cambridge/source/drawn", "title": "Drawn for this fixture" }],
+          "geometries": [{ "geojson": { "type": "Point", "coordinates": [0.1405, 52.2035] } }] }
+      ]
+    }
+  ]
+}

@@ -2929,6 +2929,7 @@ def main():
             open_map_basemap_checks(pw, url, tmp)
             open_map_compose_checks(pw, url, tmp)
             open_map_export_checks(pw, url, tmp)
+            open_map_historical_checks(pw, url, tmp)
     finally:
         stop(srv)
         stop_fixtures()
@@ -11448,5 +11449,134 @@ def open_map_export_checks(pw, url, tmp):
     attempt('Make an open map: with the shaded relief on, the file carries it, credits NASA SRTM and USGS GMTED2010, and the Commons page names their public-domain templates', relief_in_file)
     attempt('Make an open map: across the file checks, no page error, and only this site, CAWM\'s and DARE\'s asked', lambda: (len(web()) > 20 and not errors and set(foreign()) <= {'cawm.lib.uiowa.edu', 'dh.gu.se'} and 'cawm.lib.uiowa.edu' in foreign(), {'errors': errors[:5], 'foreign': foreign()}))
     ctx.close()
+
+# ---- Make an open map (#37): a georeferenced historical map as the background ---------------------------
+# The synthetic grid over Cambridge (test/fixtures/chora-iiif, served by the IIIF fixture server, its census the
+# account of what reached it), shown in Chora, chosen as the map's background: its rights stated (its manifest
+# names none), embedded with its own affine transformation and clipped by its mask where its warp is affine
+# (polynomial order 1), drawn by an offscreen map where it is not (order 2), and alone. The places are
+# test/fixtures/chora/export/cambridge.json's two, under the grid. The basemap is the test style of the file checks.
+CAMBRIDGE = ROOT / 'test/fixtures/chora/export/cambridge.json'
+
+def open_map_historical_checks(pw, url, tmp):
+    fx = start_fixtures(tmp); A, B = fx['A'], fx['B']
+    base = url.rstrip('/') + '/'; here = urlparse(base).netloc
+    ctx = pw.chromium.launch_persistent_context(str(tmp / 'open-map-historical'), headless=True, args=GL, viewport={'width': 1500, 'height': 1000}, reduced_motion='reduce', accept_downloads=True)
+    ctx.add_init_script('window.__plato_forceDownload = true;')
+    ctx.set_default_timeout(T(30) * 1000)
+    if urlparse(base).hostname not in ('127.0.0.1', 'localhost'):
+        ctx.grant_permissions(['local-network-access'], origin=f'{urlparse(base).scheme}://{urlparse(base).netloc}')
+    errors = []
+    page = ctx.pages[0] if ctx.pages else ctx.new_page()
+    page.on('pageerror', lambda e: errors.append(str(e)[:200]))
+    STYLE = test_style()
+    page.route('**/basemap/style.json', lambda route: route.fulfill(status=200, content_type='application/json', body=STYLE))
+    nav = {'date': None}
+    def manifest(route):
+        d = json.loads((FIX / 'manifest-rumsey-shaped.json').read_text().replace('https://iiif.example.org', A))
+        if nav['date']: d['navDate'] = nav['date']
+        route.fulfill(status=200, content_type='application/json', headers={'Access-Control-Allow-Origin': '*'}, body=json.dumps(d))
+    ctx.route(A + '/manifests/grid/manifest', manifest)
+    es = lambda: page.evaluate(EXPORT_STATE) or {}
+    def census(since=0): return [json.loads(l) for l in fx['log'].read_text().splitlines()[since:] if l.strip()]
+    def made():
+        until(page, '() => window.__chora.export && ["ready", "error"].includes(window.__chora.export.phase) && !!document.querySelector("#chora-export-preview-map svg")', 120)
+    def recomposed(change):
+        page.evaluate('() => { const s = document.querySelector("#chora-export-preview-map svg"); if (s) s.dataset.old = "1"; }')
+        change()
+        until(page, '() => { const s = document.querySelector("#chora-export-preview-map svg"); return !!s && !s.dataset.old && ["ready", "error"].includes(window.__chora.export.phase); }', 120)
+    def get(fmt):
+        with page.expect_download(timeout=T(120) * 1000) as d: page.click(f'#chora-export-{fmt}')
+        p = tmp / f'hist-{time.time():.3f}-{d.value.suggested_filename}'; d.value.save_as(p); return p
+    def boot(annotation='annotation.json'):
+        page.goto(NOTOOLS if PROVE else base)
+        page.evaluate(f"""() => {{ localStorage.setItem('plato-tools.permissions', JSON.stringify({{ version: 1, grants: {{ 'iiif:{A}': {{ state: 'allowed', at: '2026-10-15T10:00:00Z' }} }} }}));
+          localStorage.setItem('chora-contributor', JSON.stringify({{ name: 'Ada Mapmaker' }})); localStorage.removeItem('chora-relief'); localStorage.removeItem('chora-basemap'); }}""")
+        # Each check with no historical map kept from the one before (a map kept keeps the manifest it was first read with).
+        page.evaluate('''async () => { sessionStorage.removeItem('chora-overlays-shown');
+          try { await (await navigator.storage.getDirectory()).removeEntry('chora-overlays', { recursive: true }); } catch {} }''')
+        chora_boot(page, base, [fixture(CAMBRIDGE, f'cambridge-{annotation}', tmp)])
+        until(page, '() => window.__chora.canary === "enforced" && window.__chora.phase === "loaded"', 30)
+        a = json.loads((FIX / annotation).read_text().replace('https://iiif.example.org', A).replace('https://elsewhere.example.org', B))
+        page.fill('#chora-map-input', json.dumps(a)); page.click('#chora-map-form button[type=submit]')
+        until(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id && o.firstTile)', 60, a['id'])
+        key = next(o['key'] for o in cstate(page)['overlays'] if o['annotationId'] == a['id'])
+        page.click(f'#chora-overlay-list li[data-overlay="{key}"] button[data-fit]'); page.evaluate(SETTLE)
+        page.click('#chora-export-open'); made()
+        return a
+    def px_of(ll, s, im):
+        x, y = page.evaluate('(ll) => { const p = window.__chora_map.project(ll); return [p.x, p.y]; }', ll)
+        k = s['size'][0] / page.evaluate('() => window.__chora_map.getCanvas().clientWidth')
+        return im.convert('RGB').getpixel((round(x * k), round(y * k)))
+
+    def rights_stated():
+        nav['date'] = None
+        a = boot()
+        s = es(); words = page.inner_text('#chora-export-licence'); hist = page.inner_text('.export-hist')
+        disabled = page.evaluate('() => document.getElementById("chora-export-svg").disabled')
+        chosen = page.input_value('#chora-export-statement')
+        recomposed(lambda: page.select_option('#chora-export-statement', 'PD-old-100'))
+        s2 = es(); page_text = page.input_value('#chora-export-page')
+        return (not s['licence']['ok'] and any('not clear' in r['why'] and 'say what they are' in r['why'] for r in s['licence']['refused']) and disabled and chosen == ''
+                and 'names no licence' in hist and 'A Synthetic Historical Map Collection' in hist
+                and s2['licence']['ok'] and '{{PD-old-100}}' in s2['licence']['templates'] and 'are stated by Ada Mapmaker' in page_text and '|warp status = warped' in page_text
+                and f"|warp url = {a['id']}" in page_text), {'before': s['licence'], 'words': words, 'hist': hist[:200], 'disabled': disabled, 'chosen': chosen, 'after': s2.get('licence'), 'page': page_text[-400:]}
+    attempt('Make an open map: a historical map whose manifest names no licence is shown with its own words, and refused until its rights are stated; stated (out of copyright), the map may go, the statement recorded as the user\'s, the warp named', rights_stated)
+
+    def dated_preselects():
+        nav['date'] = '1746-01-01T00:00:00Z'
+        boot()
+        chosen = page.input_value('#chora-export-statement'); s = es()
+        return chosen == 'PD-Art|PD-old-100' and s['licence']['ok'] and '{{PD-Art|PD-old-100}}' in s['licence']['templates'], {'chosen': chosen, 'licence': s.get('licence')}
+    attempt('Make an open map: a historical map its manifest dates 1746 has "a faithful photograph of a map in the public domain" chosen for it, which the user may change', dated_preselects)
+
+    # The middle of a cell of the grid (image pixel 96, 96: its lines are every 64 pixels), where the paper is blank.
+    PAPER = [0.10417, 52.2175]
+    def affine_embed():
+        nav['date'] = '1746-01-01T00:00:00Z'
+        since = len(census())
+        boot()
+        s = es()
+        svg = get('svg').read_text(); im, _ = png_read(get('png'))
+        asked = census(since)
+        images = [r for r in asked if re.search(r'/iiif/grid/full/\d+,/0/default\.jpg', r.get('path', ''))]
+        # Inside the mask, the grid's paper (near white, not the test style's green); outside the image, the land's green.
+        # Outside: the view's top left corner, beyond the map's mask (the view is fitted to the map with a margin).
+        corner = page.evaluate('() => { const p = window.__chora_map.unproject([12, 12]); return [p.lng, p.lat]; }')
+        inside, outside = px_of(PAPER, s, im), px_of(corner, s, im)
+        page_text = page.input_value('#chora-export-page')
+        m = re.search(r'<clipPath id="historical-mask"[^>]*>\s*<path transform="matrix\(([^)]*)\)" d="M([\d. L]+)Z"', svg)
+        return (s['historical']['how'] == 'affine' and s['historical']['kind'] == 'polynomial1' and m and len(m.group(1).split()) == 6
+                and re.search(r'<image transform="matrix\([^)]*\)" x="0" y="0" width="512" height="512"', svg)
+                and images and all(f"127.0.0.1:{r['port']}" == urlparse(A).netloc for r in asked)
+                and min(inside) > 150 and inside[1] - inside[0] < 60 and outside[1] > 200 and outside[0] < 60
+                and 'misses its control points by' in page_text and 'Historical map: “A synthetic grid over Cambridge (test fixture)”' in svg), {
+            'how': s.get('historical'), 'clip': m.group(0)[:160] if m else None, 'image asked': [r.get('path') for r in images][:3], 'pixels': {'inside': inside, 'outside': outside}}
+    attempt('Make an open map: a georeference of polynomial order 1 is embedded as it is, its image (asked of its own server alone) placed by its matrix and clipped by its mask; in the PNG the grid inside, the land outside; its residuals in the Commons description', affine_embed)
+
+    def alone():
+        recomposed(lambda: page.select_option('#chora-export-hist-over', 'alone'))
+        s = es(); svg = get('svg').read_text()
+        return ('ne-land' not in svg and 'historical-mask' in svg and 'Coastline: as “A synthetic grid over Cambridge (test fixture)” draws it' in svg
+                and not any(t == '{{Natural Earth}}' for t in s['licence']['templates'])), {'templates': s['licence'].get('templates'), 'land drawn': 'ne-land' in svg}
+    attempt('Make an open map: the historical map alone: no Natural Earth in the file or its licence, the coastline named as the historical map\'s', alone)
+
+    def rendered():
+        nav['date'] = '1746-01-01T00:00:00Z'
+        a = boot('annotation-order2.json')
+        # The maps shown are kept between loads: the one of order 2 chosen by name, not the first.
+        key = next(o['key'] for o in cstate(page)['overlays'] if o['annotationId'] == a['id'])
+        if page.input_value('#chora-export-hist') != key: recomposed(lambda: page.select_option('#chora-export-hist', key))
+        s = es(); svg = get('svg').read_text(); im, _ = png_read(get('png'))
+        note = page.inner_text('#chora-export-raster')
+        inside = px_of(PAPER, s, im)
+        return (s['historical']['how'] == 'rendered' and s['historical']['kind'] == 'polynomial2' and 'historical-mask' not in svg
+                and re.search(r'<g id="historical-map"[^>]*>\s*<image x="0" y="0" width="\d+" height="\d+"', svg) and 'not affine' in note
+                and min(inside) > 150), {'how': s.get('historical'), 'note': note, 'inside': inside}
+    attempt('Make an open map: a georeference of polynomial order 2 (not affine) is drawn by an offscreen map and embedded as a picture of the map\'s size, the panel saying why; the grid is in the PNG where it lies', rendered)
+    # The absence beside a presence: the checks did reach the map's server (its census), and no page error came of them.
+    attempt('Make an open map: across the historical-map checks, the map\'s own server was asked, and no page error', lambda: (len(census()) > 5 and not errors, {'asked': len(census()), 'errors': errors[:5]}))
+    ctx.close()
+    stop_fixtures()
 
 if __name__ == '__main__': main()
