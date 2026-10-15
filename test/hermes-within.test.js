@@ -417,7 +417,11 @@ test('with a name column already, a split\'s first part is one of the place\'s o
 // ---- the pasted list ------------------------------------------------------------------------------
 test('a pasted list becomes a CSV of two columns, "id" (made from the name, unique) and "name", that the tables reader reads as ids and names', async () => {
   const text = '  St Mary; Kent \r\n\nNewport, Isle of Wight\nThe "Old" Mill\tbarn\nSt Mary; Kent\nἈθῆναι\n';
-  assert.equal(pastedListCsv(text), 'id,name\n"st-mary-kent","St Mary; Kent"\n"newport-isle-of-wight","Newport, Isle of Wight"\n"the-old-mill-barn","The ""Old"" Mill\tbarn"\n"st-mary-kent-2","St Mary; Kent"\n"place","Ἀθῆναι"\n');
+  assert.equal(pastedListCsv(text), 'id,name\n"st-mary-kent","St Mary; Kent"\n"newport-isle-of-wight","Newport, Isle of Wight"\n"the-old-mill-barn","The ""Old"" Mill\tbarn"\n"st-mary-kent-2","St Mary; Kent"\n"athenai","Ἀθῆναι"\n');
+  // Greek (polytonic, its diacritics stripped) and Cyrillic in Latin letters for the id alone; Latin's diacritics stripped;
+  // the uniqueness numbers kept; nothing an id can be made of, "place". The names stay as written.
+  assert.equal(pastedListCsv('Ἀθῆναι\nἈθῆναι\nΘῆβαι\nМосква\nКиїв\nZürich\nŁódź\n---'),
+    'id,name\n"athenai","Ἀθῆναι"\n"athenai-2","Ἀθῆναι"\n"thebai","Θῆβαι"\n"moskva","Москва"\n"kiiv","Київ"\n"zurich","Zürich"\n"lodz","Łódź"\n"place","---"\n');
   assert.equal(pastedListCsv(' \n\n'), null);
   const f = pastedListFile(text);
   assert.equal(f.name, PASTED_FILE_NAME);
