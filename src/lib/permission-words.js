@@ -9,7 +9,7 @@ export const CATEGORY_WORDS = {
   basemap: { heading: 'Basemaps', learns: 'A basemap’s provider sees which part of the world you look at, and your address on the internet, as any website does.' },
   iiif: { heading: 'Historical maps', learns: 'A historical map’s server sees which map you view, and which parts of it; so does the site its description (its manifest) or its georeference is on. Tracing from a map asks its server for the part you click, in more detail.' },
   allmaps: { heading: 'Georeferences', learns: 'Allmaps learns which map a georeference was looked for. Opening a map in the Allmaps Editor sends Allmaps the map’s address.' },
-  gazetteer: { heading: 'Gazetteers', learns: 'A gazetteer sees the names you look up in it, and their language where one is sent with them.' },
+  gazetteer: { heading: 'Gazetteers', learns: 'A gazetteer sees the names you look up in it, and their language where one is sent with them. Wikidata also sees the coordinates of each place searched before an item is made for it (it is asked for items near that point), and, when your new items are read back, the Wikidata user name you type.' },
   linked: { heading: 'Linked sites', learns: 'A site your data links to sees which of its pages you open.' },
   collaborate: { heading: 'Projects kept in WHG', learns: 'The World Historical Gazetteer keeps each project you save to it whole, as a project file holds it: your workflow, your answers, the files in it, the review with its decisions and the reviewer’s name. Anyone you give a share link to can read it too. It is asked only when you save, open, delete or share a project there, or open a share link.' },
 };
@@ -25,6 +25,7 @@ export const SERVICE_NAMES = {
   'basemap:carto': 'CARTO',
   'allmaps:allmaps': 'Allmaps',
   'gazetteer:whg': 'World Historical Gazetteer',
+  'gazetteer:wikidata': 'Wikidata',
   'collaborate:whg': 'World Historical Gazetteer Workbench',
 };
 

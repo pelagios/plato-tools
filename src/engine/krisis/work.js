@@ -56,6 +56,10 @@
 // and `batch` ('b1', …) when the bulk accept made it; a lookup query's `variants: [{ text, how }]`
 // (aligned with `sent`) and a lookup's `parameters.variants`; and `batches: [{ id, at, identityType,
 // threshold, accepted, leftOut: { far, ccodes, total }, undone? }]`.
+// Any version may also carry, OPTIONAL (wikidata.js, Issue #36): `mint`, the Wikidata items made for the places
+// no gazetteer knows: the consent statement, the options, each item as edited, the batches written and the Q-ids
+// recorded (checkMint); a lookup of Wikidata's API whose `parameters.minted` is true holds those Q-ids as
+// candidates decided 'match'.
 // Any version may also carry, OPTIONAL (withdraw.js): `draft_answers: 'withdraw' | 'replace'` (what a
 // Finish does with an earlier answer a changed decision contradicts, in a dataset not yet published;
 // withdraw when absent) and `finished: [{ at, output, sha256, gazetteer?, reviewer: { name, orcid? } }]`
@@ -67,6 +71,7 @@ import { fileSha256 } from './digest.js';
 import { qualifierIds } from './qualifiers.js';
 import { isWhg, WHG_ENDPOINT } from '../gazetteer/index.js';
 import { kindFit, candidateTypes } from './kinds.js';
+import { checkMint } from './mint-section.js';
 
 /**
  * A reconciliation service's address as the work file records it: any of WHG's (www, a trailing slash)
@@ -222,6 +227,7 @@ export function readWork(text) {
   if (w.cursor !== undefined && !(Number.isInteger(w.cursor) && w.cursor >= 0)) bad('its place in the review (cursor) is not a count.');
   checkLookups(w, bad);
   checkMethodos(w, bad);
+  checkMint(w, bad);   // Krisis: Wikidata items (wikidata.js), optional in any version
   if (w.krisis < 3 && w.regions !== undefined) bad(REGION_WORDS.work.noRegionsBefore(w.krisis));
   // WHG by its one address (canonicalEndpoint), however a file wrote it; nothing given is changed in place.
   const lookups = (w.lookups ?? []).map((l) => (canonicalEndpoint(l.service.endpoint) === l.service.endpoint ? l : { ...l, service: { ...l.service, endpoint: canonicalEndpoint(l.service.endpoint) } }));

@@ -9,8 +9,8 @@
 //   which part of the world you look at;
 // - iiif: a historical map's server (a site), which sees which map you view, and where;
 // - allmaps: Allmaps' annotation service (a REGISTRY id), which learns which map was looked for;
-// - gazetteer: a gazetteer's service (the REGISTRY's whg, or another service's site), which sees
-//   the names you look up;
+// - gazetteer: a gazetteer's service (the REGISTRY's whg or wikidata, or another service's site), which
+//   sees the names you look up (Wikidata, the coordinates too: it is asked for items near a place's point);
 // - linked: a site a dataset links to (a site), which sees which of its pages you open;
 // - collaborate: a service that keeps the projects you save in it (the REGISTRY's whg: WHG's Workbench),
 //   which holds everything in them, and whose share links let others read them.
@@ -41,7 +41,8 @@ export const REGISTRY = {
   },
   iiif: {},
   allmaps: { allmaps: { origins: ['https://annotations.allmaps.org'] } },
-  gazetteer: { whg: { origins: ['https://whgazetteer.org', 'https://www.whgazetteer.org'] } },
+  // Wikidata's API (src/engine/krisis/wikidata-search.js): the search before an item is made, and the reads that bring its Q-id back.
+  gazetteer: { whg: { origins: ['https://whgazetteer.org', 'https://www.whgazetteer.org'] }, wikidata: { origins: ['https://www.wikidata.org'] } },
   linked: {},
   // WHG's Workbench, under https://whgazetteer.org/reconciliation/ (src/engine/workbench.js).
   collaborate: { whg: { origins: ['https://whgazetteer.org'] } },

@@ -83,12 +83,17 @@ export const WHG_SERVICE = { endpoint: WHG_ENDPOINT, title: 'World Historical Ga
 export { WHG_PLACE_TYPE };
 /**
  * The permission a lookup of a service is made under (src/lib/permissions.js, category 'gazetteer'):
- * 'whg' for WHG, else the service's site (its origin, e.g. https://example.org), or null for an address
- * that has none. Pure: the page asks the permissions module with it.
+ * 'whg' for WHG, 'wikidata' for Wikidata's API (both of the REGISTRY), else the service's site (its origin,
+ * e.g. https://example.org), or null for an address that has none. Pure: the page asks the permissions module with it.
  */
 export function gazetteerPermission(endpoint) {
   if (isWhg(endpoint)) return 'whg';
-  try { const u = new URL(String(endpoint)); return u.protocol === 'https:' || u.protocol === 'http:' ? u.origin : null; } catch { return null; }
+  try {
+    const u = new URL(String(endpoint));
+    // Wikidata's API (wikidata.js), known by name in the REGISTRY: one permission, whichever of its addresses is asked.
+    if (/^(www\.)?wikidata\.org$/.test(u.hostname) && u.protocol === 'https:') return 'wikidata';
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.origin : null;
+  } catch { return null; }
 }
 /**
  * A fetch for createLookup that makes every request through the permissions module: `ask` is its

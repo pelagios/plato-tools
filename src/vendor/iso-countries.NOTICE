@@ -1,0 +1,14 @@
+src/vendor/iso-countries.json: ISO 3166-1 alpha-2 codes and their Wikidata items
+
+src/vendor/iso-countries.json is derived from Wikidata (https://www.wikidata.org/), read through the
+Wikidata Query Service (https://query.wikidata.org/) on 2026-10-15 with the query
+
+  SELECT ?code ?item ?itemLabel WHERE { ?item wdt:P297 ?code . FILTER NOT EXISTS { ?item wdt:P576 ?d }
+    SERVICE wikibase:label { bd:serviceParam wikibase:language "en". } } ORDER BY ?code
+
+by scripts/make-iso-countries.mjs, which keeps, for each code, the item that carries it as its ISO
+3166-1 alpha-2 code (P297) and the item's English label, and nothing else. A code carried by two items
+keeps the item with the lower number. The table is generated again only by that script.
+
+Wikidata's structured data is released under the Creative Commons CC0 1.0 Universal public domain
+dedication (https://creativecommons.org/publicdomain/zero/1.0/; https://www.wikidata.org/wiki/Wikidata:Licensing).
