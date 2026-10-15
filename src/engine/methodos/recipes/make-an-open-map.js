@@ -30,7 +30,7 @@ export default {
   // What the map cannot carry, said in words before the workflow is followed and while it is.
   cannot: [
     'The map is made of the places in view in Chora, at most 200 at a time: zoom in to make it of fewer. A place with no location is not drawn: recording the decisions identifies each place with its match, but gives it no location, so each is located in Chora (its location adopted from its match, or drawn) before the map is made.',
-    "A background whose licence is not known (a basemap you pasted), CARTO's basemaps, and anything under a licence for no commercial use or no adaptations cannot go to Wikimedia Commons: Chora names which, and why, and does not offer the map until it is put right. Share-alike (the Digital Atlas of the Roman Empire, OpenStreetMap) makes the map CC BY-SA.",
+    "A background whose licence is not known (a basemap you pasted), CARTO's basemaps, and anything under a licence for no commercial use or no adaptations cannot go to Wikimedia Commons: Chora names which, and why; the map still downloads, for your own use, saying why it is not under an open licence, with no Commons description and no upload link until it is put right. Share-alike (the Digital Atlas of the Roman Empire, OpenStreetMap) makes the map CC BY-SA.",
     'Labels are placed so as not to overlap one another, a place or the scale and the attribution; a label that finds no room is said, for you to drag where it should go.',
   ],
   asks: {

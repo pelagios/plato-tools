@@ -575,9 +575,15 @@ who knows no GIS, under a licence Wikimedia Commons accepts. Stephen's decisions
 2. *Licences combined* from what the map is made of (`agora/licence.js`): share-alike raises it to CC BY-SA
    (DARE, CC BY-SA 3.0; OpenStreetMap, CC BY-SA and ODbL), said why; NC, ND, a licence not known (a pasted
    background among them) and CARTO are refused; CAWM CC BY 4.0; Natural Earth public domain; the user's own
-   drawing CC BY 4.0 unless they choose another.
+   drawing CC BY 4.0 unless they choose another. A refused map still downloads, for the user's own use (15
+   October): the file says why in words and claims no licence, with no Commons description and no upload link.
+   The places' sources that ask for credit are credited by their own gazetteer (Pleiades, through WHG), and
+   `{{self|…}}` is written only for a map wholly the user's own or in the public domain.
 3. *A historical map with no clear rights:* stated by the user from a short list, the manifest's own words beside
-   it, a date in the manifest pre-selecting; recorded as their statement; refused only while nothing is stated.
+   it, a date in the manifest pre-selecting `{{PD-Art|PD-old-assumed}}` where its rights say nothing either way
+   (never over a holder's licence for no commercial use: there the user chooses, told that this overrides it);
+   rightsstatements.org's NoC-US taken as `{{PD-US}}`, its NKC left to the user; recorded as their statement;
+   refused only while nothing is stated.
 4. *SVG, a hybrid:* true vectors on Natural Earth; a picture background embedded, the panel saying the SVG is
    then mostly a picture. *The PNG* is drawn from the same SVG, the font inlined.
 5. *Projections:* Web Mercator and equirectangular (a Wikipedia location map's base).
@@ -593,11 +599,13 @@ who knows no GIS, under a licence Wikimedia Commons accepts. Stephen's decisions
    deterministic placement; dragged, hidden, re-classed and sized, one short note; no arrows.
 10. *The author:* Chora's contributor, name and ORCID iD; never an email address.
 
-**Found while building, and settled here (to confirm):** recording the decisions gives a place its identity, not
+**Found while building, and settled here:** recording the decisions gives a place its identity, not
 its location, so a list of names reaches the map with nothing to draw unless each place is located in Chora (its
 match's location adopted). The step that locates them is therefore every time, not a question. And a pasted list
 had no ids, so its places had no addresses for the lookup to record its matches against (Map your data's pasted
-list had the same gap): its ids are now made from its names, under the base address, as a traced place's are.
+list had the same gap): its ids are now made from its names, under the base address, as a traced place's are,
+Greek and Cyrillic put into Latin letters for the id alone (15 October: Ἀθῆναι gives `athenai`). Confirmed by
+Stephen on 15 October, with the locate step kept unconditional.
 
 ## 7. Persistence
 

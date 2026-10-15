@@ -28,6 +28,12 @@ const param = (s) => String(s ?? '').replace(/\|/g, '{{!}}').replace(/\}\}/g, '}
 /** Words in a language, as Commons writes them: {{en|1=…}}. */
 const inLang = (lang, s) => (s ? `{{${String(lang || 'en').toLowerCase().split('-')[0]}|1=${param(s)}}}` : '');
 const deg = (v, pos, neg) => `${Math.abs(v).toFixed(2)}°${v >= 0 ? pos : neg}`;
+/**
+ * The licence template a map is given on Commons: {{self|…}} only where the map is wholly the uploader's own or
+ * in the public domain (composeLicence's `self`); else the licence's plain template, what it is made of credited
+ * in the source.
+ */
+export const licenceTemplate = (L) => (L.self ? `self|${L.licence.template}` : L.licence.template);
 
 /**
  * The file page. `map`: { title, description, lang, legend, author: { name, orcid }, date (YYYY-MM-DD, the
@@ -40,9 +46,11 @@ const deg = (v, pos, neg) => `${Math.abs(v).toFixed(2)}°${v >= 0 ? pos : neg}`;
  */
 export function filePage(map, { forUpload = false } = {}) {
   const L = map.licence;
-  const desc = [map.description, ...(map.residuals || [])].filter(Boolean).join(' ');
-  const permission = [L.words, ...(L.statements || [])].filter(Boolean).join(' ');
   const [w, s, e, n] = map.bounds;
+  // {{Map}}'s latitude and longitude are the map's centre, in decimal degrees; its bounds are said in the description.
+  const bounds = `The map covers ${deg(s, 'N', 'S')} to ${deg(n, 'N', 'S')} and ${deg(w, 'E', 'W')} to ${deg(e, 'E', 'W')}.`;
+  const desc = [map.description, bounds, ...(map.residuals || [])].filter(Boolean).join(' ');
+  const permission = [L.words, ...(L.statements || [])].filter(Boolean).join(' ');
   const rows = [
     ['title', inLang(map.lang, map.title)],
     ['description', inLang(map.lang, desc)],
@@ -52,16 +60,16 @@ export function filePage(map, { forUpload = false } = {}) {
     ['map date', map.mapDate || ''],
     ['projection', PROJECTION_NAMES[map.projection] || map.projection],
     ['scale', map.scaleWords || ''],
-    ['latitude', `${deg(s, 'N', 'S')} to ${deg(n, 'N', 'S')}`],
-    ['longitude', `${deg(w, 'E', 'W')} to ${deg(e, 'E', 'W')}`],
-    ['source', (map.sources || []).map(param).join('; ')],
+    ['latitude', ((s + n) / 2).toFixed(4)],
+    ['longitude', ((w + e) / 2).toFixed(4)],
+    ['source', [...(map.sources || []), ...(L.placeCredits?.length ? [`The places' sources: ${L.placeCredits.join('; ')}`] : [])].map(param).join('; ')],
     ['warp status', map.warp ? 'warped' : ''],
     ['warp url', map.warp?.url || ''],
     ['permission', param(permission)],
     ['other versions', (map.otherVersions || []).map((f) => `[[:File:${f}]]`).join(' ')],
   ];
   const lines = ['{{Map', ...rows.map(([k, v]) => ` |${k} =${v ? ` ${v}` : ''}`), '}}'];
-  const licensing = [...(forUpload ? [] : [`{{self|${L.licence.template}}}`]), ...L.templates];
+  const licensing = [...(forUpload ? [] : [`{{${licenceTemplate(L)}}}`]), ...L.templates];
   if (map.format === 'svg' && map.rasterInSvg) licensing.push('{{SVG with raster elements}}');
   return [...lines, '', '=={{int:license-header}}==', ...licensing].join('\n') + '\n';
 }
@@ -74,7 +82,7 @@ export function filePage(map, { forUpload = false } = {}) {
  */
 export function uploadUrl(map, fileName) {
   if (!map.licence?.ok) return null;
-  const q = new URLSearchParams({ wpDestFile: fileName, wpUploadDescription: filePage(map, { forUpload: true }), wpLicense: `self|${map.licence.licence.template}` });
+  const q = new URLSearchParams({ wpDestFile: fileName, wpUploadDescription: filePage(map, { forUpload: true }), wpLicense: licenceTemplate(map.licence) });
   const url = `${UPLOAD_PAGE}?${q.toString().replace(/\+/g, '%20')}`;
   return url.length > MAX_LINK ? null : url;
 }

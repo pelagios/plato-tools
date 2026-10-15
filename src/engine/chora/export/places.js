@@ -58,8 +58,13 @@ const GAZETTEERS = [
   ['https://pleiades.stoa.org/', 'Pleiades'], ['https://sws.geonames.org/', 'GeoNames'], ['https://www.geonames.org/', 'GeoNames'],
   ['http://www.wikidata.org/', 'Wikidata'], ['https://www.wikidata.org/', 'Wikidata'], ['http://vocab.getty.edu/tgn/', 'Getty TGN'],
 ];
-/** The gazetteer (or site) a record's address is of, in words. */
+// WHG's records are each of an upstream gazetteer, named in their address's namespace (place:<ns>:<id>): the one
+// credited and named, as the licence its record carries is that gazetteer's (adopt.js, upstreamLicence).
+const NAMESPACES = { pl: 'Pleiades', gn: 'GeoNames', wd: 'Wikidata', tgn: 'Getty TGN', osm: 'OpenStreetMap', loc: 'Library of Congress', ne: 'Natural Earth', dplace: 'D-PLACE' };
+/** The gazetteer (or site) a record's address is of, in words: a WHG record's upstream gazetteer where its namespace is known. */
 export function gazetteerOf(address) {
+  const ns = /(?:^|[/:])place:([a-z]+):/.exec(String(address));
+  if (ns && NAMESPACES[ns[1]]) return NAMESPACES[ns[1]];
   const g = GAZETTEERS.find(([p]) => String(address).startsWith(p));
   if (g) return g[1];
   try { return new URL(address).hostname.replace(/^www\./, ''); } catch { return null; }

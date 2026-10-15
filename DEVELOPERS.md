@@ -691,7 +691,9 @@ readers link to those headings, so keep them.
   **The pasted list**: `<details id="paste">` under the drop zone (`PASTE_WORDS`): the lines that are
   not blank, trimmed, become `pastedListCsv(text)`, a CSV headed `id` and `name` with every cell quoted (so a
   `;`, `,` or tab is never taken for the separator), each id made from its name (`seed.js` `slugOf`, as a traced
-  place's is; unique by a number after it; `place` for a name with no Latin letter or digit: 15 October 2026, so
+  place's is; unique by a number after it; Greek, polytonic included, and Cyrillic put into Latin letters first,
+  diacritics stripped, for the id alone, `latinForId`: Ἀθῆναι gives `athenai`, Москва `moskva`, Zürich `zurich`,
+  the name kept as written; `place` for a name with nothing an id can be made of: 14 and 15 October 2026, so
   that a pasted list's places have addresses under the base address, without which the lookup cannot match them;
   a table of the user's own with no id column still gives none, decision D2), handed to `choose()` as `pasted-list.csv`
   (`pastedListFile`, `src/engine/hermes/pasted.js`), through the usual detection and matching. The
@@ -2528,25 +2530,36 @@ part is `export-ui.js`, `export-raster.js` (pictures), `export-fonts.js` (the fo
   embedded with `transform="matrix(…)"` from three of its corners placed by `georef.toWorld` and projected, clipped
   by its mask in the same matrix (`compose.js`). Any other warp, or equirectangular, is drawn by an offscreen map
   with the map's own layer manager (`historicalRendered`) and embedded as a picture. Its rights (`rights.js`
-  `rightsOf`): free to reuse, or stated by the user from `licence.js` `STATEMENTS` (`{{PD-old-100}}`,
-  `{{PD-Art|PD-old-100}}`, or the licence its manifest gives), the manifest's own words shown beside; a date in the
-  manifest more than 120 years ago pre-selects `{{PD-Art|PD-old-100}}` (`suggestedStatement`); refused while
-  nothing is stated. The statement is recorded as the user's, in the Commons page. The georeference's residuals
+  `rightsOf`): free to reuse (rightsstatements.org's NoC-US as `{{PD-US}}`), or stated by the user from
+  `licence.js` `STATEMENTS` (`{{PD-old-100}}`, `{{PD-Art|PD-old-100}}`, `{{PD-Art|PD-old-assumed}}`, or the licence
+  its manifest gives; `needsStatement`: NKC, "no known copyright", is not a statement that it is in the public
+  domain, so it is the user's), the manifest's own words shown beside; the manifest's `navDate` more than 120 years
+  ago pre-selects `{{PD-Art|PD-old-assumed}}` (`suggestedStatement`), only where its rights say nothing either way:
+  a map its holder licenses for no commercial use is never pre-selected, stays refused, saying so, until the user
+  chooses, and the panel says that the choice states the scan is a faithful reproduction of a public-domain map,
+  which overrides the licence its holder states (`OVERRIDE_WORDS`); refused while nothing is stated. The statement is recorded as the user's, in the Commons page. The georeference's residuals
   (`controlPointMisfitKm`) go in the description, not on the map; its address is `{{Map}}`'s warp url.
 - **The licence** (`licence.js` `composeLicence`), worked out from what the map is made of with
   `agora/licence.js` (`licenceTerms`, `licenceReasons`, `attestationLicences`): the user's own drawing and labels
   CC BY 4.0 unless they choose CC BY-SA 4.0 or CC0; share-alike anywhere (DARE's CC BY-SA 3.0, OpenStreetMap's CC
   BY-SA 2.0, a source's) raises the map to CC BY-SA 4.0, credit asked raises CC0 to CC BY 4.0, each said why;
   ODbL data (OpenStreetMap's, through OpenFreeMap or a WHG record) is a Produced Work, `{{ODbL OpenStreetMap}}`
-  beside, never a raise. Refused, each named with why, and the downloads and the upload link withheld: a licence
-  not known (a pasted basemap's, a source's with none or another), a rights statement, NC, ND, CARTO's terms, and
-  a historical map with no rights stated.
+  beside, never a raise. Refused, each named with why: a licence not known (a pasted basemap's, a source's with
+  none or another), a rights statement, NC, ND, CARTO's terms, and a historical map with no rights stated. **A
+  refused map still downloads** (Stephen, 15 October 2026), for the user's own use: its attribution, and the PNG's
+  Copyright, say in words why it is not under an open licence ("Not under an open licence: …"), and it claims none
+  (no `cc:license`); there is no Commons description and no upload link. The places' sources that ask for credit
+  are credited by their own gazetteer (`placeCredits`: "Pleiades (CC BY 3.0), through the World Historical
+  Gazetteer", from the `place:<ns>:` of a WHG address, `places.js` `gazetteerOf`). `self` is true only when every
+  part is in the public domain or CC0, or the user's own; otherwise the licence is the plain template.
 - **The furniture** (`furniture.js`): a scale bar always, "at latitude N" (the middle of the map, the standard
   parallel for equirectangular), the variation from top to bottom said where it is over a tenth; a north arrow,
   a locator inset of Natural Earth's land with the map's extent, a title, the key, each if wanted; the
   attribution on a pale panel: the map's author and licence, the background's credit, the relief's, the
-  historical map's, the gazetteers the places were identified with (`recordSites`, named: WHG's w3id addresses
-  as "World Historical Gazetteer"), and the coastline's source ("Modern coastline: Natural Earth, 50m (public
+  historical map's, the gazetteers the places were identified with (`recordSites`, named: a WHG w3id address by
+  the gazetteer its record comes from, `place:pl:` Pleiades, `gn` GeoNames, `wd` Wikidata, `tgn` Getty TGN, `osm`
+  OpenStreetMap, else "World Historical Gazetteer"), the places' sources that ask for credit ("The places'
+  sources: …"), and the coastline's source ("Modern coastline: Natural Earth, 50m (public
   domain)", or "Coastline: as <background> draws it").
 - **The SVG** (`svg.js`, `compose.js`): deterministic (the same settings, the same bytes: a golden file,
   `test/fixtures/chora/export/golden.svg`), its groups Inkscape's layers, text as `<text>` in `FONT_STACK`
@@ -2555,20 +2568,24 @@ part is `export-ui.js`, `export-raster.js` (pictures), `export-fonts.js` (the fo
   description, and **the map's settings in its `<metadata>`** (`<plato:map>`, JSON: the view, width,
   projection, background, layers, relief, historical map and statement, places left out, each label's choices
   and offset, the rule, the furniture, the licence, the title), which "Remake from a map made here" reads
-  (`settingsIn`) to make the same map again.
+  (`settingsIn`) to make the same map again, its width and resolution brought within the panel's bounds (400 to
+  8,000 pixels, 72 to 1,200 dpi).
 - **The PNG** is drawn by the browser from the same SVG with the fonts inlined (`cssWithData`: the woff2 files
   as `data:` addresses; an image drawn from an SVG may load nothing else), at the map's size, and given its
   resolution (pHYs, from the dots per inch chosen) and its words (`png-meta.js`: tEXt, or iTXt where Latin-1
   cannot hold them: Title, Author, Description, Copyright, Source, Software, Creation Time, and the settings as
   `plato-tools:map`).
 - **The Commons page** (`commons.js` `filePage`): `{{Map}}` (title, description and legend in the file's
-  language, author, date, map date, projection, scale, latitude and longitude from the bounds, source,
-  warp status and url, permission, other versions), then the licence (`{{self|cc-by-4.0}}` and its kin) and the
+  language, author, date, map date, projection, scale, latitude and longitude (the map's centre, in decimal
+  degrees: the template's own documentation is not on Commons, so its centre; the bounds in the description in
+  words), source (with the places' sources credited), warp status and url, permission, other versions), then the
+  licence (`{{self|cc-by-4.0}}` for a map wholly the user's own or in the public domain, else the plain
+  `{{cc-by-4.0}}` and its kin, with the parts credited in the source) and the
   templates of what it is made of (`{{Natural Earth}}`, `{{ODbL OpenStreetMap}}`, `{{PD-USGov-NASA-SRTM}}`,
   `{{PD-USGov-USGS}}`, a historical map's statement, `{{SVG with raster elements}}`). **The author is Chora's
   contributor, by name, with their ORCID iD where given; never an email address** (`authorWords` writes none,
   and a name with `@` in it is not written). "Upload to Wikimedia Commons ↗" is a link to `Special:Upload` with
-  `wpDestFile`, `wpUploadDescription` and `wpLicense` (`self|…`) filled in (`uploadUrl`), saying in words what
+  `wpDestFile`, `wpUploadDescription` and `wpLicense` (`self|…` or the plain licence, as the page) filled in (`uploadUrl`), saying in words what
   following it sends, as the Allmaps Editor's link does: it is the user's own navigation, and nothing is sent by
   the page. A link longer than 7,000 characters is not offered: "Copy the description" is.
 - **The preview** is the SVG itself, put into the page over the map (`#chora-export-preview`), its labels drawn
@@ -3374,7 +3391,8 @@ with nothing to draw; a dataset whose places have locations goes on with "Nothin
 the map made in Chora and downloaded there (`map.export`: interactive, Chora's, taking the dataset, giving a
 `map` hand-off: `handoffs.js`'s new type, "a map made in Chora, as an SVG or a PNG, its settings kept in it").
 Its download does the step (`mapped()`, `CHORA_STEPS`), when Chora has open the dataset that went to the step
-(else said why, as for `place`); "This step is done" is not offered there, and the tracker says to make the map
+(else said why, as for `place`); the other format downloaded after (the PNG after the SVG, say) is kept with the
+same step, beside it (`runner.addOutputs`: only the last step done, of the types it gives, by SHA-256 once); "This step is done" is not offered there, and the tracker says to make the map
 in Chora instead. No tracing (that is "Trace a historical map", the other direction: a georeferenced historical
 map is here only an optional background) and nothing published, so no `out` step: the result is the map. The
 recipe's `cannot` says the cap of 200 places in view, that a place with no location is not drawn, what cannot go

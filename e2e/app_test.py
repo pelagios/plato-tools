@@ -11350,12 +11350,13 @@ def open_map_export_checks(pw, url, tmp):
                 and text.get('Title') == 'Places of Places of Attica (a test fixture)' and text.get('Author') == 'Ada Mapmaker' and text.get('Copyright', '').startswith('CC BY 4.0')
                 and settings.get('version') == 1 and settings.get('width') == 1600 and settings.get('view')
                 and 'Map: Ada Mapmaker, CC BY 4.0, made with PLATO tools' in svg and 'Modern coastline: Natural Earth, 50m (public domain)' in svg
+                and "The places' sources: Pleiades (CC BY 3.0)" in svg and '<cc:license rdf:resource="https://creativecommons.org/licenses/by/4.0/"' in svg
                 and '<plato:map' in svg and '@' not in svg.split('<metadata')[0] + svg.split('</metadata>')[1]
                 and red(athens) and sea[2] > 200 and sea[0] < 60 and land[1] > 200 and land[0] < 60
                 and not foreign(since) and any(u.endswith('/basemap/land.geojson') for u in web(since))), {
             'names': [svg_name, png_name], 'viewBox': m.group(0) if m else None, 'size': s.get('size'), 'png': im.size, 'dpi': im.info.get('dpi'),
             'text': {k: v[:80] for k, v in text.items()}, 'pixels': {'athens': athens, 'sea': sea, 'land': land}, 'foreign': foreign(since)}
-    attempt('Make an open map: the SVG and the PNG downloaded are the same map: the SVG\'s viewBox and the PNG\'s size the map\'s; the PNG\'s resolution (150 dpi), title, author, licence and settings in its chunks; Athens red, the sea and the land in the test style\'s colours where they are; the attribution and the coastline\'s source written in; nothing asked of another site', files_read_back)
+    attempt('Make an open map: the SVG and the PNG downloaded are the same map: the SVG\'s viewBox and the PNG\'s size the map\'s; the PNG\'s resolution (150 dpi), title, author, licence and settings in its chunks; Athens red, the sea and the land in the test style\'s colours where they are; the attribution, the places\' sources (Pleiades, CC BY 3.0) and the coastline\'s source written in; nothing asked of another site', files_read_back)
 
     def page_and_link():
         page_text = page.input_value('#chora-export-page')
@@ -11365,12 +11366,26 @@ def open_map_export_checks(pw, url, tmp):
         words = page.inner_text('#chora-export-upload-link')
         from urllib.parse import parse_qs
         q = parse_qs(urlparse(link).query)
-        return (page_text.startswith('{{Map\n') and '|author = [https://orcid.org/0000-0002-1825-0097 Ada Mapmaker]' in page_text and '{{self|cc-by-4.0}}' in page_text and '{{Natural Earth}}' in page_text
-                and '|projection = Web Mercator (EPSG:3857)' in page_text and '|latitude = ' in page_text and 'pleiades.stoa.org/places/579885' in page_text and '@' not in page_text
+        lat = re.search(r'\|latitude = (-?\d+\.\d+)\n', page_text); lon = re.search(r'\|longitude = (-?\d+\.\d+)\n', page_text)
+        return (page_text.startswith('{{Map\n') and '|author = [https://orcid.org/0000-0002-1825-0097 Ada Mapmaker]' in page_text and '{{cc-by-4.0}}' in page_text and '{{self|' not in page_text and '{{Natural Earth}}' in page_text
+                and '|projection = Web Mercator (EPSG:3857)' in page_text and lat and lon and 37.5 < float(lat.group(1)) < 38.4 and 23.2 < float(lon.group(1)) < 24.0
+                and 'The map covers ' in page_text and "The places' sources: Pleiades (CC BY 3.0)" in page_text
+                and 'pleiades.stoa.org/places/579885' in page_text and '@' not in page_text
                 and link.startswith('https://commons.wikimedia.org/wiki/Special:Upload?') and q.get('wpDestFile') == ['Places of Places of Attica (a test fixture).svg']
-                and q.get('wpLicense') == ['self|cc-by-4.0'] and q.get('wpUploadDescription', [''])[0].startswith('{{Map') and 'sends' in words and 'Wikimedia Commons' in words), {
-            'page': page_text[:300], 'link': link[:160], 'words': words}
-    attempt('Make an open map: the Commons page is the {{Map}} template filled (author by name and ORCID iD, no email, projection, bounds, the Pleiades record), CC BY 4.0 and {{Natural Earth}}; the upload link fills in the file\'s name, description and licence, and says what it sends', page_and_link)
+                and q.get('wpLicense') == ['cc-by-4.0'] and q.get('wpUploadDescription', [''])[0].startswith('{{Map') and 'sends' in words and 'Wikimedia Commons' in words), {
+            'page': page_text[:300], 'source': [l for l in page_text.split('\n') if l.startswith('|source')][:1], 'link': link[:160], 'words': words}
+    attempt('Make an open map: the Commons page is the {{Map}} template filled (author by name and ORCID iD, no email, projection, the map\'s centre as its latitude and longitude, its bounds in words, the Pleiades record and Pleiades credited as the places\' source), CC BY 4.0 as the plain template, not {{self}}, since Pleiades\' work is in it, and {{Natural Earth}}; the upload link fills in the file\'s name, description and licence, and says what it sends', page_and_link)
+
+    def remake_clamped():
+        # A file whose settings ask for a map 5 pixels wide at 99,999 dots per inch: made again within the panel's
+        # own bounds (400 pixels, 1,200 dpi), as a value typed in is.
+        if not st.get('svg'): return False, 'no SVG from the first check'
+        doctored = re.sub(r'(&quot;|")dpi\1:\d+', lambda m: f'{m.group(1)}dpi{m.group(1)}:99999', re.sub(r'(&quot;|")width\1:\d+', lambda m: f'{m.group(1)}width{m.group(1)}:5', st['svg']))
+        f = tmp / 'doctored.svg'; f.write_text(doctored)
+        recomposed(lambda: page.set_input_files('#chora-export-remake', str(f)))
+        s = es(); width, dpi = page.input_value('#chora-export-width'), page.input_value('#chora-export-dpi')
+        return (doctored != st['svg'] and width == '400' and dpi == '1200' and s['size'][0] == 400), {'width': width, 'dpi': dpi, 'size': s.get('size')}
+    attempt('Make an open map: a map made again from a file whose settings ask for 5 pixels at 99,999 dpi is made within the panel\'s bounds, 400 pixels at 1,200 dpi', remake_clamped)
 
     def equirect():
         # A wide view, where the two projections differ by many pixels (in a small one, by about one).
@@ -11420,7 +11435,7 @@ def open_map_export_checks(pw, url, tmp):
         ctx.route('https://dh.gu.se/**', lambda route: (dare_hits.append(1), route.fulfill(status=200, content_type='image/png', body=magenta(), headers={'Access-Control-Allow-Origin': '*'})))
         boot({'basemap:dare': {'state': 'allowed', 'at': '2026-10-15T09:00:00Z'}}, 'dare')
         s = es(); words = page.inner_text('#chora-export-licence'); page_text = page.input_value('#chora-export-page')
-        return (s['licence']['label'] == 'CC BY-SA 4.0' and s['licence']['ok'] and 'share-alike' in words and 'CC-BY-SA-3.0' in words and '{{self|cc-by-sa-4.0}}' in page_text and dare_hits), {
+        return (s['licence']['label'] == 'CC BY-SA 4.0' and s['licence']['ok'] and 'share-alike' in words and 'CC-BY-SA-3.0' in words and '{{cc-by-sa-4.0}}' in page_text and '{{self|' not in page_text and dare_hits), {
             'licence': s.get('licence'), 'words': words, 'tiles': len(dare_hits)}
     attempt('Make an open map: on Roman Empire (DARE), the map is CC BY-SA 4.0, and the panel and the Commons page say it is because DARE\'s CC BY-SA 3.0 is share-alike', dare_raises)
 
@@ -11433,12 +11448,20 @@ def open_map_export_checks(pw, url, tmp):
         s = es(); words = page.inner_text('#chora-export-licence')
         disabled = page.evaluate('() => [document.getElementById("chora-export-svg").disabled, document.getElementById("chora-export-png").disabled]')
         link = page.query_selector('#chora-export-upload-link')
-        # The control: untick the place it is cited for, and the map may go.
+        desc = page.evaluate('() => { const t = document.getElementById("chora-export-page"); return [t.value, t.hidden, document.getElementById("chora-export-copy").hidden, document.getElementById("chora-export-upload").textContent]; }')
+        svg = get('svg')[0].read_text(); im, text = png_read(get('png')[0])
+        # The control: untick the place it is cited for, and the map may go, under its licence, with its link.
         recomposed(lambda: page.uncheck('#chora-export-places li[data-place$="/eleusis"] input[data-tick]'))
-        s2 = es(); enabled = page.evaluate('() => [document.getElementById("chora-export-svg").disabled, document.getElementById("chora-export-png").disabled]')
+        s2 = es(); svg2 = get('svg')[0].read_text(); link2 = page.query_selector('#chora-export-upload-link')
         return (not s['licence']['ok'] and any('A non-commercial atlas' in r['name'] and 'no commercial use' in r['why'] for r in s['licence']['refused']) and 'Not for Wikimedia Commons' in words
-                and disabled == [True, True] and link is None and s2['licence']['ok'] and enabled == [False, False]), {'refused': s['licence'].get('refused'), 'words': words, 'disabled': disabled, 'after': s2.get('licence'), 'enabled after': enabled}
-    attempt('Make an open map: a place cited from a source for no commercial use stops the map going to Commons: the panel names it, the downloads and the upload link are not offered; with that place left out, they are', refused)
+                and 'You can still download it, for your own use' in words and disabled == [False, False] and link is None
+                and desc[0] == '' and desc[1] and desc[2] and 'No description and no upload link' in desc[3]
+                and 'Not under an open licence: A non-commercial atlas' in svg and 'cc:license' not in svg and 'CC BY 4.0' not in svg
+                and text.get('Copyright', '').startswith('Not under an open licence: A non-commercial atlas') and 'CC BY' not in text.get('Copyright', '')
+                and s2['licence']['ok'] and 'cc:license' in svg2 and 'Not under an open licence' not in svg2 and link2 is not None), {
+            'refused': s['licence'].get('refused'), 'words': words, 'disabled': disabled, 'description': desc, 'svg says': [l for l in svg.split('>') if 'open licence' in l][:1],
+            'png copyright': text.get('Copyright'), 'after': s2.get('licence')}
+    attempt('Make an open map: a place cited from a source for no commercial use stops the map going to Commons: the panel names it and says it still downloads, for the user\'s own use; the SVG and the PNG say why in words and claim no licence (no cc:license, no CC BY), and there is no description and no upload link; with that place left out, the file is CC BY 4.0 and the link is offered', refused)
 
     def relief_in_file():
         page.route('**/basemap/relief.pmtiles', relief_route)
@@ -11475,10 +11498,11 @@ def open_map_historical_checks(pw, url, tmp):
     page.on('pageerror', lambda e: errors.append(str(e)[:200]))
     STYLE = test_style()
     page.route('**/basemap/style.json', lambda route: route.fulfill(status=200, content_type='application/json', body=STYLE))
-    nav = {'date': None}
+    nav = {'date': None, 'rights': None}
     def manifest(route):
         d = json.loads((FIX / 'manifest-rumsey-shaped.json').read_text().replace('https://iiif.example.org', A))
         if nav['date']: d['navDate'] = nav['date']
+        if nav['rights']: d['rights'] = nav['rights']
         route.fulfill(status=200, content_type='application/json', headers={'Access-Control-Allow-Origin': '*'}, body=json.dumps(d))
     ctx.route(A + '/manifests/grid/manifest', manifest)
     es = lambda: page.evaluate(EXPORT_STATE) or {}
@@ -11521,7 +11545,7 @@ def open_map_historical_checks(pw, url, tmp):
         chosen = page.input_value('#chora-export-statement')
         recomposed(lambda: page.select_option('#chora-export-statement', 'PD-old-100'))
         s2 = es(); page_text = page.input_value('#chora-export-page')
-        return (not s['licence']['ok'] and any('not clear' in r['why'] and 'say what they are' in r['why'] for r in s['licence']['refused']) and disabled and chosen == ''
+        return (not s['licence']['ok'] and any('not clear' in r['why'] and 'say what they are' in r['why'] for r in s['licence']['refused']) and not disabled and chosen == ''
                 and 'names no licence' in hist and 'A Synthetic Historical Map Collection' in hist
                 and s2['licence']['ok'] and '{{PD-old-100}}' in s2['licence']['templates'] and 'are stated by Ada Mapmaker' in page_text and '|warp status = warped' in page_text
                 and f"|warp url = {a['id']}" in page_text), {'before': s['licence'], 'words': words, 'hist': hist[:200], 'disabled': disabled, 'chosen': chosen, 'after': s2.get('licence'), 'page': page_text[-400:]}
@@ -11531,8 +11555,23 @@ def open_map_historical_checks(pw, url, tmp):
         nav['date'] = '1746-01-01T00:00:00Z'
         boot()
         chosen = page.input_value('#chora-export-statement'); s = es()
-        return chosen == 'PD-Art|PD-old-100' and s['licence']['ok'] and '{{PD-Art|PD-old-100}}' in s['licence']['templates'], {'chosen': chosen, 'licence': s.get('licence')}
-    attempt('Make an open map: a historical map its manifest dates 1746 has "a faithful photograph of a map in the public domain" chosen for it, which the user may change', dated_preselects)
+        return chosen == 'PD-Art|PD-old-assumed' and s['licence']['ok'] and '{{PD-Art|PD-old-assumed}}' in s['licence']['templates'], {'chosen': chosen, 'licence': s.get('licence')}
+    def nc_not_preselected():
+        # The same map, dated 1746, its holder licensing it for no commercial use: nothing chosen for it, the refusal
+        # kept, and the words saying what a statement means; stated, it may go.
+        nav['date'] = '1746-01-01T00:00:00Z'; nav['rights'] = 'https://creativecommons.org/licenses/by-nc-sa/3.0/'
+        try:
+            boot()
+            chosen = page.input_value('#chora-export-statement'); s = es(); hist = page.inner_text('.export-hist')
+            recomposed(lambda: page.select_option('#chora-export-statement', 'PD-Art|PD-old-assumed'))
+            s2 = es()
+        finally:
+            nav['rights'] = None
+        return (chosen == '' and not s['licence']['ok'] and any('does not let it go to Wikimedia Commons' in r['why'] and 'state its rights' in r['why'] for r in s['licence']['refused'])
+                and 'you state that the scan is a faithful reproduction of a map in the public domain' in hist and 'overrides the licence its holder states' in hist
+                and s2['licence']['ok'] and '{{PD-Art|PD-old-assumed}}' in s2['licence']['templates']), {'chosen': chosen, 'before': s.get('licence'), 'hist': hist[-400:], 'after': s2.get('licence')}
+    attempt('Make an open map: a historical map dated 1746 that its holder licenses for no commercial use (CC BY-NC-SA 3.0) has nothing chosen for it: it is refused, saying so, and the panel says that stating its rights is stating the scan is of a public-domain map, which overrides the holder\'s licence; stated, it may go', nc_not_preselected)
+    attempt('Make an open map: a historical map its manifest dates 1746, its licence not stated, has "a faithful photograph of a map published more than 120 years ago" ({{PD-Art|PD-old-assumed}}) chosen for it, which the user may change', dated_preselects)
 
     # The middle of a cell of the grid (image pixel 96, 96: its lines are every 64 pixels), where the paper is blank.
     PAPER = [0.10417, 52.2175]
@@ -11756,17 +11795,26 @@ def open_map_workflow_checks(pw, url, tmp):
         svg_path = out / d.value.suggested_filename; d.value.save_as(svg_path); svg = svg_path.read_text()
         until(page, "() => document.querySelector('#methodos-track li[data-step=\"map\"]')?.dataset.state === 'done'", 30)
         said = page.inner_text('#chora-export-said')
+        # The PNG downloaded after: kept with the same step, beside the SVG.
+        page.evaluate("() => { document.getElementById('chora-export-said').textContent = ''; }")
+        with page.expect_download(timeout=T(120) * 1000) as d2: page.click('#chora-export-png')
+        d2.value.save_as(out / d2.value.suggested_filename)
+        until(page, "() => /beside the map downloaded before/.test(document.getElementById('chora-export-said').textContent)", 30)
+        said2 = page.inner_text('#chora-export-said')
         # The last step done, and no step current: the workflow is at its end (the tracker stays as Map your data's does).
         status = page.evaluate("() => document.getElementById('methodos-tracker').dataset.status")
         steps = track()['steps']; current = page.evaluate("() => !!document.querySelector('#methodos-track li.is-current')")
         labels = sorted(re.findall(r'<tspan[^>]*>([^<]+)</tspan>', svg.split('id="labels"')[1].split('id="furniture"')[0])) if 'id="labels"' in svg else []
         return (labels == ['Athenae', 'Eleusis', 'Piraeus'] and "The workflow's step “Make the map in Chora, and download it” is done with it." in said
                 and status in ('completed', 'idle') and not current and set(steps.values()) == {'done'} and len(steps) == 9
-                and made['licence']['ok'] and made['licence']['label'] == 'CC BY 4.0' and 'Places identified with World Historical Gazetteer' in svg
+                and "It is kept with the workflow's step “Make the map in Chora, and download it”, beside the map downloaded before." in said2
+                and made['licence']['ok'] and made['licence']['label'] == 'CC BY 4.0' and 'Places identified with Pleiades' in svg
+                and "The places' sources: Pleiades (CC BY 3.0), through the World Historical Gazetteer" in svg
+                and "The places' sources: Pleiades (CC BY 3.0), through the World Historical Gazetteer" in page.input_value('#chora-export-page')
                 and 'downloaded there, which does the step. Open Chora, frame the view, and make the map there' in message and 'Say when it is done' not in message
                 and set(foreign()) <= {'whgazetteer.org'} and gets), {
-            'labels': labels, 'said': said, 'status': status, 'steps': steps, 'current': current, 'message': message[:200], 'foreign': foreign(), 'records asked': len(gets)}
-    attempt('Make an open map (workflow): the map made in Chora of the three places located, labelled, CC BY 4.0, downloaded as an SVG, which does the last step: every step done; nothing asked of any site but this one and the stand-in WHG', made_the_map)
+            'labels': labels, 'said': said, 'said after the PNG': said2, 'credits': [l for l in svg.split('>') if 'sources' in l][:2], 'status': status, 'steps': steps, 'current': current, 'message': message[:200], 'foreign': foreign(), 'records asked': len(gets)}
+    attempt('Make an open map (workflow): the map made in Chora of the three places located, labelled, CC BY 4.0, the places identified with Pleiades and credited to it (through WHG) in the file and the Commons page, downloaded as an SVG, which does the last step, and the PNG after it, kept with the same step: every step done; nothing asked of any site but this one and the stand-in WHG', made_the_map)
     attempt('Make an open map (workflow): no page error along the way, and the stand-in WHG was asked', lambda: (bool(posts) and not errors, {'posts': len(posts), 'errors': errors[:5]}))
     ctx.close(); browser.close()
 

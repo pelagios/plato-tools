@@ -17,7 +17,7 @@ import { svgDocument, el, settingsIn, num } from '../src/engine/chora/export/svg
 import { composeMap, neLayers, NE_PLAIN } from '../src/engine/chora/export/compose.js';
 import { styleNodes, colour } from '../src/engine/chora/export/vector.js';
 import { scaleOf, niceLength } from '../src/engine/chora/export/furniture.js';
-import { composeLicence, MAP_LICENCES, OWN_DEFAULT, suggestedStatement } from '../src/engine/chora/export/licence.js';
+import { composeLicence, MAP_LICENCES, OWN_DEFAULT, suggestedStatement, needsStatement, placeCredits, STATEMENTS } from '../src/engine/chora/export/licence.js';
 import { filePage, uploadUrl, authorWords, commonsName, MAX_LINK } from '../src/engine/chora/export/commons.js';
 import { withMeta, readPng, chunksOf, crc32 } from '../src/engine/chora/export/png-meta.js';
 import { markShapes } from '../src/engine/chora/marks.js';
@@ -270,7 +270,43 @@ test('licence: a historical map with no clear rights is refused until the user s
   // A free map needs no statement; Allmaps' georeference is CC0.
   const free = rightsOf({ manifest: { rights: 'https://creativecommons.org/publicdomain/mark/1.0/' }, annotation: { id: 'https://annotations.allmaps.org/maps/abc' } });
   assert.equal(composeLicence({ parts: [{ name: 'Free', role: 'historical', rights: free }] }).ok, true);
-  assert.equal(suggestedStatement(1746, 2026), 'PD-Art|PD-old-100'); assert.equal(suggestedStatement(1950, 2026), null); assert.equal(suggestedStatement(NaN, 2026), null);
+  // Pre-selected only where its rights say nothing either way, and then {{PD-Art|PD-old-assumed}} (published over 120 years ago), never PD-old-100.
+  assert.equal(suggestedStatement(unclear, 1746, 2026), 'PD-Art|PD-old-assumed'); assert.equal(suggestedStatement(unclear, 1950, 2026), null); assert.equal(suggestedStatement(unclear, NaN, 2026), null);
+  assert.equal(suggestedStatement(nc, 1746, 2026), null, 'a map licensed for no commercial use is never pre-selected');
+  assert.ok(STATEMENTS.some((x) => x.template === '{{PD-Art|PD-old-assumed}}'));
+});
+
+test('licence: a historical map\'s rights statement: NoC-US is the public domain ({{PD-US}}, nothing to state); NKC asks the user to state it; an NC licence is refused, said why, until a statement overrides it', () => {
+  const allmaps = { id: 'https://annotations.allmaps.org/maps/abc' };
+  const nocus = rightsOf({ manifest: { rights: 'http://rightsstatements.org/vocab/NoC-US/1.0/' }, annotation: allmaps });
+  assert.equal(nocus.free, true); assert.equal(needsStatement(nocus), false);
+  const a = composeLicence({ parts: [NE, { name: '“A plan”', role: 'historical', rights: nocus }] });
+  assert.equal(a.ok, true, JSON.stringify(a.refused)); assert.ok(a.templates.includes('{{PD-US}}')); assert.equal(a.self, true);
+  const nkc = rightsOf({ manifest: { rights: 'http://rightsstatements.org/vocab/NKC/1.0/' }, annotation: allmaps });
+  assert.equal(nkc.free, true); assert.equal(needsStatement(nkc), true, 'no known copyright is not a statement that it is in the public domain');
+  const b = composeLicence({ parts: [NE, { name: '“A plan”', role: 'historical', rights: nkc }] });
+  assert.equal(b.ok, false); assert.match(b.refused[0].why, /none are stated/);
+  assert.equal(composeLicence({ parts: [NE, { name: '“A plan”', role: 'historical', rights: nkc, statement: 'PD-Art|PD-old-assumed' }] }).ok, true);
+  const nc = rightsOf({ manifest: { rights: 'https://creativecommons.org/licenses/by-nc-sa/3.0/' }, annotation: allmaps });
+  const c = composeLicence({ parts: [NE, { name: 'Rumsey', role: 'historical', rights: nc }] });
+  assert.equal(c.ok, false); assert.match(c.refused[0].why, /CC BY-NC-SA 3\.0\) does not let it go to Wikimedia Commons; if the map itself is in the public domain, state its rights/);
+  const d = composeLicence({ parts: [NE, { name: 'Rumsey', role: 'historical', rights: nc, statement: 'PD-Art|PD-old-assumed' }] });
+  assert.equal(d.ok, true); assert.ok(d.templates.includes('{{PD-Art|PD-old-assumed}}'));
+});
+
+test('licence: the places\' sources that ask for credit are credited by their own gazetteer (Pleiades, through WHG), and {{self}} only for a map wholly its maker\'s or in the public domain', () => {
+  const adopted = { label: 'Athens', attestations: [{ geometries: [{}], citations: [{ source: { title: 'World Historical Gazetteer', authorityType: 'dataset', licence: 'https://spdx.org/licenses/CC-BY-3.0' }, locator: 'https://w3id.org/whg/id/place:pl:579885', citationFunction: 'http://purl.org/spar/cito/citesAsEvidence' }] }] };
+  assert.deepEqual(placeCredits([adopted]).map((c) => c.words), ['Pleiades (CC BY 3.0), through the World Historical Gazetteer']);
+  const L = composeLicence({ parts: [NE], places: [adopted] });
+  assert.equal(L.ok, true); assert.deepEqual(L.placeCredits, ['Pleiades (CC BY 3.0), through the World Historical Gazetteer']);
+  assert.match(filePage({ ...PAGE_MAP, licence: L }), /\|source = .*; The places' sources: Pleiades \(CC BY 3\.0\), through the World Historical Gazetteer\n/);
+  // Not wholly the maker's: the licence's plain template, on the page and in the upload link.
+  assert.match(filePage({ ...PAGE_MAP, licence: L }), /\n\{\{cc-by-4\.0\}\}\n/); assert.doesNotMatch(filePage({ ...PAGE_MAP, licence: L }), /\{\{self\|/);
+  assert.equal(new URL(uploadUrl({ ...PAGE_MAP, licence: L }, 'a.svg')).searchParams.get('wpLicense'), 'cc-by-4.0');
+  assert.equal(L.self, false, 'Pleiades\'s CC BY 3.0 is someone else\'s');
+  assert.equal(composeLicence({ parts: [NE, RELIEF] }).self, true, 'the public domain and the maker\'s own');
+  assert.equal(composeLicence({ parts: [CAWM] }).self, false);
+  assert.deepEqual(placeCredits([placeWith('https://creativecommons.org/publicdomain/zero/1.0/')]), [], 'nothing to credit under CC0');
 });
 
 // ---- The Commons page ----------------------------------------------------------------------------
@@ -285,15 +321,15 @@ test('the Commons page: the {{Map}} template filled, the author by name and ORCI
   const page = filePage(PAGE_MAP);
   assert.equal(page, `{{Map
  |title = {{en|1=Attica in antiquity}}
- |description = {{en|1=Places of ancient Attica.}}
+ |description = {{en|1=Places of ancient Attica. The map covers 37.50°N to 38.70°N and 22.90°E to 24.40°E.}}
  |legend = {{en|1=Red dots: places; dotted circles: how far each may be from its point.}}
  |author = [https://orcid.org/0000-0002-1825-0097 Ada Lovelace] (ORCID 0000-0002-1825-0097)
  |date = 2026-10-15
  |map date =
  |projection = Web Mercator (EPSG:3857)
  |scale = scale bar, true at latitude 38° N
- |latitude = 37.50°N to 38.70°N
- |longitude = 22.90°E to 24.40°E
+ |latitude = 38.1000
+ |longitude = 23.6500
  |source = Made with PLATO tools, https://pelagios.org/plato-tools/; Places: Pleiades, https://pleiades.stoa.org/places/579885
  |warp status =
  |warp url =

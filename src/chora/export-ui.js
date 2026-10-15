@@ -14,7 +14,7 @@
 // Its state, for the browser checks, is window.__chora.export.
 import { composeMap, neLayers } from '../engine/chora/export/compose.js';
 import { nameChoices, labelText, languagesOf, CLASS_WORDS, LABEL_CLASSES } from '../engine/chora/export/labels.js';
-import { composeLicence, MAP_LICENCES, OWN_DEFAULT, STATEMENTS, suggestedStatement } from '../engine/chora/export/licence.js';
+import { composeLicence, MAP_LICENCES, OWN_DEFAULT, STATEMENTS, OVERRIDE_WORDS, suggestedStatement, needsStatement } from '../engine/chora/export/licence.js';
 import { filePage, uploadUrl, commonsName, UPLOAD_LINK_TEXT } from '../engine/chora/export/commons.js';
 import { inView, recordSites, PLACE_CAP } from '../engine/chora/export/places.js';
 import { PROJECTION_WORDS, exportView, mercator } from '../engine/chora/export/project.js';
@@ -109,7 +109,8 @@ export function createExport(root, preview, ctx) {
     // The year its manifest dates it, or none (NaN, not 0: an undated map pre-selects nothing).
     const date = String(manifestNavDate(e.manifest) || '');
     const year = /^-?\d{1,4}/.test(date) ? Number(date.match(/^-?\d{1,4}/)[0]) : NaN;
-    const statement = e.rights?.free === true ? null : suggestedStatement(year);
+    // Pre-selected only where its rights say nothing either way: never over a licence its holder states (licence.js).
+    const statement = suggestedStatement(e.rights, year);
     return { key: e.key, opacity: e.opacity ?? 1, statement, over: 'basemap' };
   }
   const entryOf = (key) => (ctx.layers?.entries || []).find((e) => e.key === key) || null;
@@ -163,11 +164,11 @@ export function createExport(root, preview, ctx) {
         <p><button type="button" id="chora-export-copy">Copy the description</button> <span id="chora-export-upload"></span></p></details>`;
   }
   function historicalForm(e) {
-    const r = e.rights || {}, s = settings.historical, free = r.free === true;
+    const r = e.rights || {}, s = settings.historical, free = !needsStatement(r);
     return `<div class="export-hist"><p>${esc(r.words || '')}</p>
       ${r.map?.credit ? `<p class="muted">Its manifest says: “${esc(r.map.credit)}”${r.map.licence ? `; licence ${esc(r.map.licenceLabel || r.map.licence)}` : ''}.</p>` : ''}
       ${free ? '' : `<p><label for="chora-export-statement">Its rights, as you state them</label> <select id="chora-export-statement"><option value="">Choose…</option>${STATEMENTS.filter((x) => x.key !== 'manifest' || r.map?.licence).map((x) => `<option value="${esc(x.key)}"${s.statement === x.key ? ' selected' : ''}>${esc(x.words)}</option>`).join('')}</select>
-        <small class="muted">Recorded as your statement, in the file's description.</small></p>`}
+        <small class="muted">Recorded as your statement, in the file's description.${r.free === false ? ` ${esc(OVERRIDE_WORDS)}` : ''}</small></p>`}
       <p><label for="chora-export-hist-opacity">Its opacity</label> <input id="chora-export-hist-opacity" type="range" min="0.2" max="1" step="0.05" value="${s.opacity}">
         <label for="chora-export-hist-over">Over</label> <select id="chora-export-hist-over"><option value="basemap"${s.over === 'basemap' ? ' selected' : ''}>the basemap</option><option value="alone"${s.over === 'alone' ? ' selected' : ''}>nothing: the map alone</option></select></p></div>`;
   }
@@ -264,12 +265,17 @@ export function createExport(root, preview, ctx) {
   }
   function attributionLines(s, licence, hist, author) {
     const b = bm(), ex = b.export || {}, e = hist ? entryOf(s.historical.key) : null, alone = hist && s.historical.over === 'alone';
-    const lines = [`Map: ${author || 'its author'}, ${licence.licence.label}, made with PLATO tools`];
+    // A map that cannot be openly licensed (Stephen, 15 October 2026) still downloads, and says why in its own words,
+    // claiming no licence.
+    const lines = [licence.ok ? `Map: ${author || 'its author'}, ${licence.licence.label}, made with PLATO tools`
+      : `Map: ${author || 'its author'}, made with PLATO tools. Not under an open licence: ${licence.refused.map((r) => `${r.name}: ${r.why}`).join('; ')}`];
     if (!alone) lines.push(`Background: ${ex.licence?.credit || b.name}`);
     if (!alone && s.relief && b.local) lines.push(RELIEF.attribution);
     if (e) lines.push(`Historical map: “${e.title}”${e.rights?.map?.credit ? `, ${e.rights.map.credit}` : ''}; placed by its georeference${e.rights?.georeference?.licenceLabel ? ` (${e.rights.georeference.licenceLabel})` : ''}`);
     const sites = recordSites(places.filter((p) => s.places[p.id]?.off !== true));
     if (sites.length) lines.push(`Places identified with ${sites.map((x) => x.site).join(', ')}`);
+    // The places' sources that ask for credit, by their own gazetteer (licence.js placeCredits).
+    if (licence.placeCredits?.length) lines.push(`The places' sources: ${licence.placeCredits.join('; ')}`);
     lines.push(alone ? `Coastline: as “${e.title}” draws it` : ex.coastline || `Coastline: as ${b.name} draws it`);
     return lines;
   }
@@ -294,7 +300,7 @@ export function createExport(root, preview, ctx) {
         places: items, marks: !!s.furniture.key, keyRows: keyRows(),
         furniture: { north: s.furniture.north, inset: s.furniture.inset ? await landFeatures() : null, title: s.furniture.title ? s.title : '', attribution: attributionLines(s, licence, hist, author) },
         lang: s.lang || null, title: s.title, desc: s.description, settings: meta,
-        dc: { title: s.title, creator: author, rights: licence.licence.iri, date: meta.made, source: 'PLATO tools, https://pelagios.org/plato-tools/' }, measure,
+        dc: { title: s.title, creator: author, rights: licence.ok ? licence.licence.iri : null, date: meta.made, source: 'PLATO tools, https://pelagios.org/plato-tools/' }, measure,
       };
       const out = composeMap(common);
       if (mine !== seq) return;
@@ -345,9 +351,10 @@ export function createExport(root, preview, ctx) {
   }
   function showComposed() {
     const { out, licence } = composed;
-    $('licence').innerHTML = `${licence.ok ? '' : '<strong>Not for Wikimedia Commons as it is.</strong> '}${esc(licence.words)}${licence.statements.length ? ` ${esc(licence.statements.join(' '))}` : ''}`;
+    $('licence').innerHTML = `${licence.ok ? '' : '<strong>Not for Wikimedia Commons as it is.</strong> '}${esc(licence.words)}${licence.statements.length ? ` ${esc(licence.statements.join(' '))}` : ''}`
+      + (licence.ok ? '' : ` ${esc('You can still download it, for your own use: the file says why it is not under an open licence, and claims none.')}`);
     $('licence').classList.toggle('warn', !licence.ok);
-    for (const id of ['svg', 'png']) { $(id).disabled = !licence.ok; $(id).title = licence.ok ? '' : 'The map cannot be shared under an open licence as it is: see the licence, above.'; }
+    for (const id of ['svg', 'png']) $(id).disabled = false;
     $('overlaps').hidden = !out.overlapping;
     $('overlaps').textContent = out.overlapping ? `${out.overlapping} label${out.overlapping === 1 ? '' : 's'} found no free place, and overlap${out.overlapping === 1 ? 's' : ''} another or the furniture: drag ${out.overlapping === 1 ? 'it' : 'them'} in the preview where ${out.overlapping === 1 ? 'it' : 'they'} should go, or leave a label out.` : '';
     const notes = [st.background?.info, out.rasterInSvg ? 'This SVG is mostly a picture (its background is embedded as one): the PNG may suit Wikimedia Commons better, which marks such an SVG {{SVG with raster elements}}.' : null,
@@ -355,11 +362,13 @@ export function createExport(root, preview, ctx) {
     $('raster').hidden = !notes.length; $('raster').textContent = notes.join(' ');
     $('count').textContent = placesWords();
     const p = page('svg');
-    $('page').value = filePage(p);
-    const link = uploadUrl(p, commonsName(settings.title, 'svg'));
+    // Not for Commons: no description to paste, and no link.
+    $('page').value = licence.ok ? filePage(p) : '';
+    $('page').hidden = !licence.ok; $('copy').hidden = !licence.ok;
+    const link = licence.ok ? uploadUrl(p, commonsName(settings.title, 'svg')) : null;
     st.commons = { link: !!link, length: link ? link.length : null };
     $('upload').innerHTML = link ? `<a id="chora-export-upload-link" href="${esc(link)}" target="_blank" rel="noopener noreferrer">${esc(UPLOAD_LINK_TEXT)}</a>`
-      : `<span class="muted">${licence.ok ? 'The description is too long to send in a link: copy it, and paste it into Commons\' upload form.' : 'No upload link: the map cannot go to Wikimedia Commons as it is.'}</span>`;
+      : `<span class="muted">${licence.ok ? 'The description is too long to send in a link: copy it, and paste it into Commons\' upload form.' : 'No description and no upload link: the map cannot go to Wikimedia Commons as it is (see the licence, above).'}</span>`;
     showPreview();
   }
 
@@ -473,7 +482,7 @@ export function createExport(root, preview, ctx) {
   // ---- Downloads ---------------------------------------------------------------------------------
   async function download(format) {
     await busy;
-    if (!composed?.licence.ok) return;
+    if (!composed) return;
     if (!contributors.load()) {
       const c = await ctx.askContributor?.();
       if (!c) { say('A map needs its author: give your name to download it.', true); return; }
@@ -489,7 +498,7 @@ export function createExport(root, preview, ctx) {
       const png = await rasterise(withFonts.svg, withFonts.width, withFonts.height);
       const p = page('png');
       blob = new Blob([withMeta(png, { dpi: s.dpi, text: {
-        Title: s.title, Author: composed.contributor?.name || '', Description: s.description, Copyright: `${composed.licence.licence.label} (${composed.licence.licence.iri})`,
+        Title: s.title, Author: composed.contributor?.name || '', Description: s.description, Copyright: composed.licence.ok ? `${composed.licence.licence.label} (${composed.licence.licence.iri})` : `Not under an open licence: ${composed.licence.refused.map((r) => `${r.name}: ${r.why}`).join('; ')}`,
         Source: p.sources.join('; '), Software: 'PLATO tools, https://pelagios.org/plato-tools/', 'Creation Time': new Date().toISOString(),
         'plato-tools:map': JSON.stringify(composed.common.settings),
       } })], { type: 'image/png' });
@@ -520,6 +529,9 @@ export function createExport(root, preview, ctx) {
     const s = settingsIn(await f.text());
     if (!s || s.version !== SETTINGS_VERSION || !s.view) { say(`${f.name} holds no settings of a map made here, so it cannot be made again.`, true); return; }
     const { made, tools, ...kept } = s;
+    // What a file says is not trusted as it is: its width and resolution brought within the panel's own bounds.
+    kept.width = Math.max(400, Math.min(8000, Math.round(Number(kept.width)) || 1600));
+    kept.dpi = Math.max(72, Math.min(1200, Math.round(Number(kept.dpi)) || 150));
     await open(kept);
     say(`Made again from ${f.name}'s settings.`);
   }

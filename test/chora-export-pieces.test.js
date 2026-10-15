@@ -71,6 +71,7 @@ test('a place as the export reads it: no denied or withdrawn location, its names
   assert.deepEqual(reasons, ['attribution']);
   assert.equal(p.licensing.length, 2);
   assert.deepEqual([labelClassOf(['sea']), labelClassOf(['Roman province']), labelClassOf(['settlement'])], ['water', 'region', 'settlement']);
-  assert.deepEqual(recordSites([p, { records: ['https://w3id.org/whg/id/place:pl:1', 'https://pleiades.stoa.org/places/1', 'https://example.org/gaz/7'] }]),
+  // A WHG record by its upstream gazetteer (its namespace); one of a namespace not known, by WHG.
+  assert.deepEqual(recordSites([p, { records: ['https://w3id.org/whg/id/place:pl:1', 'https://w3id.org/whg/id/place:zz:2', 'https://example.org/gaz/7'] }]),
     [{ site: 'Pleiades', count: 2 }, { site: 'example.org', count: 1 }, { site: 'World Historical Gazetteer', count: 1 }]);
 });

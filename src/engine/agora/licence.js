@@ -129,7 +129,7 @@ const list = (v) => (Array.isArray(v) ? v : v === undefined || v === null ? [] :
  * is a dataset (what Chora's adoption writes). The source a source was derived from is not read: its
  * licence is the original's, not that of the copy cited.
  */
-function sourcesTaken(a) {
+export function sourcesTaken(a) {
   const out = [];
   for (const s of list(a.sources)) if (isObject(s)) out.push({ source: s, copied: false });
   const geometry = list(a.geometries).length > 0;
