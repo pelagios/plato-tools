@@ -54,3 +54,27 @@ test('MapLibre\'s guard lets the relief\'s own protocol through, a tile address 
   for (const bad of ['plato-relief://evil.example.org/7/72/49', 'plato-relief://7/72/49?x=https://evil.example.org', 'https://tiles.example.org/7/72/49.png']) assert.throws(() => tr(bad), /Refused a request/, bad);
   assert.equal(blocked.length, 3);
 });
+
+test('the relief\'s first check reads only the file\'s first bytes: a host that ignores the range (200, the whole file) is not read through', async () => {
+  globalThis.document ??= { baseURI: 'https://pelagios.org/plato-tools/' };
+  const realFetch = globalThis.fetch;
+  let pulled = 0, cancelled = false, asked = 0;
+  // A long body (200 pieces of 64 KB, standing for 322 MB), made only as it is read; it starts with the PMTiles magic.
+  globalThis.fetch = async () => {
+    asked++;
+    let n = 0;
+    const body = new ReadableStream({
+      pull(c) { pulled++; n++; if (n > 200) { c.close(); return; } const b = new Uint8Array(65536); if (n === 1) b.set(new TextEncoder().encode('PMTiles')); c.enqueue(b); },
+      cancel() { cancelled = true; },
+    });
+    return new Response(body, { status: 200 });   // no Content-Range, no Content-Length: the range ignored
+  };
+  try {
+    const relief = await import('../src/chora/relief.js');
+    const a = await relief.available();
+    assert.ok(asked >= 1, 'it was asked');
+    assert.ok(cancelled, 'the body let go');
+    assert.ok(pulled <= 4, `${pulled} pieces of 64 KB read`);
+    assert.equal(a.ok, false, 'a host that does not serve ranges cannot serve the relief');
+  } finally { globalThis.fetch = realFetch; }
+});

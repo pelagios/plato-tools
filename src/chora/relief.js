@@ -28,7 +28,18 @@ export function available() {
     // development server's index page, with 200), which is "not on this site", as a 404 is.
     let r;
     try { r = await fetch(reliefUrl(), { headers: { Range: 'bytes=0-6' }, cache: 'no-cache' }); } catch (e) { return { ok: false, why: `the relief file could not be read (${String(e?.message || e).slice(0, 120)})` }; }
-    const head = r.ok ? new TextDecoder().decode((await r.arrayBuffer()).slice(0, 7)) : '';
+    // Read through the body's first bytes only, and let the rest go: a host that ignores the range (200, the whole
+    // file) would otherwise have the browser pull in all 322 MB here.
+    let head = '';
+    if (r.ok && r.body) {
+      const reader = r.body.getReader(), got = [];
+      let n = 0;
+      try { while (n < 7) { const { done, value } = await reader.read(); if (done) break; got.push(value); n += value.length; } }
+      finally { reader.cancel().catch(() => {}); }
+      const bytes = new Uint8Array(n); let at = 0;
+      for (const v of got) { bytes.set(v, at); at += v.length; }
+      head = new TextDecoder().decode(bytes.slice(0, 7));
+    }
     if (head !== 'PMTiles') return { ok: false, why: 'the relief file is not on this site' };
     try {
       const h = await pm().getHeader();
