@@ -52,6 +52,10 @@ jobs:
           ref: ${{ steps.plato.outputs.commit }}
           path: plato-repo
       - run: npm ci
+      # librsvg's rsvg-convert and the fonts Wikimedia Commons draws a map's labels in (DejaVu Sans, Noto Sans), for
+      # the test that renders a map made in Chora as Commons would (test/chora-export-rsvg.test.js): absent, it fails.
+      - name: rsvg-convert and the fonts Commons has
+        run: sudo apt-get update -q && sudo apt-get install -y --no-install-recommends librsvg2-bin fonts-dejavu-core fonts-noto-core
       - name: Unit and conversion tests
         shell: bash
         run: npm test 2>&1 | tee unit.log

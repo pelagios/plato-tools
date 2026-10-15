@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" version="1.1" width="800" height="560" viewBox="0 0 800 560" xml:lang="en">
+  <title>Attica</title>
+  <desc>Places of Attica</desc>
+  <metadata id="metadata">
+    <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#">
+      <cc:Work rdf:about="">
+        <dc:format>image/svg+xml</dc:format>
+        <dc:title>Attica</dc:title>
+        <dc:creator>
+          <cc:Agent>
+            <dc:title>Ada Lovelace</dc:title>
+          </cc:Agent>
+        </dc:creator>
+        <dc:date>2026-10-15</dc:date>
+        <cc:license rdf:resource="https://creativecommons.org/licenses/by/4.0/"/>
+        <dc:language>en</dc:language>
+      </cc:Work>
+    </rdf:RDF>
+    <plato:map xmlns:plato="https://w3id.org/plato-tools/map#" version="1">{"version":1,"view":{"center":[23.4,38.2],"zoom":6},"labels":{"p1":{"offset":[1,2]}}}</plato:map>
+  </metadata>
+  <g id="background" inkscape:groupmode="layer" inkscape:label="Background: Natural Earth">
+    <g id="ne-ocean">
+      <rect x="0" y="0" width="800" height="560" fill="#d5e3ea"/>
+    </g>
+    <g id="ne-land">
+      <path d="M90.52 -4L90.52 564L636.66 564L636.66 -4L90.52 -4Z" fill="#f4f2ec" fill-rule="evenodd"/>
+    </g>
+    <g id="ne-rivers">
+      <path d="M199.75 116.25L208.85 256.8" fill="none" stroke="#a9c4d4" stroke-width="1.08" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+  <g id="places" inkscape:groupmode="layer" inkscape:label="Places">
+    <g id="areas" fill="#b3261e" fill-opacity="0.18" stroke="#b3261e" stroke-width="1.35" stroke-linejoin="round">
+      <path d="M390.9 337.72L463.72 337.72L463.72 233.54L390.9 233.54L390.9 337.72Z" data-place="https://example.org/p/attica"/>
+    </g>
+    <g id="uncertainty" fill="#b3261e" fill-opacity="0.08" stroke="#b3261e" stroke-width="1.2" stroke-dasharray="0.15 2.63" stroke-linecap="round">
+      <path d="M412.74 286.03L411.52 286.09L410.31 286.27L409.12 286.57L407.96 286.98L406.86 287.51L405.81 288.14L404.82 288.87L403.91 289.69L403.09 290.6L402.36 291.59L401.74 292.64L401.21 293.75L400.8 294.9L400.51 296.09L400.33 297.3L400.27 298.52L400.33 299.74L400.51 300.95L400.81 302.14L401.23 303.29L401.75 304.4L402.38 305.44L403.11 306.43L403.93 307.33L404.84 308.15L405.82 308.88L406.87 309.51L407.98 310.03L409.13 310.44L410.31 310.74L411.52 310.92L412.74 310.97L413.96 310.92L415.17 310.74L416.36 310.44L417.51 310.03L418.61 309.51L419.66 308.88L420.65 308.15L421.55 307.33L422.38 306.43L423.1 305.44L423.74 304.4L424.26 303.29L424.67 302.14L424.97 300.95L425.15 299.74L425.22 298.52L425.16 297.3L424.98 296.09L424.68 294.9L424.27 293.75L423.75 292.64L423.12 291.59L422.39 290.6L421.57 289.69L420.66 288.87L419.68 288.14L418.63 287.51L417.52 286.98L416.37 286.57L415.18 286.27L413.97 286.09L412.74 286.03Z" data-place="https://example.org/p/eleusis"/>
+    </g>
+    <g id="precision-marks">
+      <g data-place="https://pleiades.stoa.org/places/579885">
+        <path d="M429.13 298.35L429.13 294.22M437.38 306.6L441.5 306.6M429.13 314.85L429.13 318.97M420.88 306.6L416.75 306.6" fill="none" stroke="#ffffff" stroke-width="4.5"/>
+        <path d="M429.13 298.35L429.13 294.22M437.38 306.6L441.5 306.6M429.13 314.85L429.13 318.97M420.88 306.6L416.75 306.6" fill="none" stroke="#1b1f24" stroke-width="1.5"/>
+      </g>
+      <g data-place="https://example.org/p/eleusis">
+        <path d="M422.87 298.51A10.13 10.13 0 1 1 402.62 298.51A10.13 10.13 0 1 1 422.87 298.51Z" fill="none" stroke="#ffffff" stroke-width="4.5"/>
+        <path d="M422.87 298.51A10.13 10.13 0 1 1 402.62 298.51A10.13 10.13 0 1 1 422.87 298.51Z" fill="none" stroke="#1b1f24" stroke-width="1.5" stroke-dasharray="3.75 2.63"/>
+      </g>
+    </g>
+    <g id="points" fill="#b3261e" stroke="#ffffff" stroke-width="0.98">
+      <circle cx="429.13" cy="306.6" r="3" data-place="https://pleiades.stoa.org/places/579885"/>
+      <circle cx="412.74" cy="298.51" r="3" data-place="https://example.org/p/eleusis"/>
+    </g>
+  </g>
+  <g id="labels" inkscape:groupmode="layer" inkscape:label="Labels">
+    <text data-place="https://pleiades.stoa.org/places/579885" font-family="Noto Sans, DejaVu Sans, Liberation Sans, sans-serif" text-anchor="start" fill="#1b1f24" stroke="#ffffff" stroke-width="2.25" stroke-linejoin="round" paint-order="stroke"><tspan x="444.76" y="309.72" font-size="9.75">Ἀθῆναι</tspan></text>
+    <text data-place="https://example.org/p/eleusis" font-family="Noto Sans, DejaVu Sans, Liberation Sans, sans-serif" text-anchor="end" fill="#1b1f24" stroke="#ffffff" stroke-width="2.25" stroke-linejoin="round" paint-order="stroke"><tspan x="397.11" y="296.95" font-size="9.75">Eleusis</tspan><tspan x="397.11" y="306.86" font-size="7.8">the Mysteries</tspan></text>
+    <text data-place="https://example.org/p/attica" font-family="Noto Sans, DejaVu Sans, Liberation Sans, sans-serif" text-anchor="middle" fill="#1b1f24" stroke="#ffffff" stroke-width="2.25" stroke-linejoin="round" paint-order="stroke" letter-spacing="1.46"><tspan x="436.41" y="271.53" font-size="9.75">ATTICA</tspan></text>
+    <text data-place="https://example.org/p/saronic" font-family="Noto Sans, DejaVu Sans, Liberation Sans, sans-serif" text-anchor="start" fill="#1f4e79" stroke="#ffffff" stroke-width="2.25" stroke-linejoin="round" paint-order="stroke" font-style="italic"><tspan x="410.95" y="357.63" font-size="9.75">Saronicus Sinus</tspan></text>
+  </g>
+  <g id="furniture" inkscape:groupmode="layer" inkscape:label="Scale, attribution and key">
+    <g id="scale-bar">
+      <rect x="7.5" y="520.55" width="143.44" height="31.42" fill="#ffffff" fill-opacity="0.75" rx="1.5"/>
+      <rect x="10.5" y="523.55" width="26" height="4.5" fill="#1b1f24" stroke="#1b1f24" stroke-width="0.6"/>
+      <rect x="36.5" y="523.55" width="26" height="4.5" fill="#ffffff" stroke="#1b1f24" stroke-width="0.6"/>
+      <rect x="62.5" y="523.55" width="26" height="4.5" fill="#1b1f24" stroke="#1b1f24" stroke-width="0.6"/>
+      <rect x="88.49" y="523.55" width="26" height="4.5" fill="#ffffff" stroke="#1b1f24" stroke-width="0.6"/>
+      <text x="118.24" y="528.05" font-family="Noto Sans, DejaVu Sans, Liberation Sans, sans-serif" font-size="8.25" text-anchor="start" fill="#1b1f24">100 km</text>
+      <text x="10.5" y="538.36" font-family="Noto Sans, DejaVu Sans, Liberation Sans, sans-serif" font-size="7.43" text-anchor="start" fill="#1b1f24">0</text>
+      <text x="10.5" y="548.26" font-family="Noto Sans, DejaVu Sans, Liberation Sans, sans-serif" font-size="7.43" text-anchor="start" fill="#1b1f24">at latitude 38° N</text>
+    </g>
+    <g id="attribution">
+      <rect x="568.61" y="526.48" width="220.89" height="23.02" fill="#ffffff" fill-opacity="0.8" rx="1.5"/>
+      <text x="786.5" y="535.85" font-family="Noto Sans, DejaVu Sans, Liberation Sans, sans-serif" font-size="7.13" text-anchor="end" fill="#1b1f24">Map: Ada Lovelace, CC BY 4.0, made with PLATO tools</text>
+      <text x="786.5" y="545.11" font-family="Noto Sans, DejaVu Sans, Liberation Sans, sans-serif" font-size="7.13" text-anchor="end" fill="#1b1f24">Modern coastline: Natural Earth, 50m (public domain)</text>
+    </g>
+    <g id="title">
+      <rect x="10.5" y="10.5" width="55.98" height="22.2" fill="#ffffff" fill-opacity="0.8" rx="1.5"/>
+      <text x="15" y="26.33" font-family="Noto Sans, DejaVu Sans, Liberation Sans, sans-serif" font-size="13.5" text-anchor="start" fill="#1b1f24">Attica</text>
+    </g>
+    <g id="inset">
+      <rect x="613.5" y="10.5" width="176" height="123.12" fill="#d5e3ea" stroke="#1b1f24" stroke-width="0.75"/>
+      <path d="M690.15 85.47L710.18 85.47L710.18 60L690.15 60L690.15 85.47Z" fill="#f4f2ec" stroke="#9aa5ab" stroke-width="0.3" fill-rule="evenodd"/>
+      <path d="M686.83 61.8L716.17 61.8L716.17 82.32L686.83 82.32L686.83 61.8" fill="none" stroke="#c0392b" stroke-width="1.2"/>
+    </g>
+    <g id="north-arrow">
+      <path d="M782 141.12L787.25 160.62L782 155.16L776.75 160.62Z" fill="#1b1f24" stroke="#ffffff" stroke-width="0.75"/>
+      <text x="782" y="170.37" font-family="Noto Sans, DejaVu Sans, Liberation Sans, sans-serif" font-size="9" text-anchor="middle" font-weight="bold" fill="#1b1f24">N</text>
+    </g>
+    <g id="key">
+      <rect x="7.5" y="458.08" width="415.24" height="55.5" fill="#ffffff" fill-opacity="0.8" rx="1.5"/>
+      <circle cx="18.75" cy="469.33" r="2.25" fill="#2757dd" stroke="#ffffff" stroke-width="0.75"/>
+      <path d="M18.75 464.99L18.75 462.83M23.08 469.33L25.25 469.33M18.75 473.66L18.75 475.82M14.42 469.33L12.25 469.33" fill="none" stroke="#ffffff" stroke-width="3.79"/>
+      <path d="M18.75 464.99L18.75 462.83M23.08 469.33L25.25 469.33M18.75 473.66L18.75 475.82M14.42 469.33L12.25 469.33" fill="none" stroke="#1b1f24" stroke-width="0.79"/>
+      <text x="31.5" y="472.08" font-family="Noto Sans, DejaVu Sans, Liberation Sans, sans-serif" font-size="7.88" text-anchor="start" fill="#1b1f24">Exact: surveyed, or by GPS</text>
+      <circle cx="18.75" cy="485.83" r="2.25" fill="#2757dd" stroke="#ffffff" stroke-width="0.75"/>
+      <path d="M24.07 485.83A5.32 5.32 0 1 1 13.43 485.83A5.32 5.32 0 1 1 24.07 485.83Z" fill="none" stroke="#ffffff" stroke-width="3.79"/>
+      <path d="M24.07 485.83A5.32 5.32 0 1 1 13.43 485.83A5.32 5.32 0 1 1 24.07 485.83Z" fill="none" stroke="#1b1f24" stroke-width="0.79" stroke-dasharray="1.97 1.38"/>
+      <text x="31.5" y="488.58" font-family="Noto Sans, DejaVu Sans, Liberation Sans, sans-serif" font-size="7.88" text-anchor="start" fill="#1b1f24">Approximate: estimated from maps or descriptions</text>
+      <circle cx="18.75" cy="502.33" r="6.27" fill="#2757dd" fill-opacity="0.1" stroke="#2757dd" stroke-width="1.13" stroke-dasharray="0.15 2.63" stroke-linecap="round"/>
+      <text x="31.5" y="505.08" font-family="Noto Sans, DejaVu Sans, Liberation Sans, sans-serif" font-size="7.88" text-anchor="start" fill="#1b1f24">Circle: how far the true position may be from the point, drawn to scale (points only)</text>
+    </g>
+  </g>
+</svg>

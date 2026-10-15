@@ -16,6 +16,7 @@
 // with drawMark and drawLineSample, so that the two cannot differ.
 import { PRECISIONS } from '../engine/chora/draw.js';
 import { circleAround, positions } from '../engine/chora/geo.js';
+import { markShapes, MARK_SIZE, INK, CASING } from '../engine/chora/marks.js';
 
 export { PRECISIONS };
 /** Each precision in words: its name, and PLATO's own gloss of it (plato:spatial_precision, ontology.ttl). */
@@ -27,11 +28,11 @@ export const PRECISION_WORDS = {
 };
 export const isPrecision = (p) => typeof p === 'string' && Object.hasOwn(PRECISION_WORDS, p);
 
-/** The size of a mark, in CSS pixels, square; the status's disc it surrounds is 16.5 across (map.js). */
-export const MARK_SIZE = 44;
+// The marks themselves are one list of shapes for each precision (src/engine/chora/marks.js), which this
+// file draws on a canvas and a map made from Chora's view writes in its SVG (#37): one description, two readers.
+export { MARK_SIZE, INK, CASING } from '../engine/chora/marks.js';
 /** A mark's image on the map, by precision: chora-precision-<value>. */
 export const markImage = (p) => `chora-precision-${p}`;
-export const INK = '#1b1f24', CASING = '#ffffff';
 const TAU = 2 * Math.PI;
 
 // A path stroked twice, wide in white and then in ink, so that it shows on any basemap. A dashed one
@@ -42,42 +43,16 @@ function inked(ctx, path, width, dash = []) {
   }
   ctx.setLineDash([]);
 }
-const RING = 13.5;
-const MARKS = {
-  // Four ticks out from the point: pinned to it.
-  exact(ctx, s) {
-    const c = s / 2;
-    inked(ctx, () => { for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) { ctx.moveTo(c + dx * 11, c + dy * 11); ctx.lineTo(c + dx * 16.5, c + dy * 16.5); } }, 2);
-  },
-  // A dashed ring, whole: about here.
-  approximate(ctx, s) {
-    const c = s / 2;
-    inked(ctx, () => ctx.arc(c, c, RING, 0, TAU), 2, [5, 3.5]);
-  },
-  // Three small hollow rings round the point, a third of a turn apart, and no ring: one of several
-  // places, and the point one of them.
-  uncertain(ctx, s) {
-    const c = s / 2;
-    for (const a of [-90, 30, 150]) {
-      const x = c + 13 * Math.cos((a * Math.PI) / 180), y = c + 13 * Math.sin((a * Math.PI) / 180);
-      ctx.beginPath(); ctx.arc(x, y, 4, 0, TAU); ctx.fillStyle = CASING; ctx.fill();
-      inked(ctx, () => ctx.arc(x, y, 3.2, 0, TAU), 1.6);
-    }
-  },
-  // The dashed ring of an approximate location, broken at the top right for an hourglass: approximate,
-  // from historical sources.
-  historical_approximate(ctx, s) {
-    const c = s / 2, gap = (a) => (a * Math.PI) / 180;
-    inked(ctx, () => ctx.arc(c, c, RING, gap(-12), gap(-78) + TAU), 2, [5, 3.5]);
-    // Out past the ring, clear of the status's disc (8.25 across from the point).
-    const x = c + 16.5 * Math.cos(gap(-45)), y = c + 16.5 * Math.sin(gap(-45));
-    ctx.beginPath(); ctx.arc(x, y, 8, 0, TAU); ctx.fillStyle = CASING; ctx.fill();
-    ctx.lineWidth = 1.5; ctx.strokeStyle = INK; ctx.stroke();
-    // The hourglass, 12 pixels tall: two triangles point to point.
-    ctx.beginPath(); ctx.moveTo(x - 4, y - 6); ctx.lineTo(x + 4, y - 6); ctx.lineTo(x - 4, y + 6); ctx.lineTo(x + 4, y + 6); ctx.closePath();
-    ctx.fillStyle = INK; ctx.fill();
-  },
-};
+/** Draw a mark's shapes (marks.js markShapes) on a 2D canvas context. */
+export function drawShapes(ctx, shapes) {
+  for (const s of shapes) {
+    if (s.kind === 'lines') inked(ctx, () => { for (const [a, b, c, d] of s.segments) { ctx.moveTo(a, b); ctx.lineTo(c, d); } }, s.width, s.dash);
+    else if (s.kind === 'arc') inked(ctx, () => ctx.arc(s.cx, s.cy, s.r, s.from, s.to), s.width, s.dash);
+    else if (s.kind === 'disc') { ctx.beginPath(); ctx.arc(s.cx, s.cy, s.r, 0, TAU); ctx.fillStyle = s.fill; ctx.fill(); }
+    else if (s.kind === 'ring') { ctx.beginPath(); ctx.arc(s.cx, s.cy, s.r, 0, TAU); ctx.lineWidth = s.width; ctx.strokeStyle = s.stroke; ctx.stroke(); }
+    else if (s.kind === 'polygon') { ctx.beginPath(); s.points.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.fillStyle = s.fill; ctx.fill(); }
+  }
+}
 /**
  * Draw the mark of precision `p` on `ctx`, a 2D canvas context of `size` CSS pixels each way (scaled
  * beforehand for a finer screen), centred on its middle. False, and nothing drawn, for a value PLATO
@@ -85,7 +60,7 @@ const MARKS = {
  */
 export function drawMark(ctx, p, size = MARK_SIZE) {
   if (!isPrecision(p)) return false;
-  ctx.save(); MARKS[p](ctx, size); ctx.restore();
+  ctx.save(); drawShapes(ctx, markShapes(p, size)); ctx.restore();
   return true;
 }
 
