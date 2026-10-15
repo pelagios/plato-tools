@@ -54,6 +54,14 @@ export const OPERATIONS = Object.fromEntries([
     permissions: [['iiif', '<site>'], ['allmaps', 'allmaps']],
     waitsFor: 'the places to be traced from the map in Chora, into a new dataset, and that dataset saved there, which does the step',
     takes: {}, gives: { dataset: 'dataset' } }),
+  // Making a map of the places to share (the recipe "Make an open map", #37): in Chora's "Make a map", the view
+  // framed and the labels set, the map downloaded there, which does the step (src/methodos/page.js, mapped): what was
+  // downloaded is the step's result, a hand-off of its own type, `map`. "This step is done" cannot do it, as the map is
+  // made and downloaded in Chora, not chosen in step 1. Its permissions are only those of a background on another site,
+  // asked in Chora as ever: on Natural Earth, nothing is asked of any other site.
+  op({ key: 'map.export', title: 'Make the map, and download it', tool: 'Chora', kind: 'interactive',
+    waitsFor: 'the map to be made in Chora ("Make a map") and downloaded there, which does the step',
+    takes: { dataset: { types: ANY } }, gives: { map: 'map' } }),
   // The regions a table's places lie in (Hermes's "within" columns, minted as regions of their own when
   // the table is converted under a base address), identified level by level, the widest first, each
   // level looked up within the match of the level above (Krisis's region review, src/engine/krisis/

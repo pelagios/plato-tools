@@ -483,7 +483,8 @@ def within_checks(page, tmp):
           and (p0.get('attestations') or [{}])[0].get('notes') == 'Within (as the source gives it): England > Surrey > Rotherhithe',
           {'before': d1, 'after': d2, 'done': done, 'state': st.get('splits'), 'place': p0})
 
-    # A pasted list: nothing to use says so and chooses nothing; a list becomes a one-column table, "name".
+    # A pasted list: nothing to use says so and chooses nothing; a list becomes a table of two columns, "id" (made from
+    # each name, so that the places have addresses under the base address) and "name".
     try:
         page.set_input_files('#picker', [])
         if not page.locator('#paste').evaluate('(d) => d.open'): page.click('#paste summary')
@@ -493,13 +494,15 @@ def within_checks(page, tmp):
         phase_empty = wait_state(page, lambda s: True, 2).get('phase')
         page.get_by_label('Paste a list of names, one per line', exact=True).fill('Rotherhithe\nNewport, Isle of Wight\n')
         page.click('#paste-use')
-        st = wait_state(page, lambda s: s.get('phase') == 'detected' and (s.get('columns') or {}).get('headers') == ['name'], 60, 'pasted list')
+        st = wait_state(page, lambda s: s.get('phase') == 'detected' and (s.get('columns') or {}).get('headers') == ['id', 'name'], 60, 'pasted list')
         chosen = page.inner_text('#chosen'); message = page.inner_text('#paste-message'); ok = True
     except Exception as e: st = {}; chosen = empty = message = ''; phase_empty = None; ok = str(e).split('\n')[0][:200]
     ex = ((st.get('columns') or {}).get('examples') or {}).get('name')
-    check('pasted list: an empty list is refused with a message and nothing chosen; a list is read as a table of places of one column, "name", read as the name',
+    ids = ((st.get('columns') or {}).get('examples') or {}).get('id')
+    check('pasted list: an empty list is refused with a message and nothing chosen; a list is read as a table of places of two columns, "id" made from each name and "name", read as the id and the name',
           ok is True and 'paste one name on each line' in empty and phase_empty != 'detected'
-          and st.get('format') == 'csv' and (st.get('columns') or {}).get('mapping') == {'name': 'name'} and ex == ['Rotherhithe', 'Newport, Isle of Wight']
+          and st.get('format') == 'csv' and (st.get('columns') or {}).get('mapping') == {'id': 'id', 'name': 'name'} and ex == ['Rotherhithe', 'Newport, Isle of Wight']
+          and ids == ['rotherhithe', 'newport-isle-of-wight']
           and 'pasted-list.csv' in chosen and message == '', {'ok': ok, 'empty': empty, 'phase': phase_empty, 'state': st.get('columns'), 'chosen': chosen[:200]})
 
 
@@ -2930,6 +2933,7 @@ def main():
             open_map_compose_checks(pw, url, tmp)
             open_map_export_checks(pw, url, tmp)
             open_map_historical_checks(pw, url, tmp)
+            open_map_workflow_checks(pw, url, tmp)
     finally:
         stop(srv)
         stop_fixtures()
@@ -11578,5 +11582,192 @@ def open_map_historical_checks(pw, url, tmp):
     attempt('Make an open map: across the historical-map checks, the map\'s own server was asked, and no page error', lambda: (len(census()) > 5 and not errors, {'asked': len(census()), 'errors': errors[:5]}))
     ctx.close()
     stop_fixtures()
+
+# ---- Make an open map (#37): the Methodos workflow, followed on the page, from pasted names ----------------
+# The interview ("A list of place names" to "A map image for Wikipedia or Commons"), then three names pasted, their
+# columns matched, checked, made a dataset under the base address, looked up in a stand-in WHG (a route: never the
+# real one), accepted, recorded, each located in Chora by adopting its match's location (the stand-in's record),
+# checked again, and the map made and downloaded in Chora, which does the last step and ends the workflow.
+OPENMAP_BASE = 'https://example.org/listed/'
+OPENMAP_SPOTS = {'Athenae': ('place:pl:579885', [23.7267, 37.9715]), 'Eleusis': ('place:pl:579920', [23.5417, 38.0389]), 'Piraeus': ('place:pl:580048', [23.6466, 37.9429])}
+# What the stand-in WHG says of its sources' licences, as WHG's answer carries them: its records' namespace, pl, under
+# Pleiades's CC BY 3.0, which the locations adopted from them carry (without it the map is refused: a licence not known).
+OPENMAP_ATTRIBUTION = {'whg': {'license': 'CC-BY-4.0'}, 'sources': {'pl': {'license': {'spdx_id': 'CC-BY-3.0', 'permits_commercial': True, 'no_derivatives': False}, 'redistributable': True}}}
+def openmap_answer(name):
+    pid, pt = OPENMAP_SPOTS[name]
+    return {'id': pid, 'name': name, 'score': 100, 'match': True, 'description': 'Country: GR', 'ccodes': ['GR'], 'repr_point': pt, 'namespace': 'pl', 'alt_names': [], 'has_geom': True, 'confidence': 100}
+
+def open_map_workflow_checks(pw, url, tmp):
+    import re
+    base = url.rstrip('/') + '/'; here = urlparse(base).netloc
+    out = tmp / 'openmap'; out.mkdir(exist_ok=True)
+    browser = pw.chromium.launch(headless=True, args=GL)
+    ctx = browser.new_context(accept_downloads=True, viewport={'width': 1500, 'height': 1000}, reduced_motion='reduce')
+    ctx.add_init_script('window.__plato_forceDownload = true;')
+    cors = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS', 'Access-Control-Allow-Headers': 'authorization, content-type, accept, user-agent'}
+    posts, gets, asked = [], [], []
+    def stub(route):
+        req = route.request
+        if req.method == 'OPTIONS': return route.fulfill(status=204, headers=cors)
+        reply = lambda body, status=200: route.fulfill(status=status, headers={**cors, 'Content-Type': 'application/json'}, body=json.dumps(body))
+        if req.method == 'GET':
+            gets.append(req.url)
+            for name, (pid, pt) in OPENMAP_SPOTS.items():
+                if f'/entity/{pid}/api' in req.url:
+                    return reply({'@id': f'https://whgazetteer.org/entity/{pid}/api', 'type': 'Feature', 'properties': {'title': name, 'ccodes': ['GR']},
+                                  'geometry': {'type': 'Point', 'coordinates': pt}, 'names': [{'toponym': name, 'lang': 'la'}]})
+            return reply({'detail': 'Not found'}, 404)
+        body = json.loads(req.post_data or '{}'); posts.append(body)
+        res = {'attribution': OPENMAP_ATTRIBUTION}
+        for k, q in (body.get('queries') or {}).items():
+            name = (q.get('query') or '').replace(' adopt', '')
+            res[k] = {'result': [openmap_answer(name)] if name in OPENMAP_SPOTS else []}
+        reply(res)
+    ctx.route(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'), stub)
+    ctx.on('request', lambda r: asked.append(r.url))
+    page = ctx.new_page()
+    errors = []; page.on('pageerror', lambda e: errors.append(str(e)[:200]))
+    r = {}
+    track = lambda: page.evaluate(JOIN_STATE)
+    def step_is(step, state, timeout=60):
+        until(page, f"() => document.querySelector('#methodos-track li[data-step=\"{step}\"]')?.dataset.state === '{state}'", timeout)
+    def choose(fs):
+        page.set_input_files('#picker', [])
+        page.set_input_files('#picker', [str(f) for f in fs])
+        s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection')
+        if s.get('phase') != 'detected': raise RuntimeError(f'not detected: {s.get("phase")}')
+        return s
+    def run(button, timeout=180):
+        page.click(button)
+        return wait_state(page, lambda s: s.get('phase') in ('done', 'error'), T(timeout), 'run')
+    def saved(s, ending):
+        n = next((o['name'] for o in (s.get('outputs') or []) if o['name'].endswith(ending)), None)
+        if not n: raise RuntimeError(f'no output ending {ending}: {[o["name"] for o in s.get("outputs") or []]}')
+        return download(page, n, out / n)
+    def need(*keys):
+        missing = [k for k in keys if not r.get(k)]
+        if missing: raise RuntimeError(f'an earlier step did not finish ({", ".join(missing)})')
+    foreign = lambda: sorted({urlparse(u).netloc for u in asked if urlparse(u).scheme in ('http', 'https') and urlparse(u).netloc != here})
+
+    def begin():
+        page.goto(NOTOOLS if PROVE else base)
+        page.evaluate("""() => { localStorage.setItem('plato-tools.permissions', JSON.stringify({ version: 1, grants: { 'gazetteer:whg': { state: 'allowed', at: '2026-10-15T10:00:00Z' } } }));
+          localStorage.setItem('plato-tools.reviewer', JSON.stringify({ name: 'Map Reviewer' })); localStorage.setItem('chora-contributor', JSON.stringify({ name: 'Map Reviewer' })); }""")
+        page.goto(NOTOOLS if PROVE else base)
+        wait_state(page, lambda s: s.get('phase') == 'ready' and s.get('canary') in ('enforced', 'not-enforced'), T(30), 'ready')
+        page.evaluate("() => { const b = document.getElementById('base'); b.value = %s; b.dispatchEvent(new Event('change')); const v = document.getElementById('reviewer'); v.value = 'Map Reviewer'; v.dispatchEvent(new Event('change')); }" % json.dumps(OPENMAP_BASE))
+        page.click('#methodos-ask'); until(page, "!document.getElementById('methodos').hidden", 5)
+        page.check('input[name="methodos-have"][value="table"]'); page.check('input[name="methodos-want"][value="commons"]')
+        want = page.inner_text('label:has(input[name="methodos-want"][value="commons"])')
+        r['base shown'] = page.input_value('#methodos-base')
+        planned = page.eval_on_selector_all('#methodos-plan li', 'ls => ls.map((l) => l.textContent)')
+        page.click('#methodos-start'); until(page, "['pending', 'idle'].includes(document.getElementById('methodos-tracker').dataset.status)", 10)
+        if not page.evaluate("() => document.getElementById('paste').open"): page.click('#paste summary')
+        page.fill('#paste-text', 'Athenae\nEleusis\nPiraeus'); page.click('#paste-use')
+        s = wait_state(page, lambda s: s.get('phase') == 'detected' and (s.get('columns') or {}).get('headers') == ['id', 'name'], T(60), 'pasted list')
+        until(page, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+        t = track(); r['begun'] = t
+        return ('A map image for Wikipedia or Commons' in want and r['base shown'] == OPENMAP_BASE and t['steps'].get('columns') == 'current'
+                and (s.get('columns') or {}).get('headers') == ['id', 'name'] and (s.get('columns') or {}).get('mapping') == {'id': 'id', 'name': 'name'}
+                and list(t['steps']) == ['columns', 'check', 'dataset', 'lookup', 'review', 'apply', 'place', 'again', 'map']
+                and all(x in ' '.join(planned) for x in ('Match the columns to PLATO', 'Look the places up', 'Locate the places in Chora', 'Make the map in Chora, and download it'))), {
+            'want': want, 'base': r['base shown'], 'steps': t['steps'], 'columns': (s.get('columns') or {}).get('headers'), 'planned': [x[:60] for x in planned]}
+    attempt('Make an open map (workflow): the interview\'s "A map image for Wikipedia or Commons" from a list of names gives its nine steps, the base address shown from Options; three names pasted begin it, read as a table of "id" and "name"', begin)
+
+    def to_the_dataset():
+        need('begun')
+        page.click('#methodos-done'); step_is('columns', 'done', 15)
+        r['check'] = run('#check').get('phase'); step_is('check', 'done')
+        page.select_option('#target', 'plato-json')
+        s = run('#convert'); step_is('dataset', 'done')
+        r['converted'] = saved(s, '.json')
+        doc = json.loads(r['converted'].read_text())
+        ids = sorted(e['@id'] for e in doc['spatialEntities'])
+        return (r['check'] == 'done' and ids == [OPENMAP_BASE + 'place/athenae', OPENMAP_BASE + 'place/eleusis', OPENMAP_BASE + 'place/piraeus']
+                and track()['steps'].get('lookup') == 'current'), {'ids': ids, 'steps': track()['steps']}
+    attempt('Make an open map (workflow): the columns matched, the list checked and made a dataset, each place given its address under the base address from its name', to_the_dataset)
+
+    def looked_up_and_recorded():
+        need('converted')
+        choose([r['converted']])
+        if not page.evaluate("() => document.getElementById('lookup').open"): page.click('#lookup > summary')
+        page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
+        page.wait_for_function("() => /^Send 3 queries to WHG$/.test(document.getElementById('lookup-send').textContent) && !document.getElementById('lookup-send').disabled", timeout=T(60) * 1000)
+        n = len(posts)
+        page.click('#lookup-send'); step_is('lookup', 'done', 90)
+        sent = sorted(q['query'] for p in posts[n:] for q in p['queries'].values())
+        until(page, "() => !document.getElementById('bulk-accept').disabled", 30)
+        page.click('#bulk-accept')
+        wait_state(page, lambda s: sum(1 for c in (s.get('work') or {}).get('candidates', []) if (c.get('decision') or {}).get('kind') == 'match') == 3, T(15), 'accepted')
+        page.click('#methodos-done'); step_is('review', 'done', 15)
+        page.check('input[name="review-output"][value="dataset"]')
+        s = run('#finish'); step_is('apply', 'done', 30)
+        r['recorded'] = saved(s, '.krisis-dataset.json')
+        doc = json.loads(r['recorded'].read_text())
+        idents = [i for e in doc['spatialEntities'] for a in e['attestations'] for i in a.get('identities') or []]
+        geoms = [g for e in doc['spatialEntities'] for a in e['attestations'] for g in a.get('geometries') or []]
+        return (sent == ['Athenae', 'Eleusis', 'Piraeus'] and len(idents) == 3 and geoms == [] and track()['steps'].get('place') == 'current'), {
+            'sent': sent, 'identities': len(idents), 'geometries': len(geoms), 'steps': track()['steps']}
+    attempt('Make an open map (workflow): the names looked up in the stand-in WHG (the three names sent), accepted, and the decisions recorded: each place identified, none yet located, and the workflow waits at locating them', looked_up_and_recorded)
+
+    def located():
+        need('recorded')
+        choose([r['recorded']])
+        page.click('#for-tool a[href="#chora"]')
+        until(page, 'window.__chora && window.__chora.mapReadyCount >= 1 && ["loaded", "error", "unrecognised"].includes(window.__chora.phase)', 90)
+        if cstate(page).get('phase') != 'loaded': raise RuntimeError(f'not opened: {cstate(page).get("phase")}')
+        for name, (pid, _) in OPENMAP_SPOTS.items():
+            chora_pick(page, name.lower())
+            page.click('#adopt-find'); until(page, '() => window.__chora.adopt && window.__chora.adopt.open', 10)
+            if not page.is_visible('#adopt-token-forget'): page.fill('#adopt-token', LOOKUP_TOKEN); page.press('#adopt-token', 'Enter')
+            page.fill('#adopt-q', f'{name} adopt'); page.click('#adopt-send')
+            until(page, '() => ["answered", "problem"].includes(window.__chora.adopt.phase)', 30)
+            page.click(f'#adopt-candidates li[data-cand="{pid}"] button[data-preview]')
+            until(page, '() => window.__chora.adopt.phase === "preview"', 30)
+            page.click('#adopt-go'); until(page, '() => window.__chora.adopt.phase === "adopted"', 10)
+        until(page, '() => window.__chora.draftWrites === 0', 10)
+        page.click('#chora-save'); until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
+        ls = cstate(page)['lastSave'] or {}
+        with page.expect_download(timeout=T(60) * 1000) as d: page.click('#chora-save-result button.primary')
+        r['located'] = out / ls['outputs'][0]['name']; d.value.save_as(r['located'])
+        until(page, '() => !!window.__chora.handedOver && window.__plato.phase === "detected"', 60)
+        step_is('place', 'done', 15)
+        # The download is on the disk: the drawings let go, and the file saved is the dataset open in Chora from now.
+        page.click('#chora-save-result [data-clear]')
+        until(page, 'n => window.__chora.rebased === n && ["loaded", "place"].includes(window.__chora.phase)', 60, r['located'].name)
+        page.click('#chora-leave')
+        r['again'] = run('#check').get('phase'); step_is('again', 'done')
+        return ls.get('passed') is True and r['again'] == 'done' and track()['steps'].get('map') == 'current', {'save': {k: ls.get(k) for k in ('passed', 'added')}, 'again': r['again'], 'steps': track()['steps']}
+    attempt('Make an open map (workflow): in Chora, each place\'s location adopted from its match, saved (the version check passed), which does the step; checked again; the workflow waits at the map', located)
+
+    def made_the_map():
+        need('located')
+        message = track()['message']
+        page.click('#for-tool a[href="#chora"]')
+        # The dataset located is still open there (saved), or opened again.
+        until(page, 'window.__chora && ["loaded", "saved", "place"].includes(window.__chora.phase) && window.__chora.mapReadyCount >= 1', 90)
+        # The view framed on the three places, as the user frames it.
+        page.evaluate('() => window.__chora_map.jumpTo({ center: [23.63, 37.98], zoom: 9.2 })'); page.evaluate(SETTLE)
+        page.click('#chora-export-open')
+        until(page, '() => window.__chora.export && window.__chora.export.phase === "ready"', 90)
+        made = page.evaluate(EXPORT_STATE) or {}
+        if page.is_disabled('#chora-export-svg'): return False, {'not offered': made.get('licence'), 'places': made.get('places')}
+        with page.expect_download(timeout=T(120) * 1000) as d: page.click('#chora-export-svg')
+        svg_path = out / d.value.suggested_filename; d.value.save_as(svg_path); svg = svg_path.read_text()
+        until(page, "() => document.querySelector('#methodos-track li[data-step=\"map\"]')?.dataset.state === 'done'", 30)
+        said = page.inner_text('#chora-export-said')
+        # The last step done, and no step current: the workflow is at its end (the tracker stays as Map your data's does).
+        status = page.evaluate("() => document.getElementById('methodos-tracker').dataset.status")
+        steps = track()['steps']; current = page.evaluate("() => !!document.querySelector('#methodos-track li.is-current')")
+        labels = sorted(re.findall(r'<tspan[^>]*>([^<]+)</tspan>', svg.split('id="labels"')[1].split('id="furniture"')[0])) if 'id="labels"' in svg else []
+        return (labels == ['Athenae', 'Eleusis', 'Piraeus'] and "The workflow's step “Make the map in Chora, and download it” is done with it." in said
+                and status in ('completed', 'idle') and not current and set(steps.values()) == {'done'} and len(steps) == 9
+                and made['licence']['ok'] and made['licence']['label'] == 'CC BY 4.0' and 'Places identified with World Historical Gazetteer' in svg
+                and 'downloaded there, which does the step. Open Chora, frame the view, and make the map there' in message and 'Say when it is done' not in message
+                and set(foreign()) <= {'whgazetteer.org'} and gets), {
+            'labels': labels, 'said': said, 'status': status, 'steps': steps, 'current': current, 'message': message[:200], 'foreign': foreign(), 'records asked': len(gets)}
+    attempt('Make an open map (workflow): the map made in Chora of the three places located, labelled, CC BY 4.0, downloaded as an SVG, which does the last step: every step done; nothing asked of any site but this one and the stand-in WHG', made_the_map)
+    attempt('Make an open map (workflow): no page error along the way, and the stand-in WHG was asked', lambda: (bool(posts) and not errors, {'posts': len(posts), 'errors': errors[:5]}))
+    ctx.close(); browser.close()
 
 if __name__ == '__main__': main()

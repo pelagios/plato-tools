@@ -243,5 +243,38 @@
    "site",
    "w3id"
   ]
+ },
+ {
+  "have": "table",
+  "want": "commons",
+  "yes": {},
+  "recipe": "make-an-open-map",
+  "steps": [
+   "columns",
+   "check",
+   "dataset",
+   "lookup",
+   "review",
+   "apply",
+   "place",
+   "again",
+   "map"
+  ],
+  "base": "https://example.org/listed/"
+ },
+ {
+  "have": "plato",
+  "want": "commons",
+  "yes": {},
+  "recipe": "make-an-open-map",
+  "steps": [
+   "check-a",
+   "lookup",
+   "review",
+   "apply",
+   "place",
+   "again",
+   "map"
+  ]
  }
 ]

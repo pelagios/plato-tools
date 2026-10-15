@@ -232,7 +232,7 @@ export const PASTE_WORDS = {
   summary: 'Or paste a list of names',
   label: 'Paste a list of names, one per line',
   use: 'Use this list',
-  note: 'Read as a table of places with one column, “name”, as a file dropped here would be.',
+  note: 'Read as a table of places with two columns, “id” (made from each name) and “name”, as a file dropped here would be.',
   empty: 'There are no names to use: paste one name on each line.',
 };
 

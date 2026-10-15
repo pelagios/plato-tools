@@ -415,19 +415,19 @@ test('with a name column already, a split\'s first part is one of the place\'s o
 });
 
 // ---- the pasted list ------------------------------------------------------------------------------
-test('a pasted list becomes a CSV of one column, "name", that the tables reader reads as names', async () => {
-  const text = '  St Mary; Kent \r\n\nNewport, Isle of Wight\nThe "Old" Mill\tbarn\n';
-  assert.equal(pastedListCsv(text), 'name\n"St Mary; Kent"\n"Newport, Isle of Wight"\n"The ""Old"" Mill\tbarn"\n');
+test('a pasted list becomes a CSV of two columns, "id" (made from the name, unique) and "name", that the tables reader reads as ids and names', async () => {
+  const text = '  St Mary; Kent \r\n\nNewport, Isle of Wight\nThe "Old" Mill\tbarn\nSt Mary; Kent\nἈθῆναι\n';
+  assert.equal(pastedListCsv(text), 'id,name\n"st-mary-kent","St Mary; Kent"\n"newport-isle-of-wight","Newport, Isle of Wight"\n"the-old-mill-barn","The ""Old"" Mill\tbarn"\n"st-mary-kent-2","St Mary; Kent"\n"place","Ἀθῆναι"\n');
   assert.equal(pastedListCsv(' \n\n'), null);
   const f = pastedListFile(text);
   assert.equal(f.name, PASTED_FILE_NAME);
   const input = await detect([f]);
   assert.equal(input.format, 'csv');
   const { headers, sample } = await columnsOf(input);
-  assert.deepEqual(headers, ['name']);
-  assert.deepEqual(sample.map((r) => r.name), ['St Mary; Kent', 'Newport, Isle of Wight', 'The "Old" Mill\tbarn']);
+  assert.deepEqual(headers, ['id', 'name']);
+  assert.deepEqual(sample.map((r) => r.name), ['St Mary; Kent', 'Newport, Isle of Wight', 'The "Old" Mill\tbarn', 'St Mary; Kent', 'Ἀθῆναι']);
   const m = await mappingOf(input);
-  assert.equal(m.mapping.name, 'name');
+  assert.equal(m.mapping.name, 'name'); assert.equal(m.mapping.id, 'id');
   // Control: the same names unquoted would be read with ";" or "," as a separator.
   const loose = await detect([new File(['name\nSt Mary; Kent\nNewport, Isle of Wight\n'], 'loose.csv')]);
   assert.notDeepEqual((await columnsOf(loose)).sample.map((r) => r.name), ['St Mary; Kent', 'Newport, Isle of Wight']);

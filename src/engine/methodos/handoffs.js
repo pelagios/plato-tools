@@ -14,6 +14,8 @@ export const TYPES = {
   deposit: 'the files for a deposit (the FAIR report and citation)',
   site: "a dataset's web site, and the files for its repository",
   w3id: 'the permanent-address rules for w3id.org',
+  // A map made in Chora's "Make a map" (#37): the SVG or the PNG downloaded, its settings kept in it.
+  map: 'a map made in Chora, as an SVG or a PNG, its settings kept in it',
 };
 
 export class HandoffError extends Error {

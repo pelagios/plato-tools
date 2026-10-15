@@ -1791,7 +1791,7 @@ export function mountChora(rootEl, context = {}) {
   initMaps();
   updateTraceButtons();
   exporter = createExport($('export'), $('export-preview'), {
-    mapApi, state, request, layers, dataset: () => dataset, overview: () => overview, saveFile, host, askContributor: contributorFor,
+    mapApi, state, request, layers, dataset: () => dataset, overview: () => overview, files: () => files, saveFile, host, askContributor: contributorFor,
   });
   adopt = createAdopt({ root: $('adopt'), mapApi, state, addAdoption, armConsult: (c) => { consultArmed = c; state.consultArmed = c ? c.record : null; },
     adopted: (placeId) => drafts.filter((d) => d.kind === 'adoption' && d.placeId === placeId),

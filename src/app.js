@@ -1046,6 +1046,9 @@ async function openChora() {
       files: () => files,
       choose: (list) => { const dt = new DataTransfer(); for (const f of list) dt.items.add(f); $('picker').files = dt.files; choose(list); },
       saved: choraSaved,
+      // A map made in Chora and downloaded ("Make a map", #37), from the files Chora had open: in a workflow at its step
+      // "Make the map", that step's result (Methodos's mapped). A promise of what to say, in words, or null.
+      exported: (files, base) => methodos.mapped(files, base),
       // The workflow's Scope (Methodos's), for adopting a location from WHG.
       scope: () => methodos.scope(),
       // WHG's lookup, the page's one (one queue, whoever asks); and what it does when a request is refused.

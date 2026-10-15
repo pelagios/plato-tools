@@ -6,11 +6,12 @@ import placesFromTei from './places-from-tei.js';
 import placesFromRecogito from './places-from-recogito.js';
 import matchTwoDatasets from './match-two-datasets.js';
 import traceAMap from './trace-a-map.js';
+import makeAnOpenMap from './make-an-open-map.js';
 
 const deepFreeze = (o) => { if (o && typeof o === 'object' && !Object.isFrozen(o)) { Object.freeze(o); Object.values(o).forEach(deepFreeze); } return o; };
 
 /** Each recipe, checked, frozen, with its digest. */
-export const RECIPES = Object.fromEntries([mapYourData, publishADataset, placesFromTei, placesFromRecogito, matchTwoDatasets, traceAMap].map((r) => {
+export const RECIPES = Object.fromEntries([mapYourData, publishADataset, placesFromTei, placesFromRecogito, matchTwoDatasets, traceAMap, makeAnOpenMap].map((r) => {
   check(r);
   return [r.key, deepFreeze({ ...r, digest: digest(r) })];
 }));

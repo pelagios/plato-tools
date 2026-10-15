@@ -51,9 +51,22 @@ export function exportPlace(record, { id, withdrawn = null, brief = null, identi
   return { id: id ?? v.id, label: v.label, names, geometries, point, cls: labelClassOf(v.types.map((t) => t.label || '')), records, licensing };
 }
 
-/** The sites the places were identified at, with how many each: [{ site, count }], most first: for the attribution. */
+// The gazetteers a record's address names, by the start of the address: WHG's persistent addresses are on w3id.org
+// (src/engine/hermes/addresses.js), which would tell a reader nothing; any other is named by its site.
+const GAZETTEERS = [
+  ['https://w3id.org/whg/', 'World Historical Gazetteer'], ['https://whgazetteer.org/', 'World Historical Gazetteer'],
+  ['https://pleiades.stoa.org/', 'Pleiades'], ['https://sws.geonames.org/', 'GeoNames'], ['https://www.geonames.org/', 'GeoNames'],
+  ['http://www.wikidata.org/', 'Wikidata'], ['https://www.wikidata.org/', 'Wikidata'], ['http://vocab.getty.edu/tgn/', 'Getty TGN'],
+];
+/** The gazetteer (or site) a record's address is of, in words. */
+export function gazetteerOf(address) {
+  const g = GAZETTEERS.find(([p]) => String(address).startsWith(p));
+  if (g) return g[1];
+  try { return new URL(address).hostname.replace(/^www\./, ''); } catch { return null; }
+}
+/** The gazetteers the places were identified with, with how many records each: [{ site, count }], most first: for the attribution. */
 export function recordSites(places) {
   const c = new Map();
-  for (const p of places) for (const r of p.records || []) { let h; try { h = new URL(r).hostname.replace(/^www\./, ''); } catch { continue; } c.set(h, (c.get(h) || 0) + 1); }
+  for (const p of places) for (const r of p.records || []) { const h = gazetteerOf(r); if (h) c.set(h, (c.get(h) || 0) + 1); }
   return [...c].map(([site, count]) => ({ site, count })).sort((a, b) => b.count - a.count || a.site.localeCompare(b.site));
 }

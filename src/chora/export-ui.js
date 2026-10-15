@@ -497,7 +497,8 @@ export function createExport(root, preview, ctx) {
     const file = new File([blob], name, { type: blob.type });
     await ctx.saveFile(file, name);
     st.downloads.push({ name, format, size: file.size });
-    const step = await ctx.host?.exported?.([file]);
+    // In a workflow at its step "Make the map": that step's result, if the dataset open here is the one that went to it.
+    const step = await ctx.host?.exported?.([file], ctx.files?.() || null);
     say([`${name} is downloaded (${Math.round(file.size / 1024).toLocaleString('en-GB')} KB).`, step].filter(Boolean).join(' '));
   }
   /** The PNG of an SVG, drawn by the browser at its own size. */

@@ -28,8 +28,9 @@ const MAIN = { check: 'files', convert: 'files', compare: 'later', 'publish.repo
 // the region each place is in is Krisis's Finish (its 'apply' run), on a review whose candidates are exported.
 const RUN_OF = { 'relate.containment': 'apply' };
 const runOf = (op) => RUN_OF[op] || op;
-// The steps done in Chora, on the map (#chora): drawing on a dataset that went to it, or tracing a map into a new one.
-const CHORA_STEPS = new Set(['place', 'trace']);
+// The steps done in Chora, on the map (#chora): drawing on a dataset that went to it, tracing a map into a new one, or
+// making a map of the dataset's places to share ("Make a map", #37).
+const CHORA_STEPS = new Set(['place', 'trace', 'map.export']);
 /** What to put right, from a run's report with errors or a run that did not finish (as adapters.js's problemOf, without the engine). */
 function problemOf(r) {
   const errors = r?.report?.errors || 0;
@@ -607,6 +608,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       if (!files.length) throw new Error('Trace the places in Chora and save the dataset there first: its save chooses it in “Choose your data”, and does this step.');
       return { dataset: await refsHeld(files, 'dataset', { own: true }) };
     }
+    if (s.op === 'map.export') throw new Error('Make the map in Chora (“Make a map”, under its places) and download it there: its download does this step.');
     throw new Error(`The step “${s.title}” is done by the tools, when its run finishes.`);
   }
   async function finishInteractive(s, outputs) {
@@ -644,6 +646,27 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       const next = atStep();
       say(`${names(files)}, saved in Chora: the step “${s.title}” is done with it.`); render(false);
       resolve(`The workflow's step “${s.title}” is done with it${next ? `, and the workflow goes on to “${next.title}”: leave the map to carry on` : ''}.`);
+    }).then(() => resolve(null)));
+  }
+  /**
+   * A map made in Chora and downloaded (`files`: the SVG or the PNG, #37), from the dataset Chora had open (`base`):
+   * with the workflow at its step "map.export", and `base` the dataset that went to that step, the step's result, a
+   * hand-off of type `map`, and the step is done. Made from another dataset, it is not, and both here and under the
+   * download it is said why. Resolves with what to say of it, in words, or null when the workflow is not at that step.
+   */
+  function mapped(files, base) {
+    return new Promise((resolve) => chain(async () => {
+      const s = wf && !changed ? atStep() : null;
+      if (!s || s.op !== 'map.export') { resolve(null); return; }
+      const went = currentInput(wf, s);
+      if (went && base && !sameRefs(went, await refsOf([...base], 'dataset'))) {
+        const why = `It was made from ${[...base].map((f) => f.name).join(', ')}, not from ${names(went)}, the dataset that went to the step “${s.title}”, so the step is not done with it.`;
+        say(`${why} Open ${names(went)} in Chora, and make the map from it.`, true); render(false);
+        resolve(why); return;
+      }
+      try { await finishInteractive(s, { map: await refsHeld([...files], 'map') }); } catch (e) { say(e.message, true); render(false); resolve(null); return; }
+      say(`${names(files)}, made in Chora: the step “${s.title}” is done with it.`); render(false);
+      resolve(`The workflow's step “${s.title}” is done with it.`);
     }).then(() => resolve(null)));
   }
   // "Nothing to draw: go on with this dataset": offered once "This step is done" found the dataset that
@@ -889,13 +912,15 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     let next = '';
     if (viewing) next = '';
     else if (!shown) next = fileKey(RECIPES[pending.key]) ? `Not started. Choose ${lower(RECIPES[pending.key].files[fileKey(RECIPES[pending.key])].words)} in step 1 to begin: Methodos starts when it is chosen. Or discard it.` : 'Not started.';
-    else if (s && op.kind === 'interactive') next = `This step is yours: it waits for ${op.waitsFor}. Say when it is done.`;
+    // The map's step has no "This step is done": its download in Chora does it, and nothing else can.
+    else if (s && op.kind === 'interactive') next = `This step is yours: it waits for ${op.waitsFor}.${s.op === 'map.export' ? ' Open Chora, frame the view, and make the map there (“Make a map”).' : ' Say when it is done.'}`;
     else if (ready) next = `Ready to download: ${names(main)} is already in the format this workflow writes, so it is not converted into itself. Download it, and the step is done.`;
     else if (s && !run) next = `Run ${OPERATIONS[s.op].tool ? `${OPERATIONS[s.op].tool}'s` : 'its'} ${lower(OPERATIONS[s.op].title)}; the step is done when the run finishes.`;
     const message = [note?.words, next].filter(Boolean).join(' ');
     tMsg.textContent = message; tMsg.hidden = !message; tMsg.classList.toggle('warn', !!note?.warn);
     tSaid.textContent = [where, run, message].filter(Boolean).join(' ');
-    doneB.hidden = !(s && op.kind === 'interactive' && !changed && wf);
+    // Not for the map's step: its download in Chora does it (mapped), and nothing chosen here could.
+    doneB.hidden = !(s && op.kind === 'interactive' && s.op !== 'map.export' && !changed && wf);
     asIsB.hidden = !(s && s.op === 'place' && asIs === s.id && wf && !changed);
     backB.disabled = !wf || changed || !wf.steps.some((x) => x.state === 'done');
     restartB.hidden = changed?.action !== 'changed';
@@ -1025,6 +1050,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     const first = [opened, v.words].filter(Boolean).join(' ');
     if (s?.op === 'place') say([first, `At Chora's step:${chosenAgain} Open Chora to draw: its save does this step with the dataset it writes. Or choose a dataset you saved in Chora before, and say the step is done.`].filter(Boolean).join(' '));
     else if (s?.op === 'trace') say([first, 'At Chora\'s step: open Chora to trace the map. What you have traced and not yet saved is kept there; its save does this step with the dataset it writes.'].filter(Boolean).join(' '));
+    else if (s?.op === 'map.export') say([first, `At Chora's step:${chosenAgain} Open Chora, frame the view and make the map there (“Make a map”): its download does this step.`].filter(Boolean).join(' '));
     else if (ready) say([first, `Taken up where it was left, with ${names(main)}${fromWhere(wf, s, main)}, kept in this browser: it is chosen in step 1 for you.`].filter(Boolean).join(' '));
     else say([first, main ? `Taken up where it was left. Choose ${names(main)} again in step 1 to carry on: the file is checked to be the one the workflow recorded.` : 'Taken up where it was left.'].filter(Boolean).join(' '));
     if (!ready) return false;
@@ -1537,6 +1563,6 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
 
   // step(): the step at hand, { id, op, answers }, or null: Chora reads it (its step "trace" is done there, from the map).
   const stepNow = () => { const s = wf && !changed && !viewing ? atStep() : null; return s ? { id: s.id, op: s.op, answers: { ...wf.answers } } : null; };
-  return { open, chosen, placed, began, ended, dropped, keepChanged, detected, baseChanged, id: () => wf?.id || null, step: stepNow, following: () => !!(wf || pending || changed), takenUp: () => takenUp,
+  return { open, chosen, placed, mapped, began, ended, dropped, keepChanged, detected, baseChanged, id: () => wf?.id || null, step: stepNow, following: () => !!(wf || pending || changed), takenUp: () => takenUp,
     scope: scopeNow, setScope, scoped: () => !!(wf || pending || changed), viewShared, openFromWhg, shareTokens: () => [...shareTokens], tokenGiven };
 }

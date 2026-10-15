@@ -26,6 +26,7 @@ export const WANT = Object.freeze([
   ['convert', 'A file in another format'],
   ['match', 'A match of two datasets'],
   ['cube', 'Figures as a Data Cube'],
+  ['commons', 'A map image for Wikipedia or Commons'],
   ['unsure', 'I am not sure: show me what the tools can do'],
 ].map(([key, words]) => Object.freeze({ key, words })));
 
@@ -41,6 +42,7 @@ export const WANT = Object.freeze([
 // (REGIONS), or every place traced from a map is (TRACED).
 const REGIONS = 'Needed: the regions are given addresses under it.';
 const TRACED = 'Needed: every place you trace is given its address under it as you name it.';
+const LISTED = 'Needed: each place of your list is given its address under it, against which what the gazetteer matches it with is recorded.';
 /** The words under the base address's field saying why it is needed (baseAsked's `why`, else the regions'). */
 export const baseWhy = (asked) => asked?.why || REGIONS;
 const ROUTES = [
@@ -63,6 +65,12 @@ const ROUTES = [
   // start, as every place traced is given its address under it as it is named; the lookup asked as a question.
   { have: 'map', want: 'map', recipe: 'trace-a-map', set: { target: 'plato-json' }, ask: ['will-identify', 'will-publish'], base: { needed: true, why: TRACED } },
   { have: 'map', want: 'publish', recipe: 'trace-a-map', set: { target: 'plato-json', 'will-publish': true }, ask: ['will-identify'], base: { needed: true, why: TRACED } },
+  // A map image to share (Stephen, 14 October 2026; #37): the places of a list, a table or a PLATO dataset identified as Map your
+  // data identifies them, then made into a map in Chora. `from-table` is the route's, never asked. The base address: for a list
+  // or a table, needed (its places have their addresses only under it, which the lookup records its matches against); for a
+  // PLATO dataset, whose places have theirs, not asked.
+  { have: 'table', want: 'commons', recipe: 'make-an-open-map', set: { 'from-table': true }, ask: [], base: { needed: true, why: LISTED } },
+  { have: 'plato', want: 'commons', recipe: 'make-an-open-map', set: { 'from-table': false }, ask: [] },
 ];
 
 // Answers that name no recipe yet: what to use meanwhile, by what is wanted, as the page's tool keys
@@ -74,6 +82,7 @@ const MEANWHILE = {
   convert: { why: 'A conversion is one step, not a workflow.', tools: ['read', 'convert'] },
   match: { why: 'Match two datasets starts from a table of places, or a dataset in a PLATO format: bring yours into PLATO first, or match it with Krisis, which matches any two datasets, one step at a time.', tools: ['read', 'match'] },
   cube: { why: 'Figures as a Data Cube is one tool, not a workflow.', tools: ['figures'] },
+  commons: { why: 'Make an open map starts from a list of place names, a table, or a dataset in a PLATO format: bring yours into PLATO first; or open a dataset in Chora, and make the map there ("Make a map").', tools: ['read', 'chora'] },
 };
 const TEXT = 'Places from a text is not available yet: finding the places named in a text is deferred.';
 
