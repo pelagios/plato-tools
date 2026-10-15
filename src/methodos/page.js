@@ -657,6 +657,14 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   function mapped(files, base) {
     return new Promise((resolve) => chain(async () => {
       const s = wf && !changed ? atStep() : null;
+      // The step done already by one download (the SVG, say), and the other (the PNG) downloaded after: both are its result.
+      const last = wf && !changed && !s ? [...wf.steps].reverse().find((x) => x.state === 'done') : null;
+      if (last?.op === 'map.export') {
+        try { wf = runner.addOutputs(wf, last.id, { map: await refsHeld([...files], 'map') }); await keep(); }
+        catch (e) { say(e.message, true); render(false); resolve(null); return; }
+        say(`${names(files)}, made in Chora: kept with the step “${last.title}”, beside what it gave before.`); render(false);
+        resolve(`It is kept with the workflow's step “${last.title}”, beside the map downloaded before.`); return;
+      }
       if (!s || s.op !== 'map.export') { resolve(null); return; }
       const went = currentInput(wf, s);
       if (went && base && !sameRefs(went, await refsOf([...base], 'dataset'))) {

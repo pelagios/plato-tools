@@ -164,6 +164,13 @@ test('end to end in Node, from pasted names: read as a table, matched, checked, 
   st = runner.next(st);
   assert.equal(st.status, 'completed', JSON.stringify(st.steps.map((x) => [x.id, x.state])));
   assert.deepEqual(st.steps.find((x) => x.id === 'map').outputs.map.map((r) => [r.type, r.name]), [['map', 'Places.svg']]);
+  // The PNG downloaded after: kept with the same step, beside the SVG; the SVG again is not added twice; a dataset is
+  // refused; and nothing is added to a step that is not the user's.
+  const png = new File([new Uint8Array([137, 80, 78, 71])], 'Places.png', { type: 'image/png' });
+  st = runner.addOutputs(st, 'map', { map: await refsOf([png, svg], 'map') });
+  assert.deepEqual(st.steps.find((x) => x.id === 'map').outputs.map.map((r) => r.name), ['Places.svg', 'Places.png']);
+  assert.throws(() => runner.addOutputs(st, 'map', { map: [{ ...dsRef }] }), /takes a map made in Chora|is a file of places/);
+  assert.throws(() => runner.addOutputs(st, 'again', { files: [{ ...dsRef }] }), /not a step of yours that is done/);
   assert.deepEqual(settingsIn(await host.store.get('Places.svg').text()), { version: 1, made: 'in a test' });
   assert.ok(fake.urls.length && fake.urls.every((u) => u.startsWith(new URL(WHG_ENDPOINT).origin + '/')));
 });

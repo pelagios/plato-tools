@@ -203,6 +203,26 @@ export function complete(state, stepId, outputs, { findings } = {}) {
   return out;
 }
 
+/**
+ * A step already done is given more of its outputs, of the types its operation gives (a map's step: the PNG
+ * downloaded after the SVG, both the step's result). Only an interactive step that is done, and only the last
+ * step done, so that nothing a later step took is changed; a reference it holds already (by SHA-256) is not
+ * added again. Refused, in words, otherwise.
+ */
+export function addOutputs(state, stepId, outputs) {
+  const out = clone(state);
+  const s = out.steps.find((x) => x.id === stepId);
+  if (!s) no(`There is no step "${stepId}".`);
+  if (s.state !== 'done' || OPERATIONS[s.op].kind !== 'interactive') no(`The step ${titleOf(s)} is not a step of yours that is done, so nothing can be added to what it gave.`);
+  if (out.steps.some((x) => x.state === 'done' && out.steps.indexOf(x) > out.steps.indexOf(s))) no(`A later step has been done since the step ${titleOf(s)}: what it gave is not changed now.`);
+  const more = checkOutputs(s, Object.fromEntries(Object.keys(OPERATIONS[s.op].gives).map((k) => [k, outputs?.[k] ?? s.outputs[k]])));
+  for (const [k, refs] of Object.entries(more)) {
+    const have = s.outputs[k] || [];
+    s.outputs[k] = [...have, ...refs.filter((r) => !have.some((h) => h.sha256 === r.sha256))];
+  }
+  return out;
+}
+
 /** The running step waits for the user (a permission not yet given), saying for what. */
 export function waiting(state, stepId, why) {
   const out = clone(state);
