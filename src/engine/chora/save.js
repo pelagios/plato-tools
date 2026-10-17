@@ -112,7 +112,8 @@ const BREACHES = new Set(['attestation-removed', 'attestation-changed', 'attesta
  * that many more places have attestations, by the version check's own count). Returns { passed, report, reasons }.
  */
 export async function verify(input, later, added, env, { places = 0 } = {}) {
-  const r = await compare({ earlier: input, later: await detect([later]), ...(places ? { options: { countPlaces: true } } : {}) }, env);
+  // A published dataset never minted (none of its attestations addressed) is still drawn on: compared by what its attestations say (allowUnaddressed).
+  const r = await compare({ earlier: input, later: await detect([later]), options: { allowUnaddressed: true, ...(places ? { countPlaces: true } : {}) } }, env);
   const rep = r.report, c = rep.counts || {};
   const reasons = [];
   if (r.incomplete) reasons.push('a version could not be read to the end');

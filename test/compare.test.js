@@ -42,8 +42,8 @@ const v1 = () => json(doc(places(), G1), 'v1.json');
 /** The later version: the earlier one's places, edited by `edit`. */
 const v2 = (edit = () => {}, gazetteer = G2) => { const p = places(); const d = doc(p, gazetteer); edit(p, d); return json(d, 'v2.json'); };
 
-async function cmp(earlier, later) {
-  const r = await compare({ earlier: await detect([].concat(earlier)), later: await detect([].concat(later)) }, env());
+async function cmp(earlier, later, options = {}) {
+  const r = await compare({ earlier: await detect([].concat(earlier)), later: await detect([].concat(later)), options }, env());
   return { ...r.report, incomplete: !!r.incomplete };
 }
 const kinds = (r, severity) => r.items.filter((i) => i.severity === severity).map((i) => i.kind).sort();
@@ -140,8 +140,9 @@ test('an attestation with no address, changed or deleted, is a problem that name
 test('two attestations with no address that say the same: losing one of them is found', async () => {
   const twin = { names: [{ toponym: 'Twin' }], sources: [src] };
   const earlier = json(doc([place('a', [twin, twin])], G1));
-  assert.equal((await cmp(earlier, json(doc([place('a', [twin, twin])], G2)))).errors, 0);
-  const r = await cmp(earlier, json(doc([place('a', [twin])], G2)));
+  // A published version with no addresses at all is refused unless a tool adding to it asks (allowUnaddressed: Krisis, Chora).
+  assert.equal((await cmp(earlier, json(doc([place('a', [twin, twin])], G2)), { allowUnaddressed: true })).errors, 0);
+  const r = await cmp(earlier, json(doc([place('a', [twin])], G2)), { allowUnaddressed: true });
   assert.equal(item(r, 'attestation-gone')?.count, 1, JSON.stringify(r.items));
 });
 test('an attestation with no address is not found in one that says the same under an address the earlier version had', async () => {
@@ -371,6 +372,24 @@ test('before publication the rule does not bind: the same deletion is a warning,
   const { status, ...noStatus } = G1;
   assert.ok(kinds(await cmp(json(doc(places(), noStatus)), v2()), 'warning').includes('earlier-not-published'));
 });
+test('a published release none of whose attestations has an address is refused in words (the working copy, not the release), beside its controls: the same as a draft is compared and warned of, and a published one with some addresses is compared', async () => {
+  const unaddressed = () => places().map((p) => ({ ...p, attestations: p.attestations.map(({ '@id': _, ...a }) => a) }));
+  const r = await cmp(json(doc(unaddressed(), G1)), v2());
+  assert.ok(r.incomplete);
+  assert.deepEqual(kinds(r, 'error'), ['earlier-unaddressed-release']);
+  assert.deepEqual(item(r, 'earlier-unaddressed-release').examples, ['3 attestations, none with an address']);
+  assert.match(item(r, 'earlier-unaddressed-release').message, /Give the copy with addresses that minting wrote \(<name>-with-ids\.jsonl\)/);
+  assert.equal(r.counts.earlier, undefined, 'not compared');
+  assert.match(summary(r, 'compare').problems, /could not be compared/);
+  const draft = await cmp(json(doc(unaddressed(), { ...G1, status: 'draft' })), v2());
+  assert.ok(!draft.incomplete && draft.errors === 0 && kinds(draft, 'warning').includes('earlier-unidentified'), JSON.stringify(draft.items));
+  assert.equal(draft.counts.earlier, 3);
+  const some = await cmp(v1(), v2());
+  assert.ok(!some.incomplete && kinds(some, 'warning').includes('earlier-unidentified') && !kinds(some, 'error').includes('earlier-unaddressed-release'));
+  // A tool adding to such a dataset (Krisis, Chora) has it compared all the same, and warned of.
+  const allowed = await cmp(json(doc(unaddressed(), G1)), v2(), { allowUnaddressed: true });
+  assert.ok(!allowed.incomplete && allowed.counts.earlier === 3 && kinds(allowed, 'warning').includes('earlier-unidentified'), JSON.stringify(allowed.items));
+});
 test('what the versions say of themselves: a later one not published, the same version, another previous version, another gazetteer', async () => {
   const has = async (g, kind) => kinds(await cmp(v1(), v2(() => {}, g)), 'warning').includes(kind);
   for (const [kind, g] of [['later-not-published', { ...G2, status: 'draft' }], ['same-version', { ...G2, version: '1' }],
@@ -462,7 +481,7 @@ test('every lookup the comparison makes goes by an index on more than the versio
 });
 test('ten thousand attestations without addresses, a twentieth of them changed: each change is found', async () => {
   const many = (edit) => json(doc(Array.from({ length: 2000 }, (_, i) => place(`p${i}`, Array.from({ length: 5 }, (_, j) => ({ names: [{ toponym: `N${i}-${j}${edit && j === 0 && i % 4 === 0 ? ' altered' : ''}` }], sources: [src] })))), edit ? G2 : G1));
-  const r = await cmp(many(false), many(true));
+  const r = await cmp(many(false), many(true), { allowUnaddressed: true });
   assert.deepEqual([r.counts.earlier, r.counts.unchanged, r.counts.lost, r.counts.added], [10000, 9500, 500, 500]);
   assert.equal(item(r, 'attestation-gone').count, 500);
 });

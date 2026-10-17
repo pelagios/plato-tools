@@ -1003,6 +1003,10 @@ What it reports, and why, is in the guide:
   already, so it is not reported again (DEEP's names have addresses, and a deleted attestation
   would otherwise count twice). Any other named node (a place, a
   source) may be corrected: a lost statement is a warning, an added one nothing.
+- **A published release with no addresses at all** is refused rather than compared
+  (`earlier-unaddressed-release`, Stephen, 17 October 2026: it is the working copy before minting, and
+  nothing in a later version can retract or replace what it holds); one with some attestations
+  unaddressed is compared by what they say and warned of (`earlier-unidentified`).
 - **An address used twice** in the later version, once unchanged and once saying something else,
   is one node in RDF, so it is a changed attestation. **An address lost**, where the later version
   says the same without it or under another, is a breach of its own (`attestation-readdressed`),
@@ -1066,6 +1070,164 @@ What it reports, and why, is in the guide:
   export and requires exactly those counts back: on DEEP, 14,144 deleted, 14,143 changed and 14,143
   added were all found, with nothing else but a warning for each of the 32 sources only the deleted
   attestations cited, in under ten minutes (the second reading included) and 490 MB of memory.
+
+## Releasing a new version (Mneme)
+
+The version check (above) says, in words, what a new version of a published dataset must withdraw
+instead of deleting or changing; `src/engine/revise.js` writes those withdrawals (plan #34, item 10;
+Issue #23; Stephen's decisions of 17 October 2026, all eight the design's recommendations). It is
+Mneme's second act: `revise({ earlier, later, options }, env)` takes the previous release (`earlier`,
+the copy with addresses that the site was made from, `<name>-with-ids.jsonl`) and the new version
+(`later`, edited freely since, in any format the tools read), and writes `<name>-revised.json`,
+place-centric PLATO JSON, which keeps the append-only rule against the previous release. On the
+page it is Mneme's "Revise against the earlier version…" (the new version chosen in step 1, the
+previous release asked for); on the command line `plato-tools revise NEW --previous PUBLISHED
+--reviewer NAME [--release NAME] [--base B] [--date D] [--out DIR]`; in Methodos the recipe "Release
+a new version" (below).
+
+- **The rules, per attestation of the new version**, set against the previous release's attestations
+  of the same place (by address, and by the digest of what each says: `digestsOf`, the same digest
+  minting inherits by and the version check compares by, so "unchanged" means the same thing in all
+  three): one with its address and the same digest is **kept**; one without an address whose digest
+  matches an untaken attestation of the place is **inherited** (the tables case, minted afresh each
+  release: twins in file order, as minting's rule 2); one with its address and another digest is
+  **changed**: the old form is put back as it was and the new form written beside it with `meta`
+  `plato:Supersedes` pointing at it (D1); one whose digest matches under another address, or with
+  none, is **readdressed**: the address is given back; anything else is **added**, under an address of
+  its own and with a `created` of this revision if it has none (`created-stamped`). An attestation of
+  the previous release met by none of these is **removed**: put back as it was, and retracted by an
+  attestation of its own (`meta` `plato:Retracts`, the reviewer as contributor, dated, with a note),
+  unless the release had withdrawn it already (`already-withdrawn`: put back only) or the new version
+  withdraws it by hand (`withdrawn-by-you`: the user's withdrawal stands). A place of the previous
+  release with no record in the new version is a **tombstone** (D3): the record as it was, every
+  attestation that claims something retracted, its description kept, so that its address keeps
+  resolving. An address used twice in the new version (`address-twice`): the one saying what was
+  published under it keeps it and the other replaces it; neither, the first replaces it and the second
+  is added. An address the previous release gave an attestation of another place is refused
+  (`address-moved`): an address is never moved.
+- **Pairing in the tables case** (D2): only where the new version has no addresses at all for the
+  place (the tables, minted afresh each release; a version that carries addresses says what it deleted
+  and what it added, and nothing is guessed there), and the place has exactly one attestation removed
+  and exactly one added of the same kind (the same facets present: names, geometries, timespans,
+  types, properties, relations, identities) citing the same sources, the added one supersedes the
+  removed one (`paired`, each named). Anything else is retracted, and added. A row the previous
+  release had withdrawn is never inherited by a row put back with the same content (the Fable review
+  of 17 October 2026): the dead twin is put back as it was, and the row is a new attestation under an
+  address of its own, told from the twin by Agora's counter.
+- **The chain** (D1; `resolveWithdrawn` in `src/formats/shared.js`, PLATO 5e7901c): a withdrawal takes
+  effect only while the withdrawing attestation holds, so A superseded by B, then B superseded by C in
+  the next release, would leave A current again (`test/withdrawal.test.js` shows it). When an
+  attestation withdrawn here is itself a superseder, its target is retracted too, down the chain
+  (`chain-closed`, each named), unless something that still holds withdraws it (the new form of a
+  changed superseder keeps the `meta` it was copied with, since an attestation's `meta` is one object,
+  and so still replaces the same target: then the old form is retracted beside it and nothing more is
+  needed; the version check then counts that change as one retracted and one added, not one
+  superseded, since the new form points at the original target, not at the form it replaces). A chain
+  that crosses places is closed under the other place when it is written; one whose other place was
+  written already is refused (`cannot-close-chain`), a limit said in words. A retraction the new
+  version deleted or changed is put back and left holding (`withdrawal-kept`): a withdrawal is never
+  undone by deleting it; PLATO's way is to retract the retraction, which the new version may do by hand:
+  the read-back then finds the target current again with every withdrawal of it withdrawn by something
+  the new version adds, and says `restored` (named) rather than `revived`. A deletion whose only
+  withdrawal by hand no longer holds (a retraction itself retracted) is a deletion, and is retracted.
+- **Addresses**: every attestation written under the base address gets one by `mintAddress` (Agora's
+  rule, as Krisis's answers do): the place's digests all known first, new forms minted before the
+  retractions (each holds its target). Agora's minting of the output against the previous release then
+  keeps every address (`test/revise.test.js` mints it and finds nothing minted afresh). A place
+  outside the base cannot have a retraction minted: refused (`cannot-withdraw-outside-base`).
+- **The header** (D5): `status` published (`later-not-published` says so when the new version said
+  otherwise); with a release name, `@id` `<base>release/<name>`, `version`, `previousVersion` (the
+  previous release's `@id`) and `isVersionOf` (the base), said as `release-written`, and the user told
+  to put them in the dataset; a base given for the run becomes `uriSpace` (`base-written`, as minting);
+  the two versions' `candidateSets` merged. Without a release name the header stays the new version's,
+  and one that still names the previous release (its `@id` or its `version`: the `-with-ids` copy
+  edited, its header untouched) is refused as the same release name is (`same-release-header`). The
+  base is the one given, else the header's `uriSpace`,
+  else its `isVersionOf` (a release's own `@id` is `<base>release/<name>`, whose folder is not the base:
+  DEEP's shape), else the folder of its `@id` (`baseOf`). The same release name as the previous
+  release's `version` is refused (`same-release`); two versions under different bases are refused
+  (`base-differs`, the two named) rather than every place written as dropped and new; no base at all
+  is refused (`no-base`).
+- **Who signs** (D6; Stephen, 17 October 2026; PLATO ee84f9d, which defines `plato:Retracts` at the
+  Gazetteer's level): a Gazetteer retracts the attestations it made, and a maintainer signs for it,
+  recorded as the retraction's contributor; it is not a claim about the person who first wrote the
+  attestation (disputing another Gazetteer's attestation is `plato:Contradicts`, not this). Here the
+  maintainer is the reviewer (the name and ORCID the page remembers under Krisis's review, or
+  `--reviewer`), whoever made the attestation withdrawn, and the retractions' notes say so. The
+  release report names the maintainer. Without one, nothing is written (`no-reviewer`).
+- **Every attestation of a release carries an address** (Stephen, 17 October 2026): the revision gives
+  one to everything it writes under the base, and refuses to write a release with any attestation it
+  cannot address (`attestations-unaddressed`, `cannot-withdraw-outside-base`: a place outside the
+  base). The version check refuses, in plain words, a published release none of whose attestations has
+  an address (`earlier-unaddressed-release`: the working copy before minting, not the release; the
+  copy to give is named); a published version with some unaddressed is still compared and warned of
+  (`earlier-unidentified`), as before, since Krisis's answers and Chora's drawings are added to such
+  datasets, and `test/compare.test.js` holds both beside each other.
+- **The release report** (Stephen, 17 October 2026): beside the dataset, `<stem>.release.json`, a small
+  machine-readable account for a cross-check (the report in words stays): `format`
+  `plato-tools-release` 1; the revised file and its SHA-256; the previous release's `@id` and
+  `version`; the release's `@id`, `version`, `previousVersion` and `isVersionOf`; the maintainer and the
+  date; the counts by category (`unchanged`, `new`, `superseded`, `retracted`, `tombstones`,
+  `chainsClosed`, with the places and attestations counted); the address of every chain closed and
+  every tombstone; and the version check's counts. Written only once the checks have passed, as the
+  dataset is; the command line writes it too (`<stem>.release.json`, beside `<stem>-revised.json`); in
+  Methodos it stays beside the dataset, which alone is the step's result (the adapter and the page
+  leave it out of the hand-off).
+- **Refused in words, nothing written**: no reviewer (`no-reviewer`); a previous release whose
+  attestations have no addresses (`previous-unaddressed`, naming the `-with-ids.jsonl` copy to give); a facet with an address of its own changed or no longer
+  described (`facet-changed`, D4, version 1: the attestation pointing to it was kept as it was, so the
+  version check of the output finds the facet changed, and the words say to put it back and record the
+  correction under a new address in a superseding attestation); an answer changed without withdrawing
+  the earlier one (`answered-both-ways`, passed through as the error it is: a changed decision is
+  Krisis's to withdraw).
+- **Checked before it is handed on**, as Krisis's finishing checks its output: the whole output is
+  held as Blob parts (`teeing`) until it has been read back for its withdrawals and addresses (nothing
+  the previous release withdrew current again, `revived`, unless restored by hand; every withdrawal
+  planned present, `not-all-withdrawn`; exactly the attestations counted, `not-all-added`; every
+  attestation with an address, `not-all-addressed`) and then compared with the previous release by
+  the version check itself: nothing missing or changed (`not-append-only`), and its counts of what is
+  retracted, replaced and added the revision's own. A failure there is a fault in the tools, and the
+  page and the command line keep nothing. The tests break the writer on purpose (`options.tamper`, for
+  the tests only: a retraction dropped, a tombstone's attestation lost or altered, the chain retraction
+  dropped) and each is caught.
+- **At any size**: the previous release goes into a working database (each record's JSON, to put it
+  back; each attestation's address and digest), read once; the new version's header is read first by a
+  reading stopped as soon as it has it (the writer's output is batched, so the base could not be read
+  off it before the first place), then the new version is read once by `run()` convert to PLATO JSON
+  with `options.augment` revising each place as it streams and `options.extraRecords` (now also a
+  function, called once every record has been read) adding the tombstones; then the output is read
+  back twice (its withdrawals; the version check, which reads both versions, and once more for the
+  examples when something is reported). Memory holds the places streamed (their addresses), the
+  withdrawals and the counts. Measured on DEEP: see "Limits".
+- **In Methodos**: the operation `revise` (Mneme; `takes` `later` and `earlier`, `gives` `dataset`),
+  the adapter over `revise()` (the reviewer from the host, `host.reviewer`, the page's remembered name,
+  unless the step's options name one), and the recipe `release-a-new-version` (version 1): check the
+  new version; revise; check again; compare with the previous release; write out; and, under
+  `will-publish`, Publish a dataset's four steps with `previous` given to minting and the report. The
+  previous release is a late file (`previous`, chosen at the revise step, D7): on the page,
+  `began({ op: 'revise', files, earlier })` records it from the run's `earlier` slot, as the match's
+  other dataset is recorded, and the tracker names it from the start ("…chosen at the step …, with
+  Mneme's “Revise against the earlier version…”"). The steps that take it again are checked against
+  it by the same slot: the version check's run hands its `earlier`, and a publishing run the
+  "Previous release" chosen under Options (`previous`), so a compare against another file, or a
+  minting without the previous release, is not counted as the step, and said so. The interview's route: a dataset in a PLATO format
+  and "A new version of a published dataset, checked" (`have: 'plato', want: 'version'`), once a dead
+  end, asking publishing and, when publishing, the base address, optional; a table wanting a new
+  version is sent to bring it into PLATO first. No other recipe changed, so no version was raised and a
+  workflow saved under any of them resumes as it was.
+- **Tests**: `test/revise.test.js` (one case per rule and per edge, each failing case beside its
+  control; the tables case through a CSV read under a base and minted; the chain, both ways; the
+  writer broken on purpose), `test/methodos-release.test.js` (the recipe, the route, the late file, the
+  Antonine example minted as a release and edited three ways, walked to the w3id rules in Node),
+  `test/revise-cli.test.js`, the chain case in `test/withdrawal.test.js`, and
+  `release_workflow_checks` in `e2e/app_test.py` (the interview to the download, with the unrevised
+  version shown breaking the rule where the revised one keeps it). `e2e/revise_scale.mjs` plants one
+  edit in a hundred of DEEP's export and requires exactly those counts back.
+- **Not in version 1**, by design: repairing a changed facet with an address of its own (refused in
+  words; a follow-up issue); a withdrawal written under a place other than its target's; a changed
+  decision about a match (Krisis's Finish withdraws it); merging two places (an identity relation).
+  The rules of the revision (Supersedes for a change, Retracts for a deletion, tombstones, the chain
+  closed) are to be agreed with WHG for its revised-upload diff (D8; place#308), handled elsewhere.
 
 ## Publishing (Agora)
 
@@ -3188,7 +3350,8 @@ page's interview and tracker (below); keeping a workflow beyond the tab is phase
   `src/methodos/page.js`; "Chora, the map", above); a map downloaded from Chora's "Make a map" completes the step
   `map.export` (`mapped()`), as a hand-off of its own type, `map`.
 - **Recipes** (`recipes/`) are data: "Map your data", "Publish a dataset", "Places from an edition
-  (TEI)", "Places from Recogito", "Match two datasets", "Trace a historical map" and "Make an open map" (below); the
+  (TEI)", "Places from Recogito", "Match two datasets", "Trace a historical map", "Make an open map" and "Release a new
+  version" ("Releasing a new version (Mneme)", above); the
   first, the fifth and the sixth have the optional step "Create Wikidata items for the places no gazetteer knows"
   (`wikidata.items`, above) under their question `will-mint`. A step names an
   operation, where each input comes from (a file chosen at the start, `$files`, or an earlier step's
@@ -3224,7 +3387,7 @@ page's interview and tracker (below); keeping a workflow beyond the tab is phase
   with what its report found, `complete(state, id, outputs, { findings })`, kept with the step and shown
   ("done, with a report"); one that could not read its file to the end still stops.
 - **The adapters** (`adapters.js`) are one per automatic operation that has landed (check, convert,
-  compare, the four parts of publishing, match, apply, lookup), each calling the engine as the worker
+  compare, revise, the four parts of publishing, match, apply, lookup), each calling the engine as the worker
   does. The front end gives a host: `open(ref)` for the file a reference names, `env()` for one run's
   environment, `file(output)` for what the run wrote, and, for the lookup, a lookup made on the page
   thread through the permissions module. `drive()` runs the automatic steps until the workflow waits,
@@ -3949,6 +4112,16 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
 - **Web annotations** give attestations about places the file does not describe, so each place is
   labelled with its address, with a warning. A region on a georeferenced map is carried as a
   point, never as its outline.
+- **Revising a new version against its release** (Mneme, "Releasing a new version") is measured on
+  DEEP's export (`e2e/revise_scale.mjs`, 18 October 2026): 1,414,328 attestations about 539,372
+  places, one in a hundred deleted, changed and added, took 17 minutes on the command line (22 to 25
+  in two earlier runs of the same code under more load) and 2.0 GB of memory at peak (the revised
+  dataset, 1.16 GB as text, held in memory for the checks), and found exactly the edits planted:
+  14,144 retracted, 14,143 replaced and 14,143 added, nothing paired (the export carries addresses,
+  so the pairing of the tables case does not apply), the version check of the output clean. Nothing
+  larger is refused, and nothing larger is measured.
+  The revised dataset is held in memory as Blob parts until the checks have read it back, as a
+  review's finishing holds its output (below), on top of what the reading and the checks need.
 - **Finishing a review with the dataset output holds the dataset written in memory** until the
   version check has read it back (the engine's hosts have no way to read an output again): as Blob
   parts, so about the size of the file in UTF-8, on top of what the conversion and the check need. A
@@ -3992,6 +4165,7 @@ python3 e2e/ink_budget.py                 # the budget of tracing with assistanc
 node e2e/ink_memory.mjs                   # the tracing worker's memory, for its budget
 node scripts/install-test.mjs             # install the packed tools as npx does, and run the command
 node e2e/compare_scale.mjs deep-plato.jsonl.gz --work-dir DIR   # the version check at full scale
+node e2e/revise_scale.mjs deep-plato.jsonl.gz --work-dir DIR    # Mneme's revision at full scale (through heavy.sh)
 python3 e2e/scale_test.py --input deep-plato.nt.gz --target plato-jsonl --out out.jsonl
 PERSEUS_P4_FILE=/path/to/text.xml node scripts/check-perseus-p4.mjs   # TEI P4 against a real Perseus file (opt-in)
 ```

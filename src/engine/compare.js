@@ -51,6 +51,7 @@ const isBlank = (key) => key.startsWith('_:');
 // 128 bits of SHA-256: the digests guard against accident, not attack, and half the length halves
 // the working database.
 const digest = (text) => sha256(text).slice(0, 32);
+const n = (x) => (x || 0).toLocaleString('en-GB');
 
 // A problem of a version's own that stops part of it being read: the comparison is then of less
 // than the whole, so it cannot pass. Other problems (a record the JSON Schema rejects) are the
@@ -91,6 +92,7 @@ const TEXT = {
   'not-compared': 'has something that cannot be written as PLATO RDF, which is what is compared, so a difference there would not be seen',
   'added-without-created': 'An attestation added in the later version does not say when it was made (created). Without that, the state of the dataset at an earlier moment cannot be worked out from the data alone.',
   'earlier-unidentified': 'Attestations of the earlier version have no web address of their own (@id). They were compared by what they say, which cannot tell one that was changed from one deleted and another added, and no later attestation can retract or replace them. Give published attestations addresses.',
+  'earlier-unaddressed-release': 'The earlier version is published, but none of its attestations has a web address of its own (@id), so it is not the release as published: nothing in a later version can retract or replace what it holds, and the two versions were not compared. A published release carries an address on every attestation. Give the copy with addresses that minting wrote (<name>-with-ids.jsonl), not the working copy before minting.',
   'earlier-not-published': "The earlier version does not say that it is published (status), so the append-only rule does not bind it yet. What would break the rule is listed here as warnings.",
   'later-not-published': 'The earlier version is published, but the later one does not say that it is (status). Published is published: a later version is published too.',
   'previous-version-differs': "The later version names another version as the one before it (previousVersion), not the earlier file's. If versions came between them, this comparison still holds: the rule runs through them all.",
@@ -426,6 +428,9 @@ export function attestationLines(context, out) {
  * earlier version describes only within those places and the later version not at all went with
  * them: it is a warning ('description-left-out'), not a description removed. Any other loss is
  * reported as without it.
+ * options.allowUnaddressed: a published earlier version none of whose attestations has an address is compared by
+ * what they say (and warned of), not refused: for a tool adding to such a dataset (Krisis, Chora), never for the
+ * version check a user runs, nor for Mneme's revision.
  * options.countPlaces: the counts also say how many places each version's attestations are about
  * (counts.places: { earlier, later }), for a save that adds places (src/engine/chora/save.js, verify).
  */
@@ -514,6 +519,13 @@ async function comparing({ earlier, later, options }, env) {
     const count = (v, k = OF) => ledger.one('SELECT COUNT(*) FROM a WHERE v=? AND k=?', [v, k]);
     const had = count(EARLIER), has = count(LATER);
     if (!had) rep.error(isSet ? 'nothing-to-compare-candidates' : 'nothing-to-compare', TEXT[isSet ? 'nothing-to-compare-candidates' : 'nothing-to-compare']);
+    // A published release carries an address on every attestation (Stephen, 17 October 2026): one with none at all
+    // is the working copy before minting, not the release, and is refused in words rather than compared by what
+    // its attestations say. One with some unaddressed is still compared, and warned of (earlier-unidentified, below).
+    // options.allowUnaddressed: a caller adding to such a dataset (Krisis finishing a review on it, Chora drawing on
+    // it) has it compared all the same, by what its attestations say, and warned of.
+    const unidentified = ledger.one('SELECT COUNT(*) FROM a WHERE v=0 AND k=0 AND id IS NULL');
+    if (!isSet && published && had && unidentified === had && !options.allowUnaddressed) { db.exec('COMMIT'); return refuse('earlier-unaddressed-release', `${n(had)} attestation${had === 1 ? '' : 's'}, none with an address`); }
     let lost = 0, changed = 0;
     // The first few changed things of each kind, to be looked at again for what changed in them.
     const toExplain = new Map();
@@ -543,7 +555,6 @@ async function comparing({ earlier, later, options }, env) {
     if (isSet) for (const q of ledger.rows(QUERIES.addedCandidates)) {
       rep.error('candidate-added', TEXT['candidate-added'], q.get(0) ?? (q.get(1) ? `a candidate for ${q.get(1)}` : undefined));
     }
-    const unidentified = ledger.one('SELECT COUNT(*) FROM a WHERE v=0 AND k=0 AND id IS NULL');
     if (unidentified) rep.add('warning', 'earlier-unidentified', TEXT['earlier-unidentified'], undefined, unidentified);
 
     // What the later version adds: each should say when it was made.

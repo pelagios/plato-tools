@@ -55,6 +55,7 @@ export function summary(report, action) {
   if (action === 'publish') return publishSummary(report);
   if (action === 'match') return matchSummary(report);
   if (action === 'apply') return applySummary(report);
+  if (action === 'revise') return reviseSummary(report);
   if (action === 'candidates') return candidatesSummary(report);
   // The regions a table's places lie in, minted as places (Hermes, generic.js), are among the places, and said apart.
   const regions = (k) => (k === 'places' && c.regions ? ` (${c.regions.toLocaleString('en-GB')} of them ${c.regions === 1 ? 'a region' : 'regions'})` : '');
@@ -112,6 +113,11 @@ export function groups(action) {
     { severity: 'warning', title: 'Warnings', intro: 'Worth fixing: the dataset can be published, but is harder to find, cite or reuse.' },
   ];
   if (action === 'match' || action === 'apply') return krisisGroups(action);
+  if (action === 'revise') return [
+    { severity: 'error', title: 'Problems', intro: 'Nothing was written because of these.' },
+    { severity: 'warning', title: 'Warnings', intro: 'What the revision did, each named: worth a look before the revised dataset is published.' },
+    { severity: 'loss', title: 'Not carried over', intro: 'The revised dataset is PLATO JSON, which has no place for these, so they are left out of it.' },
+  ];
   if (action === 'candidates') return candidatesGroups();
   if (action === 'compare') return [
     { severity: 'error', title: 'Problems', intro: 'These break the append-only rule: once a dataset is published, its attestations are added to, never deleted or changed; once a candidate set is issued, its candidates are never deleted or changed.' },
@@ -381,7 +387,7 @@ export const review = {
 };
 
 // Krisis: matching. What the match review (src/engine/krisis/) says, on the page and the command line.
-const KRISIS_PHASES = { matching: 'Comparing the names', applying: 'Making the attestations', checking: 'Checking the new dataset with the version check' };
+const KRISIS_PHASES = { matching: 'Comparing the names', applying: 'Making the attestations', checking: 'Checking the new dataset with the version check', revising: 'Revising against the previous release' };
 const KRISIS_DATASETS = { subjects: 'Places to match', others: 'Other dataset' };
 const plural = (n, one, many = one + 's') => `${n.toLocaleString('en-GB')} ${n === 1 ? one : many}`;
 
@@ -395,6 +401,19 @@ function matchSummary(report) {
     problems: nErr ? `${plural(nErr, 'problem')} found.` : c.candidates ? `${plural(c.candidates, 'possible match', 'possible matches')} to review.` : 'No possible matches found.',
     counted: `Compared ${plural(c.subjects, 'place')} with ${plural(c.others, 'place')} of the other dataset; ${plural(c.suggestedFor, 'place has', 'places have')} suggestions.`
       + (already.length ? ` Not suggested: ${already.join('; ')}.` : ''),
+  };
+}
+/**
+ * The summary of a revision (Mneme, src/engine/revise.js): what it kept, replaced, retracted and added, in the
+ * engine's own line (counts.said), and what the version check found of the dataset written.
+ */
+function reviseSummary(report) {
+  const c = report.counts, nErr = report.errors, said = c.said || [], v = c.versionCheck;
+  if (c.attestations === undefined) return { problems: nErr ? `${plural(nErr, 'problem')} found.` : '', counted: '' };
+  const checked = v ? ` The version check against the previous release (${plural(v.earlier, 'attestation')}) found nothing deleted or changed: the revised dataset has ${plural(v.later, 'attestation')}, ${v.added.toLocaleString('en-GB')} of them new${v.retracted || v.superseded ? `; it ${[v.retracted ? `retracts ${v.retracted.toLocaleString('en-GB')}` : '', v.superseded ? `replaces ${v.superseded.toLocaleString('en-GB')}` : ''].filter(Boolean).join(' and ')} of the earlier ones` : ''}.` : '';
+  return {
+    problems: nErr ? `${plural(nErr, 'problem')} found.` : 'The new version was revised: nothing published is deleted or changed.',
+    counted: said.join(' ') + checked,
   };
 }
 /** The summary of finishing a review: the attestations made, and with the dataset output, what the version check found. */

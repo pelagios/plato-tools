@@ -17,12 +17,15 @@
 //              file(o)     -> the File of an output the run wrote ({ name, size, path? });
 //              lookup      the gazetteer lookup (createLookup), made on the page thread through the
 //                          permissions module: only the lookup operation needs it;
+//              reviewer    who signs what a step writes in a person's name ({ name, orcid? }, or a function
+//                          giving one): the revision's retractions take it, unless the step's options name one;
 //   outputs  references to what the step wrote, of the types its operation gives.
 // An adapter that fails after doing part of its work throws an error with `partial` (references, of
 // the types its operation gives), which the runner keeps only if the operation keeps partial results.
 import { detect, readable, DataError } from '../input.js';
 import { run } from '../pipeline.js';
 import { compare } from '../compare.js';
+import { revise } from '../revise.js';
 import { publish } from '../agora/index.js';
 import { match, gather } from '../krisis/match.js';
 import { apply } from '../krisis/apply.js';
@@ -187,6 +190,17 @@ export const ADAPTERS = {
     const earlier = await inputOf(inputs.earlier, host, 'earlier version'), later = await inputOf(inputs.later, host, 'later version');
     const r = await engine(host, null, (env) => compare({ earlier, later, options: { signal } }, env));
     return r.problem ? r : { report: r.report, outputs: {} };
+  },
+  // Release a new version (src/engine/revise.js): the new version (`later`, the files the workflow began with)
+  // against the previous release (`earlier`, chosen at this step). The reviewer who signs the retractions comes
+  // with the options (the page's remembered name, or --reviewer), never from a question of the recipe's.
+  async revise({ inputs, options, host, signal }) {
+    const later = await inputOf(inputs.later, host, 'new version'), earlier = await inputOf(inputs.earlier, host, 'previous release');
+    // The reviewer: the host's (host.reviewer, a contributor or a function giving one: the page's remembered name; a test's), unless the options name one.
+    const reviewer = options.reviewer ?? (typeof host.reviewer === 'function' ? host.reviewer() : host.reviewer) ?? undefined;
+    const r = await engine(host, 'dataset', (env) => revise({ earlier, later, options: { ...options, reviewer, signal } }, env));
+    // The release report (<stem>.release.json) is written beside the dataset, not handed on: the dataset alone is the step's result.
+    return r.problem ? r : { report: r.report, outputs: { dataset: r.outputs.filter((o) => !o.name.endsWith('.release.json')) } };
   },
   'publish.report': part('report'),
   'publish.mint': part('mint'),

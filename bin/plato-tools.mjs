@@ -16,6 +16,7 @@ const { parseArgs } = await import('node:util');
 const { readFileSync, statSync } = await import('node:fs');
 const { run, TARGETS, DEFAULT_TABLE_BASE } = await import('../src/engine/pipeline.js');
 const { compare } = await import('../src/engine/compare.js');
+const { revise } = await import('../src/engine/revise.js');
 const { publish, PUBLISH_PARTS } = await import('../src/engine/agora/index.js');
 const { match } = await import('../src/engine/krisis/match.js');
 const { apply, OUTPUTS: REVIEW_OUTPUTS } = await import('../src/engine/krisis/apply.js');
@@ -61,6 +62,15 @@ Usage:
                                             check that a published dataset was only added to:
                                             every attestation of the EARLIER version must be in
                                             the LATER one, unchanged (PLATO's append-only rule)
+  plato-tools revise [options] NEW --previous PUBLISHED --reviewer NAME
+                                            make the NEW version of a published dataset keep
+                                            the append-only rule against its PUBLISHED release
+                                            (the copy with addresses): what it deleted is put
+                                            back and retracted, what it changed is put back and
+                                            replaced (plato:Supersedes), a place dropped comes
+                                            back with its attestations retracted, and the header
+                                            is made a release's; checked with the version check
+                                            before it is written, as NEW-revised.json
   plato-tools publish PART [options] INPUT
                                             prepare a dataset for publishing (Agora); PART is
                                             report: what its description lacks, and deposit
@@ -245,6 +255,10 @@ does not apply to):
                     <base>release/NAME).
   --previous FILE   publish: the previous release: minting keeps its attestations' addresses,
                     and nothing it published may be missing.
+                    revise: the previous release, as published (the copy with addresses that its
+                    site was made from, NAME-with-ids.jsonl); required.
+  --date DATE       revise: what every retraction and new form written is dated (created), as
+                    2026-10-17 or 2026-10-17T12:00:00Z; the default is now.
   --concept-doi DOI publish: the DOI Zenodo gave to every version of the dataset.
   --maintainer NAME publish w3id: a GitHub user who maintains the namespace (repeatable).
   --repo OWNER/NAME publish: the GitHub repository the site is published from.
@@ -287,7 +301,9 @@ ${QUALIFIER_LISTS.map((l) => `                    ${l.id}: ${l.label}${l.status 
                     version check; or attestations, a PLATO file of only the new attestations.
   --reviewer NAME   match, apply, lookup: who reviews, recorded as each attestation's contributor
                     (apply: default, the name in the work file; lookup: written into the work file).
-  --orcid URL       match, apply, lookup: the reviewer's ORCID, as https://orcid.org/0000-0000-0000-0000.
+                    revise: who makes the retractions, recorded as their contributor (a retraction
+                    is a claim its maker takes back); required.
+  --orcid URL       match, apply, lookup, revise: the reviewer's ORCID, as https://orcid.org/0000-0000-0000-0000.
   --draft-answers withdraw|replace
                     apply: what to do with an earlier answer a changed decision no longer holds,
                     in a dataset that is not yet published: withdraw it and keep it (the default,
@@ -373,7 +389,8 @@ as problems. For preview: 0 if the records read have no problems, 1 if they have
 preview could be made (the command is wrong, the input cannot be read, or its format is not
 one a preview is made of). For compare: 0 if nothing was deleted or changed, 1 if something was, 2 if the
 versions could not be compared. For match and apply: 0 if nothing stopped it, 1 if something
-did (a place without an address), 2 if it could not be done. For lookup: 0 if every place
+did (a place without an address), 2 if it could not be done. For revise: 0 if the revised dataset
+was written, 1 if something stopped it (nothing is then written), 2 if it could not be done. For lookup: 0 if every place
 was answered, 1 if some were not or the lookup stopped (the work file still holds what was
 found, to resume from), 2 if it could not be done. For candidates: 0 if the set was
 written, or nothing was new to write; 2 if it could not be made.
@@ -450,7 +467,7 @@ async function main(argv) {
         with: { type: 'string' }, threshold: { type: 'string' }, 'max-distance': { type: 'string' }, top: { type: 'string' }, qualifiers: { type: 'string' },
         review: { type: 'string' }, output: { type: 'string' }, reviewer: { type: 'string' }, orcid: { type: 'string' },
         'others-title': { type: 'string' },
-        'draft-answers': { type: 'string' },
+        'draft-answers': { type: 'string' }, date: { type: 'string' },
         candidates: { type: 'string', multiple: true }, 'previous-candidates': { type: 'string', multiple: true }, 'set-iri': { type: 'string' },
         georef: { type: 'string', multiple: true }, manifest: { type: 'string', multiple: true },
         gazetteer: { type: 'string' }, places: { type: 'string' }, 'all-names': { type: 'boolean', default: false }, variants: { type: 'boolean', default: false }, countries: { type: 'boolean', default: false },
@@ -477,7 +494,7 @@ async function main(argv) {
     return 0;
   }
   const [action, ...args] = positionals;
-  if (!action) return usage('say what to do: check, convert, preview, compare, publish, match or apply.');
+  if (!action) return usage('say what to do: check, convert, preview, compare, revise, publish, match or apply.');
   if (action === 'project') return projectCommand(args, o);
   // The reading options are the readers' (TEI, a table of places), for check, convert and preview only.
   const readingFlags = READING_FLAGS.filter((f) => f === 'key-pattern' ? o[f].length : o[f]);
@@ -499,7 +516,7 @@ async function main(argv) {
   if (o.clusters !== undefined && !reads) return usage('--clusters is for check, convert and preview.');
   if (action === 'datacube') return datacube(args, o);
   if (action === 'publish') return publishCommand(args, o, resources);
-  if (o.sheet !== undefined && !reads) return usage('--sheet is for check, convert and preview.');
+  if (o.sheet !== undefined && !reads && action !== 'revise') return usage('--sheet is for check, convert, preview and revise.');
   if (o.split.length && !reads) return usage('--split is for check, convert and preview.');
   if (o.split.length) {
     o.splits = [];
@@ -508,6 +525,8 @@ async function main(argv) {
   if (action === 'candidates') return candidatesCommand(args, o, resources);
   if (o['previous-candidates'] || o['set-iri']) return usage('--previous-candidates and --set-iri are for candidates.');
   if (action === 'match' || action === 'apply') return review(action, args, o, resources);
+  if (action === 'revise') return reviseCommand(args, o, resources);
+  if (o.date !== undefined) return usage('--date is for revise.');
   if (action === 'lookup') return lookupCommand(args, o, resources);
   if (action === 'wikidata') return wikidataCommand(args, o, resources);
   if (o['allow-host'].length || o.consent || o.statements !== undefined || o.user !== undefined || o.qids !== undefined || o.api !== undefined) return usage('--allow-host, --consent, --statements, --user, --qids and --api are for wikidata.');
@@ -515,7 +534,7 @@ async function main(argv) {
   if (o.gazetteer || o.places || o['all-names'] || o.variants || o.countries || o.near || o.lang || o.batch || o['dry-run'] || o['token-env'] || o['gazetteer-iri']) return usage('--gazetteer, --token-env, --gazetteer-iri, --places, --all-names, --variants, --countries, --near, --lang, --batch and --dry-run are for lookup.');
   if (o.levels || o.level !== undefined || o.relax !== undefined || o.unconstrained) return usage('--levels, --level, --relax and --unconstrained are for lookup.');
   if (o.with || o.threshold || o['max-distance'] || o.top || o.qualifiers !== undefined || o.review || o.output || o.reviewer || o.orcid || o['others-title'] !== undefined || o['draft-answers'] !== undefined) return usage('--with, --threshold, --max-distance, --top, --qualifiers, --review, --output, --reviewer, --orcid, --others-title and --draft-answers are for match and apply.');
-  if (!reads && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, preview, cluster, compare, publish, match, apply, lookup, wikidata, candidates, datacube and project.`);
+  if (!reads && action !== 'compare') return usage(`"${action}" is not a command; the commands are check, convert, preview, cluster, compare, revise, publish, match, apply, lookup, wikidata, candidates, datacube and project.`);
   // Elenchos: candidate sets checked together, with no other input: the first is checked, with the others
   // (each is first made sure of below, so that a dataset given with --candidates is refused, not checked).
   const alone = action === 'check' && !args.length && !!o.candidates;
@@ -774,6 +793,76 @@ async function publishCommand(args, o, resources) {
     }
     return finishPublish(r, o, t0);
   } finally { host.cleanup(); }
+}
+// Mneme's revision (src/engine/revise.js): the new version of a published dataset made to keep the
+// append-only rule against its previous release, and written only once the version check has passed it.
+async function reviseCommand(args, o, resources) {
+  if (o.to || o.cube) return usage('--to and --cube are for convert.');
+  if (o.json && o.brief) return usage('choose --json or --brief, not both.');
+  if (!o.previous) return usage('revise needs --previous, the previous release (the copy with addresses that its site was made from).');
+  const { reviewer, problem } = reviewerOption(o);
+  if (problem) return usage(problem);
+  if (!reviewer) return usage('revise needs --reviewer, the name the retractions are made in: a retraction is a claim its maker takes back.');
+  if (o.date !== undefined && (!/^\d{4}-\d{2}-\d{2}/.test(o.date) || Number.isNaN(Date.parse(o.date)))) return usage(`--date ${o.date} is not a date; give it as 2026-10-17 or 2026-10-17T12:00:00Z.`);
+  let columns;
+  if (o.columns) {
+    try { columns = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(o.columns))); }
+    catch (e) { return usage(`--columns ${o.columns} cannot be read as JSON: ${e.message}`); }
+    columns = splitMatching(columns).columns;
+    if (!isColumns(columns)) return usage(`--columns ${o.columns} must hold one JSON object, {"column name": "field"}, each column given the name of a field.`);
+  }
+  const items = await gatherInputs(args);
+  if (items.length !== 1) return usage(`revise takes one dataset, the new version; ${items.length} ${items.length === 1 ? 'was' : 'were'} given.`);
+  const host = new NodeHost({ workDir: o['work-dir'], outDir: o.out, overwrite: o.overwrite });
+  const stop = (signal) => { const removed = host.abandon(); process.stderr.write(`\nplato-tools: stopped (${signal})${removed.length ? `; the incomplete ${removed.length === 1 ? 'file is' : 'files are'} removed` : ''}.\n`); process.exit(130); };
+  process.once('SIGINT', stop); process.once('SIGTERM', stop);
+  const live = process.stderr.isTTY && !o.json;
+  const t0 = Date.now();
+  const r = { type: 'revise', input: items[0].label, files: items[0].paths, format: null, previous: { input: o.previous, format: null }, status: 'failed', errors: 0, counts: {}, items: [], outputs: [], elapsedMs: 0 };
+  try {
+    const { input, message } = await readInput(items[0]);
+    if (!input) { r.message = message; return finishRevise(r, o, t0); }
+    r.format = input.format; r.profile = input.profile || null;
+    const [p] = await gatherInputs([o.previous]);
+    const got = await readInput(p);
+    if (!got.input) { r.message = `${o.previous}: ${got.message}`; return finishRevise(r, o, t0); }
+    r.previous.format = got.input.format;
+    let later = input;
+    if (o.sheet !== undefined) { try { later = withSheet(input, o.sheet); } catch (e) { if (e?.name !== 'DataError') throw e; return usage(`${items[0].label}: ${e.message}`); } }
+    const progress = live ? (p) => process.stderr.write(`\r\x1b[K${progressText(p)}`) : undefined;
+    const xlsx = [input, got.input].some((i) => i?.container === 'workbook') ? await import('xlsx') : undefined;
+    const { env, finish } = host.env(resources, { progress, xlsx });
+    let result = null, failure = null;
+    const options = { reviewer, release: o.release, base: o.base, date: o.date, columns, name: items[0].name };
+    try { result = await revise({ earlier: got.input, later, options }, env); } catch (e) { failure = e; }
+    if (live) process.stderr.write('\r\x1b[K');
+    // Nothing is written unless the checks passed: a revision with errors takes its output back.
+    const done = finish(!!failure || !!result?.incomplete || !!result?.report?.errors);
+    if (failure) {
+      r.message = isSystemError(failure) ? (failure.code === 'EEXIST' ? `${failure.path} already exists; give --overwrite to replace it, or --out for somewhere else.` : failure.message) : failure instanceof DataError ? failure.message : toolsFault(failure);
+      if (done.removed.length) r.message += ` Nothing was written: the incomplete ${done.removed.length === 1 ? 'file was' : 'files were'} removed.`;
+      return finishRevise(r, o, t0);
+    }
+    Object.assign(r, { status: result.incomplete ? 'failed' : result.report.errors ? 'problems' : 'ok', errors: result.report.errors, counts: result.report.counts, items: result.report.items,
+      outputs: result.report.errors || result.incomplete ? [] : result.outputs.map(({ name, path, size }) => ({ path: path || name, size })) });
+    if (result.incomplete && !result.report.items.length) r.message = 'It could not be finished.';
+    return finishRevise(r, o, t0);
+  } finally { host.cleanup(); }
+}
+function finishRevise(r, o, t0) {
+  r.elapsedMs = Date.now() - t0;
+  r.exitCode = r.status === 'failed' ? 2 : r.status === 'problems' ? 1 : 0;
+  if (o.json) { process.stdout.write(JSON.stringify(r) + '\n'); return r.exitCode; }
+  const lines = [`New version:      ${r.input}${r.format ? `: ${formatName(r)}` : ''}`, `Previous release: ${r.previous.input}${r.previous.format ? `: ${formatName(r.previous)}` : ''}`];
+  if (r.status === 'failed' && r.message && !r.items.length) lines.push(`  Could not be done: ${r.message}`);
+  else {
+    const { problems, counted } = summary({ errors: r.errors, counts: r.counts }, 'revise');
+    lines.push(`  ${problems}${counted ? ' ' + counted : ''} (${fmtTime(r.elapsedMs)})`);
+    if (!o.brief) lines.push(...itemLines(r.items, 'revise'));
+  }
+  for (const x of r.outputs) lines.push(`  Wrote ${x.path} (${fmtBytes(x.size)})`);
+  process.stdout.write(lines.join('\n') + '\n');
+  return r.exitCode;
 }
 function finishPublish(r, o, t0) {
   r.elapsedMs = Date.now() - t0;

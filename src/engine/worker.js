@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx';
 import { loadResources } from './resources.js';
 import { prepare, run, TARGETS } from './pipeline.js';
 import { compare } from './compare.js';
+import { revise } from './revise.js';
 import { publish } from './agora/index.js';
 import { match, gather } from './krisis/match.js';
 import { mintCollector } from './krisis/wikidata.js';
@@ -304,6 +305,26 @@ self.onmessage = async ({ data }) => {
       const { env, tidy } = await runEnv();
       let result;
       try { result = await compare({ earlier, later, options: data.options || {} }, env); } finally { tidy(); }
+      postMessage({ type: 'done', ...result });
+    } else if (data.cmd === 'revise') {
+      // Mneme's revision (src/engine/revise.js): the new version (`later`) against its previous release (`earlier`).
+      const earlier = await detect(data.earlier), later = await detect(data.later);
+      const unknown = [['previous release', earlier], ['new version', later]].find(([, input]) => !readable(input));
+      if (unknown) {
+        postMessage({ type: 'done', incomplete: true, outputs: [], report: { counts: {}, errors: 1, items: [{ severity: 'error', kind: 'not-recognised', count: 1,
+          message: `The ${unknown[0]} was not recognised as data these tools read, so nothing was revised`, examples: [unknown[1].reason] }] } });
+        return;
+      }
+      const { env, tidy } = await runEnv();
+      let result;
+      try { result = await revise({ earlier, later: withSheet(later, data.options?.sheet), options: data.options || {} }, env); }
+      catch (e) {
+        // A mistake in what was asked is said plainly, as a finding, not as a fault in the tools.
+        if (!(e instanceof DataError)) throw e;
+        result = { incomplete: true, outputs: [], report: { counts: {}, errors: 1, items: [{ severity: 'error', kind: 'not-possible', count: 1, message: e.message, examples: [] }] } };
+      } finally { tidy(); }
+      // Nothing written: the dataset held until the checks passed is not kept (nor is a half-written one).
+      if (result.incomplete || result.report?.errors) await outputsDir(true);
       postMessage({ type: 'done', ...result });
     } else if (data.cmd === 'publish') {
       // Agora (src/engine/agora/): one part of publishing, for the dataset chosen, with the previous

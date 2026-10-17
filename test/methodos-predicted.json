@@ -61,6 +61,40 @@
   ]
  },
  {
+  "have": "plato",
+  "want": "version",
+  "yes": {
+   "will-publish": false
+  },
+  "recipe": "release-a-new-version",
+  "steps": [
+   "check",
+   "revise",
+   "again",
+   "compare",
+   "out"
+  ]
+ },
+ {
+  "have": "plato",
+  "want": "version",
+  "yes": {
+   "will-publish": true
+  },
+  "recipe": "release-a-new-version",
+  "steps": [
+   "check",
+   "revise",
+   "again",
+   "compare",
+   "out",
+   "mint",
+   "report",
+   "site",
+   "w3id"
+  ]
+ },
+ {
   "have": "tei",
   "want": "map",
   "yes": {

@@ -29,6 +29,12 @@ test('a loop of withdrawals is reported, and nothing in it is shown as current',
   const r2 = resolveWithdrawn(collectWithdrawn([retract('x', 'y'), retract('y', 'x'), retract('x2', 'a')]));
   assert.equal(r2.status.get(W + 'a'), 'retracted');
 });
+test('a chain of replacements: A replaced by B, then B by C, leaves A current again (B no longer holds); retracting A with it keeps it withdrawn, which is what Mneme\'s revision writes (chain-closed)', () => {
+  const sup = (id, target) => ({ '@id': W + id, meta: { targetAttestation: W + target, metaType: P + 'Supersedes' }, sources: [{ title: 's' }] });
+  assert.deepEqual(status([sup('b', 'a')]), { a: 'superseded' });
+  assert.deepEqual(status([sup('b', 'a'), sup('c', 'b')]), { b: 'superseded' }, 'A revived: the hazard');
+  assert.deepEqual(status([sup('b', 'a'), sup('c', 'b'), retract('r1', 'a')]), { a: 'retracted', b: 'superseded' }, 'the chain closed');
+});
 test('a supersession that is itself retracted no longer replaces its target', () => {
   const sup = { '@id': W + 's1', meta: { targetAttestation: W + 'a', metaType: P + 'Supersedes' }, sources: [{ title: 's' }] };
   assert.deepEqual(status([sup]), { a: 'superseded' });

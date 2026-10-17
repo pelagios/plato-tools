@@ -70,8 +70,8 @@ function current(doc) {
 const metas = (doc) => newton(doc).filter((a) => a.meta).map((a) => [a.meta.metaType.slice(P.length), a.meta.targetAttestation, !!a.identities]);
 const kinds = (r) => r.report.items.map((i) => i.kind);
 /** The version check from one dataset to the next, as a user would run it. */
-async function mneme(earlierText, laterText) {
-  return (await compare({ earlier: await asInput(earlierText, 'v1.json'), later: await asInput(laterText, 'v2.json') }, env())).report;
+async function mneme(earlierText, laterText, options = {}) {
+  return (await compare({ earlier: await asInput(earlierText, 'v1.json'), later: await asInput(laterText, 'v2.json'), options }, env())).report;
 }
 
 test('accepted, then rejected ("different places"): the acceptance is retracted, the denial written, and one answer is current', async () => {
@@ -215,7 +215,11 @@ test('an earlier answer with no address is given the one Agora\'s minting would 
   assert.equal(given['@id'], agoraId, 'the earlier answer now has its address');
   assert.deepEqual(metas(v2.doc), [['Retracts', agoraId, false]]);
   assert.ok(kinds(v2.r).includes('answers-addressed'));
-  const m = await mneme(bareText, v2.text);
+  // The bare dataset is published with no address on any attestation, which the version check a user runs refuses (the
+  // working copy, not a release: compare.test.js); as the tools adding to it compare it (allowUnaddressed), the withdrawal counts.
+  const refused = await mneme(bareText, v2.text);
+  assert.ok(refused.items.some((i) => i.kind === 'earlier-unaddressed-release'), JSON.stringify(refused.items));
+  const m = await mneme(bareText, v2.text, { allowUnaddressed: true });
   assert.equal(m.errors, 0, JSON.stringify(m.items));
   assert.equal(m.counts.retracted, 1, 'the version check counts a withdrawal of an answer given its address in the later version');
   // The attestations-only output cannot give it one.

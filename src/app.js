@@ -176,7 +176,7 @@ async function storageCheck() {
   } catch { w.hidden = true; }
 }
 
-const buttons = (disabled) => { for (const id of ['check', 'check-candidates', 'convert', 'compare', 'publish', 'match', 'resume', 'finish', 'preview', 'regions-start']) $(id).disabled = disabled; if (!disabled) gateOnColumns(); };
+const buttons = (disabled) => { for (const id of ['check', 'check-candidates', 'convert', 'compare', 'revise', 'publish', 'match', 'resume', 'finish', 'preview', 'regions-start']) $(id).disabled = disabled; if (!disabled) gateOnColumns(); };
 // Krisis: a table of places is matched, and its review finished, by the matching of its columns: until
 // the worker's answer about them arrives, Match and Finish wait, or the table would be read by the guess.
 const columnsPending = () => isTable(input) && !columns && !state.columns?.error;
@@ -200,9 +200,13 @@ function start(action, earlier) {
   // Methodos: the run is told, as the operation a workflow's step names, with the files it runs on.
   runOp = action === 'publish' ? `publish.${$('part').value}` : action;
   // A match, with the other dataset (a workflow may choose it at this step); a Finish, with what it makes ('dataset' or 'attestations').
-  methodos.began({ op: runOp, files, ...(action === 'match' ? { others: [...earlier] } : action === 'apply' ? { output: earlier } : {}) });
+  // Mneme's revision and the version check: the files chosen are the new (later) version, and `earlier` the previous release, which
+  // a workflow chooses at the revise step and takes again at its compare and its publishing (the "Previous release" under Options).
+  methodos.began({ op: runOp, files, ...(action === 'match' ? { others: [...earlier] } : action === 'apply' ? { output: earlier } : action === 'revise' || action === 'compare' ? { earlier: [...earlier] } : action === 'publish' ? { previous: [...$('previous').files] } : {}) });
   // The version check: the files chosen are the later version, and `earlier` the one it is compared with.
   if (action === 'compare') worker.postMessage({ cmd: 'compare', earlier, later: files, options: { base } });
+  // Mneme's revision (src/engine/revise.js): the retractions in the reviewer's name, the release name from Options; a table by the matching of its columns shown.
+  else if (action === 'revise') worker.postMessage({ cmd: 'revise', earlier, later: files, options: { base, release: $('release').value.trim() || undefined, reviewer: reviewer(), ...sheetOption(), ...(isTable(input) && columns ? { columns: columnOptions() } : {}) } });
   else if (action === 'publish') onlyKeys().then(
     (only) => worker.postMessage({ cmd: 'publish', part: $('part').value, files, previous: [...$('previous').files], options: { base, ...publishOptions(), only } }),
     (e) => fail(`the list of places to include could not be read (${e.message || e}).`));
@@ -872,6 +876,11 @@ $('compare').onclick = () => $('earlier').click();
 $('check-candidates').onclick = () => $('candidate-sets').click();
 $('candidate-sets').onchange = (e) => { const sets = [...e.target.files]; e.target.value = ''; if (sets.length) start('check', sets); };
 $('earlier').onchange = (e) => { const earlier = [...e.target.files]; e.target.value = ''; if (earlier.length) start('compare', earlier); };
+// Revising asks for one more file, the previous release, and starts once it is chosen; the retractions it writes are
+// in the reviewer's name (Krisis's, remembered in this browser), so a name is asked for first.
+const REVISE_NAME = "Revising withdraws what the new version deleted or changed, in your name as reviewer: give your name under Krisis's review (\"Your name\", kept in this browser), then revise.";
+$('revise').onclick = () => { if (!reviewer()) return refuse(REVISE_NAME); const problem = reviewerProblem(); if (problem) return refuse(problem); $('earlier-revise').click(); };
+$('earlier-revise').onchange = (e) => { const earlier = [...e.target.files]; e.target.value = ''; if (earlier.length) start('revise', earlier); };
 $('publish').onclick = () => start('publish');
 // Cancel ends the worker, which stops its run at once, even in a long SQLite step, where a stop between
 // records (run()'s options.signal, which Methodos's adapters pass on) would wait for the step to end: a
@@ -903,7 +912,7 @@ const TOOLS = {
   check: { name: 'Elenchos', what: 'the check', heading: 'Check it', guide: ['checking', 'What it checks'] },
   convert: { name: 'Metaphrasis', what: 'conversion', heading: 'Convert it', guide: ['converting', 'What each format keeps'] },
   figures: { name: 'Arithmos', what: 'statistical figures, converted to N-Triples with the RDF Data Cube option (ticked, under Options)', heading: 'Convert its figures to RDF Data Cube', guide: ['converting', 'Converting, in the guide'] },
-  versions: { name: 'Mneme', what: 'the version check: choose the new version here, and you will be asked for the earlier one', heading: 'Compare it with the earlier version', guide: ['comparing-two-versions', 'What it reports'] },
+  versions: { name: 'Mneme', what: 'the version check, and revising a new version against the earlier one: choose the new version here, and you will be asked for the earlier one', heading: 'Compare it with the earlier version, or revise it against the earlier one', guide: ['comparing-two-versions', 'What it reports'] },
   publish: { name: 'Agora', what: 'publishing', heading: 'Prepare it for publishing', guide: ['publishing-your-dataset', 'What publishing takes'] },
   match: { name: 'Krisis', what: 'match review', heading: 'Match it with another dataset', guide: ['match-review', 'How to review matches'] },
 };

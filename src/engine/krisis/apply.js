@@ -413,7 +413,8 @@ async function writeDataset({ subjects, made, work, options, sets = [], give = n
  */
 export async function checkAppendOnly({ earlier, later, added, withdrawing, options = {} }, env, rep) {
   const K = KRISIS_TEXT;
-  const c = await compare({ earlier, later: await detect([later]), options: { base: options.base, columns: options.columns, ...(options.expectMissing?.length ? { expectMissing: options.expectMissing } : {}),
+  // A published dataset never minted (none of its attestations addressed) is still finished into: compared by what its attestations say (allowUnaddressed).
+  const c = await compare({ earlier, later: await detect([later]), options: { base: options.base, columns: options.columns, allowUnaddressed: true, ...(options.expectMissing?.length ? { expectMissing: options.expectMissing } : {}),
     ...(withdrawing?.replaced?.length ? { expectRemoved: withdrawing.replaced } : {}) } }, env);
   for (const i of c.report.items) {
     if (CHANGED.has(i.kind)) {

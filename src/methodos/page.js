@@ -22,7 +22,7 @@ import { stateOf, fromSnapshot } from './whg.js';
 
 // The input of each automatic operation that the page's run takes from the files chosen in step 1: a
 // run is the step's only if those files are the ones the step takes (by size and SHA-256).
-const MAIN = { check: 'files', convert: 'files', compare: 'later', 'publish.report': 'dataset', 'publish.mint': 'dataset', 'publish.site': 'dataset',
+const MAIN = { check: 'files', convert: 'files', compare: 'later', revise: 'later', 'publish.report': 'dataset', 'publish.mint': 'dataset', 'publish.site': 'dataset',
   'publish.w3id': 'dataset', match: 'subjects', lookup: 'subjects', apply: 'subjects', 'relate.containment': 'subjects' };
 // The page's run that does a step whose operation is not a run of its own: recording the decisions with
 // the region each place is in is Krisis's Finish (its 'apply' run), on a review whose candidates are exported.
@@ -42,7 +42,7 @@ function problemOf(r) {
 // Each operation's tool on this page: the key of #tool=<key> (src/app.js, TOOLS), or null where the
 // step is done elsewhere (Hermes's columns, at the drop zone; Chora, on the map, at #chora).
 const PAGE_TOOL = {
-  check: 'check', convert: 'convert', compare: 'versions', match: 'match', lookup: 'match', 'lookup.levels': 'match', review: 'match', apply: 'match', 'wikidata.items': 'match',
+  check: 'check', convert: 'convert', compare: 'versions', revise: 'versions', match: 'match', lookup: 'match', 'lookup.levels': 'match', review: 'match', apply: 'match', 'wikidata.items': 'match',
   'relate.containment': 'match', 'publish.report': 'publish', 'publish.mint': 'publish', 'publish.site': 'publish', 'publish.w3id': 'publish',
 };
 // The tools that the interview names when no workflow fits: their names, and where each is chosen.
@@ -412,7 +412,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
         const refs = await refsOf(given, 'files');
         const was = w.files[key];
         if (was && !sameRefs(was, refs)) {
-          say(`This run is not counted as the step “${s.title}”: ${names(refs)} is not ${names(was)}, ${words} this workflow recorded (the size or SHA-256 differs). ${s.op === 'match' ? `Match with ${names(was)} as it was` : `Choose ${names(was)} in step 1, as it was, and run it again`}${runner.forgettable(w, key) ? `, or forget it (“Forget ${names(was)}”, below the steps) to match with another` : ''}.`, true); render(false); return;
+          say(`This run is not counted as the step “${s.title}”: ${names(refs)} is not ${names(was)}, ${words} this workflow recorded (the size or SHA-256 differs). ${s.op === 'match' ? `Match with ${names(was)} as it was` : s.op === 'revise' ? `Revise against ${names(was)} as it was` : `Choose ${names(was)} in step 1, as it was, and run it again`}${runner.forgettable(w, key) ? `, or forget it (“Forget ${names(was)}”, below the steps) to ${s.op === 'revise' ? 'revise against' : 'match with'} another` : ''}.`, true); render(false); return;
         }
         w = runner.supply(w, recipeOf(w), key, refs);
         late.push(...refs.map((r, i) => [r, given[i]]));
@@ -492,7 +492,9 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     const gives = Object.entries(OPERATIONS[op].gives);
     if (!gives.length) return {};
     const [[slot, type]] = gives;
-    const files = run.work ? [run.work] : await Promise.all((run.outputs || []).map((o) => page.output(o.name)));
+    // Mneme's revision writes its release report (<stem>.release.json) beside the dataset: the dataset alone is the step's result.
+    const outputs = (run.outputs || []).filter((o) => !(op === 'revise' && o.name.endsWith('.release.json')));
+    const files = run.work ? [run.work] : await Promise.all(outputs.map((o) => page.output(o.name)));
     return { [slot]: files.length ? await refsHeld(files, type) : [] };
   }
   const names = (refs) => refs.map((r) => r.name).join(', ');
@@ -1003,7 +1005,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       const at = recipe.steps.find((s) => Object.values(s.from || {}).includes(`$${key}`));
       const got = state?.files?.[key];
       const p = el('p', { className: 'track-late', textContent: got ? `${f.words}: ${names(got)}.`
-        : `${f.words}: not yet chosen. It is chosen at the step “${at?.title || OPERATIONS[at?.op]?.title}”${at?.op === 'match' ? ", with Krisis's “Match with another dataset…”" : ''}.` });
+        : `${f.words}: not yet chosen. It is chosen at the step “${at?.title || OPERATIONS[at?.op]?.title}”${at?.op === 'match' ? ", with Krisis's “Match with another dataset…”" : at?.op === 'revise' ? ", with Mneme's “Revise against the earlier version…”" : ''}.` });
       p.dataset.late = key; p.dataset.chosen = String(!!got);
       // Not for a workflow shared from WHG, read-only: its files are not this browser's to forget.
       if (got && wf && !changed && !viewing && state === wf && runner.forgettable(state, key)) {

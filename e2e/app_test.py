@@ -3183,6 +3183,7 @@ def main():
             map_your_data_checks(pw, url, tmp)
             recipes_checks(pw, url, tmp)
             match_two_checks(pw, url, tmp)
+            release_workflow_checks(pw, url, tmp)
             project_checks(pw, url, tmp)
             whg_checks(pw, url, tmp)
             scope_checks(pw, url, tmp)
@@ -4930,6 +4931,224 @@ def match_two_checks(pw, url, tmp):
                 and list(t['steps']) == planned and [counts.get(k) for k in ('changed', 'lost', 'added')] == [0, 0, 1] and t['steps'].get('out') == 'current'), \
             {'asked': asked_now, 'planned': planned, 'compare': counts, 'steps': t['steps']}
     attempt('Match two datasets from a dataset already in a PLATO format: the same two questions, no columns or conversion but a check of it, matched as it is, reviewed, recorded and compared with it (one answer added)', from_plato)
+    try: ctx.close(); browser.close()
+    except Exception: pass
+
+# ---- Release a new version (src/engine/methodos/recipes/release-a-new-version.js; plan #34, item 10; Issue #23) ----
+# The workflow followed as a visitor follows it, on two small constructed files: the previous release (published, every
+# attestation with an address) and the new version, edited three ways (one attestation changed, one deleted, a place
+# dropped) with a place added. The interview (a dataset in a PLATO format, a new version of a published dataset) leads to
+# it; the new version checked; the previous release chosen at the revise step with Mneme's "Revise against the earlier
+# version…" (refused when another file is given there); the revised dataset checked again, compared with the previous
+# release and downloaded. The failing case: the unrevised new version compared with the previous release is not the
+# step's, and the version check finds the breach in it. Nothing goes to any other site. RELEASE_SHOTS=<dir> saves
+# screenshots of the tracker at 1440 x 900.
+RELEASE_X = 'https://example.org/release-test/'
+def release_files(tmp):
+    """The previous release, the new version, and the previous release altered (one byte: for the refusal)."""
+    src = {'@id': RELEASE_X + 'source/s', 'title': 'S'}
+    att = lambda k, h, name: {'@id': f'{RELEASE_X}place/{k}#a-{h}', 'names': [{'toponym': name}], 'citations': [{'source': src}], 'created': '2026-01-01T00:00:00Z'}
+    place = lambda k, label, atts: {'@id': RELEASE_X + 'place/' + k, 'label': label, 'attestations': atts}
+    g = {'@id': RELEASE_X + 'release/v1', 'title': 'Release test', 'licence': 'https://creativecommons.org/licenses/by/4.0/', 'status': 'published', 'version': 'v1', 'uriSpace': RELEASE_X}
+    v1 = {'profile': 'place-centric', 'gazetteer': g, 'spatialEntities': [
+        place('a', 'A', [att('a', '11111111', 'Alpha'), att('a', '22222222', 'Alfa')]), place('b', 'B', [att('b', '33333333', 'Beta')]), place('c', 'C', [att('c', '44444444', 'Gamma')])]}
+    v2 = {'profile': 'place-centric', 'gazetteer': {**g, '@id': RELEASE_X, 'status': 'draft', 'version': None}, 'spatialEntities': [
+        place('a', 'A', [att('a', '11111111', 'Alpha'), att('a', '22222222', 'Alfa respelt')]), place('b', 'B', []),
+        place('d', 'D', [{'names': [{'toponym': 'Delta'}], 'citations': [{'source': src}]}])]}
+    del v2['gazetteer']['version']
+    p1, p2, p1b = tmp / 'v1.json', tmp / 'v2.json', tmp / 'v1-other.json'
+    p1.write_text(json.dumps(v1)); p2.write_text(json.dumps(v2)); p1b.write_text(json.dumps(v1) + '\n')
+    return p1, p2, p1b
+
+def release_workflow_checks(pw, url, tmp):
+    import re
+    base = url.rstrip('/') + '/'
+    origin = re.match(r'^https?://[^/]+', base).group(0)
+    out = tmp / 'release'; out.mkdir(exist_ok=True)
+    V1, V2, V1B = release_files(out)
+    shots = os.environ.get('RELEASE_SHOTS')
+    browser = pw.chromium.launch(headless=True, args=GL)
+    ctx = browser.new_context(accept_downloads=True, viewport={'width': 1440, 'height': 900}, reduced_motion='reduce')
+    ctx.add_init_script('window.__plato_forceDownload = true;')
+    asked, consoled = [], []
+    ctx.on('request', lambda r: asked.append(r.url))
+    page = ctx.new_page()
+    page.on('console', lambda m: consoled.append(m.text))
+    r = {}
+    track = lambda: page.evaluate(JOIN_STATE)
+    late = lambda: page.evaluate("() => { const e = document.getElementById('methodos-late'); return e && !e.hidden ? [...e.querySelectorAll('p.track-late')].map((p) => p.textContent) : []; }")
+    def shot(name):
+        if shots and not PROVE:
+            pathlib.Path(shots).mkdir(parents=True, exist_ok=True)
+            page.mouse.move(1, 1)
+            page.screenshot(path=str(pathlib.Path(shots) / f'release-{name}.png'), full_page=False)
+    def click(sel):
+        try: page.click(sel, timeout=T(15) * 1000)
+        except Exception as e:
+            t = track()
+            raise RuntimeError(f'{sel} could not be clicked: message {t["message"][:150]}; steps {t["steps"]}')
+    def step_is(step, state, timeout=60):
+        until(page, f"() => document.querySelector('#methodos-track li[data-step=\"{step}\"]')?.dataset.state === '{state}'", timeout)
+    def choose(fs):
+        page.set_input_files('#picker', [])
+        page.set_input_files('#picker', [str(f) for f in fs])
+        s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection')
+        if s.get('phase') != 'detected': raise RuntimeError(f'not detected: {s.get("phase")}')
+        return s
+    def run(button, timeout=180):
+        click(button)
+        return wait_state(page, lambda s: s.get('phase') in ('done', 'error'), T(timeout), 'run')
+    def saved(s, ending):
+        n = next((o['name'] for o in (s.get('outputs') or []) if o['name'].endswith(ending)), None)
+        if not n: raise RuntimeError(f'no output ending {ending}: {[o["name"] for o in s.get("outputs") or []]}')
+        return download(page, n, out / n)
+    def need(*keys):
+        missing = [k for k in keys if not r.get(k)]
+        if missing: raise RuntimeError(f'an earlier step did not finish ({", ".join(missing)})')
+    def revised(previous):
+        """Mneme's Revise: the file chosen is the new version, and `previous` is given to the chooser the button opens."""
+        page.set_input_files('#earlier-revise', [str(previous)])
+        return wait_state(page, lambda s: s.get('action') == 'revise' and s.get('phase') in ('done', 'error'), T(120), 'revising')
+    def compared(earlier):
+        page.set_input_files('#earlier', [str(earlier)])
+        return wait_state(page, lambda s: s.get('action') == 'compare' and s.get('phase') in ('done', 'error'), T(120), 'compare')
+    steps = ['check', 'revise', 'again', 'compare', 'out']
+    LATE_WORDS = 'The previous release, as published (the copy with addresses)'
+
+    def begin():
+        page.goto(NOTOOLS if PROVE else base)
+        page.evaluate("() => { localStorage.setItem('plato-tools.reviewer', JSON.stringify({ name: 'Release Reviewer' })); }")
+        page.goto(NOTOOLS if PROVE else base)
+        wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+        # The reviewer's name (the retractions are made in it) and the release's name (the header is made that release's) from Options.
+        page.evaluate("() => { const v = document.getElementById('reviewer'); v.value = 'Release Reviewer'; v.dispatchEvent(new Event('change')); const n = document.getElementById('release'); n.value = 'v2'; n.dispatchEvent(new Event('change')); }")
+        click('#methodos-ask'); until(page, "!document.getElementById('methodos').hidden", 5)
+        page.check('input[name="methodos-have"][value="plato"]'); page.check('input[name="methodos-want"][value="version"]')
+        asked_now = page.eval_on_selector_all('#mq-more fieldset[data-ask]', 'fs => fs.map((f) => f.dataset.ask)')
+        before = page.evaluate("() => document.getElementById('methodos-start').hidden")   # publishing not yet answered: no plan
+        page.check('input[name="methodos-ask-will-publish"][value="no"]')
+        planned = page.eval_on_selector_all('#methodos-plan li.track-step', 'ls => ls.map((l) => l.dataset.step)')
+        cannot = page.eval_on_selector_all('#methodos-plan .track-cannot li', 'ls => ls.map((l) => l.textContent)')
+        recipe = page.evaluate("() => document.getElementById('methodos').dataset.recipe || null")
+        if shots and not PROVE: page.locator('#methodos-plan').scroll_into_view_if_needed(); shot('0-interview')
+        click('#methodos-start'); until(page, "['pending', 'idle'].includes(document.getElementById('methodos-tracker').dataset.status)", 10)
+        pending = late()
+        choose([V2])
+        until(page, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+        t = track(); r['begun'] = t; begun = late()
+        ok = (asked_now == ['will-publish'] and recipe == 'release-a-new-version' and before is True and planned == steps and list(t['steps']) == steps
+              and t['steps'].get('check') == 'current' and len(cannot) == 4 and cannot[0].startswith('Nothing published is deleted')
+              and len(pending) == 1 and pending[0].startswith(f'{LATE_WORDS}: not yet chosen. It is chosen at the step') and "Mneme's “Revise against the earlier version…”" in pending[0]
+              and begun == pending)
+        return ok, {'asked': asked_now, 'recipe': recipe, 'plan hidden before': before, 'planned': planned, 'cannot': [c[:50] for c in cannot], 'late before the file': pending, 'late begun': begun, 'steps': t['steps']}
+    attempt('Release a new version: the interview (a dataset in a PLATO format, a new version of a published dataset) leads to the workflow, asks publishing only, plans its five steps, says what it cannot do, and names the previous release, not yet chosen, from the start', begin)
+
+    def check():
+        need('begun')
+        r['check'] = run('#check').get('phase'); step_is('check', 'done')
+        t = track()
+        return r['check'] == 'done' and t['steps'].get('revise') == 'current', {'check': r['check'], 'steps': t['steps']}
+    attempt('Release a new version: the new version checked, the step done by its run; the workflow is then at the revise step', check)
+
+    def revise():
+        need('check')
+        s = revised(V1); step_is('revise', 'done', 60)
+        counts = (s.get('report') or {}).get('counts') or {}
+        said = page.inner_text('#summary')
+        chosen = late()
+        r['revised'] = saved(s, '-revised.json')
+        account = json.loads(saved(s, '.release.json').read_text())
+        t = track()
+        shot('1-revised')
+        ok = (s.get('phase') == 'done' and (s.get('report') or {}).get('errors') == 0
+              and [counts.get(k) for k in ('kept', 'superseded', 'retracted', 'tombstones', 'added')] == [1, 1, 2, 1, 1]
+              and 'Kept 1 attestation; superseded 1 and retracted 2 (1 place withdrawn whole); 1 added (1 new place).' in said
+              and chosen == [f'{LATE_WORDS}: v1.json.'] and t['steps'].get('again') == 'current'
+              and account.get('format') == 'plato-tools-release' and [account['counts'].get(k) for k in ('unchanged', 'superseded', 'retracted', 'tombstones', 'new')] == [1, 1, 2, 1, 1]
+              and account.get('tombstones') == [RELEASE_X + 'place/c'] and (account.get('maintainer') or {}).get('name') == 'Release Reviewer')
+        return ok, {'phase': s.get('phase'), 'errors': (s.get('report') or {}).get('errors'), 'counts': {k: counts.get(k) for k in ('kept', 'superseded', 'retracted', 'tombstones', 'added')}, 'summary': said[:300], 'late': chosen, 'release report': {k: account.get(k) for k in ('format', 'counts', 'tombstones', 'maintainer')}, 'steps': t['steps']}
+    attempt('Release a new version: revised in Mneme against the previous release, chosen there and named in the tracker: one attestation superseded, two retracted (one place withdrawn whole), one added, said in the summary and in the release report beside the dataset; the step done', revise)
+
+    def refuse_other():
+        need('revised')
+        click('#methodos-back'); step_is('revise', 'current', 15)
+        forget = page.evaluate("() => { const b = document.querySelector('#methodos-late button.methodos-forget'); return b && !b.closest('[hidden]') ? b.textContent : null; }")
+        revised(V1B)
+        soon(page, "() => /This run is not counted as the step/.test(document.getElementById('methodos-message').textContent)", 20)
+        refused = track()
+        s = revised(V1); step_is('revise', 'done', 60)
+        r['revised'] = saved(s, '-revised.json')   # done again: the step's output is this run's
+        again = track()
+        return (forget == 'Forget v1.json' and refused['steps'].get('revise') == 'current'
+                and 'v1-other.json is not v1.json, the previous release, as published (the copy with addresses) this workflow recorded' in refused['message']
+                and 'Revise against v1.json as it was' in refused['message'] and late() == [f'{LATE_WORDS}: v1.json.'] and again['steps'].get('again') == 'current'), \
+            {'forget': forget, 'refused': refused['message'][:300], 'steps then': refused['steps'], 'steps after': again['steps']}
+    attempt('Release a new version: back at the revise step, a revision against another file than the previous release recorded is not counted, and said so (a way to forget it shown); with the same file again it is', refuse_other)
+
+    def again():
+        need('revised')
+        choose([r['revised']])
+        r['again'] = run('#check').get('phase'); step_is('again', 'done')
+        return r['again'] == 'done' and track()['steps'].get('compare') == 'current', {'again': r['again'], 'steps': track()['steps']}
+    attempt('Release a new version: the revised dataset checked again, the step done by its run', again)
+
+    def compare_step():
+        need('again')
+        # The control first: the unrevised new version against the previous release is not the step's (its file is not the
+        # revised dataset), said so, and the version check finds the breach in it, which the revision answered.
+        choose([V2])
+        s = compared(V1)
+        soon(page, "() => /not the files the step/.test(document.getElementById('methodos-message').textContent)", 20)
+        wrong = track(); breach = (s.get('report') or {}).get('errors')
+        kinds = sorted({i['kind'] for i in (s.get('report') or {}).get('items', []) if i['severity'] == 'error'})
+        choose([r['revised']])
+        s = compared(V1)
+        done = soon(page, "() => document.querySelector('#methodos-track li[data-step=\"compare\"]')?.dataset.state === 'done'", 60)
+        counts = (s.get('report') or {}).get('counts') or {}
+        r['compared'] = done and (s.get('report') or {}).get('errors') == 0
+        t = track()
+        return (isinstance(breach, int) and breach >= 3 and 'attestation-removed' in kinds and 'attestation-changed' in kinds and wrong['steps'].get('compare') == 'current'
+                and r['compared'] and [counts.get(k) for k in ('changed', 'lost', 'retracted', 'superseded', 'added')] == [0, 0, 2, 1, 4] and t['steps'].get('out') == 'current'), \
+            {'breach in the unrevised': breach, 'kinds': kinds, 'not counted': wrong['message'][:200], 'compare of the revised': counts, 'phase': s.get('phase'), 'errors': (s.get('report') or {}).get('errors'), 'message': t['message'][:300], 'steps': t['steps']}
+    attempt('Release a new version: the unrevised new version compared with the previous release is not the step\'s and breaks the rule (deleted, changed); the revised dataset compared with it keeps the rule, two retracted and one replaced, and the step is done', compare_step)
+
+    def download_step():
+        need('compared')
+        until(page, "() => !document.getElementById('methodos-download').hidden", 30)
+        with page.expect_download(timeout=T(30) * 1000) as d: click('#methodos-download')
+        r['final'] = out / ('final-' + d.value.suggested_filename); d.value.save_as(r['final'])
+        step_is('out', 'done', 15)
+        until(page, "document.getElementById('methodos-tracker').dataset.status === 'completed' || !document.querySelector('#methodos-track li.is-current')", 15)
+        shot('2-done')
+        doc = json.loads(r['final'].read_text()); r['doc'] = doc
+        metas = sorted((a['meta']['metaType'].rsplit('#', 1)[1], a['meta']['targetAttestation'].rsplit('#', 1)[1]) for e in doc['spatialEntities'] for a in e.get('attestations') or [] if a.get('meta'))
+        r['metas'] = metas
+        g = doc['gazetteer']
+        same = r['final'].read_bytes() == r['revised'].read_bytes()
+        return (metas == [('Retracts', 'a-33333333'), ('Retracts', 'a-44444444'), ('Supersedes', 'a-22222222')] and g.get('status') == 'published'
+                and g.get('previousVersion') == RELEASE_X + 'release/v1' and g.get('version') == 'v2' and g.get('@id') == RELEASE_X + 'release/v2' and same and any(e['@id'].endswith('/place/c') for e in doc['spatialEntities']) and all(v.startswith('done') for v in track()['steps'].values())), \
+            {'metas': metas, 'gazetteer': {k: g.get(k) for k in ('status', 'previousVersion', 'version', '@id')}, 'same file': same, 'steps': track()['steps']}
+    attempt('Release a new version: downloaded as it is, every step done: the deleted attestation and the dropped place (kept, a tombstone) retracted, the changed one replaced, the header published and naming the previous release', download_step)
+
+    def can_fail():
+        need('doc')
+        # One predicate for both: the three edits answered (the deleted and the dropped place's attestation retracted, the
+        # changed one replaced), and the header a release's. It holds on the file downloaded and fails on the same file
+        # with its withdrawals left out, as a step that skipped them would leave it.
+        def answered(d):
+            metas = sorted((a['meta']['metaType'].rsplit('#', 1)[1], a['meta']['targetAttestation'].rsplit('#', 1)[1]) for e in d['spatialEntities'] for a in e.get('attestations') or [] if a.get('meta'))
+            return metas == [('Retracts', 'a-33333333'), ('Retracts', 'a-44444444'), ('Supersedes', 'a-22222222')] and d['gazetteer'].get('previousVersion') == RELEASE_X + 'release/v1'
+        stripped = {**r['doc'], 'spatialEntities': [{**e, 'attestations': [{k: v for k, v in a.items() if k != 'meta'} for a in e.get('attestations') or []]} for e in r['doc']['spatialEntities']]}
+        return answered(r['doc']) is True and answered(stripped) is False, {'as written': answered(r['doc']), 'without the withdrawals': answered(stripped)}
+    attempt('Release a new version: the end check fails on the same file with its withdrawals left out, as a step that skipped them would leave it (and passes as written)', can_fail)
+
+    def only_here():
+        need('final')
+        other = sorted({re.match(r'^[a-z]+:(//[^/]*)?', u).group(0) for u in asked if not (u.startswith(origin + '/') or u.startswith('data:') or u.startswith('blob:'))})
+        refused = [m for m in consoled if 'Refused to connect' in m]
+        mine = [u for u in asked if u.startswith(origin + '/')]
+        return (not other and not refused and len(mine) > 0), {'other sites': other, 'refused': refused[:3], 'to this site': len(mine)}
+    attempt('Release a new version: every request the page made went to this site (the presence: it did), none to another site, nor any stopped by the policy', only_here)
     try: ctx.close(); browser.close()
     except Exception: pass
 

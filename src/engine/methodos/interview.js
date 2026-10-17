@@ -50,6 +50,9 @@ const ROUTES = [
   { have: 'table', want: 'map', recipe: 'map-your-data', set: { target: 'plato-json' }, ask: ['has-regions', 'will-draw', 'will-publish', 'will-mint'], base: { when: ['has-regions', 'will-publish'], needed: 'has-regions' } },
   { have: 'table', want: 'publish', recipe: 'map-your-data', set: { target: 'plato-json', 'will-publish': true }, ask: ['has-regions', 'will-draw', 'will-mint'], base: { when: ['has-regions', 'will-publish'], needed: 'has-regions' } },
   { have: 'plato', want: 'publish', recipe: 'publish-a-dataset', set: {}, ask: [], base: { needed: false } },
+  // A new version of a published dataset (plan #34, item 10; 17 October 2026): revised against the previous release,
+  // chosen at the revise step; the base address when publishing, optional, as Publish a dataset asks it.
+  { have: 'plato', want: 'version', recipe: 'release-a-new-version', set: { target: 'plato-json' }, ask: ['will-publish'], base: { when: 'will-publish', needed: false } },
   // An edition, or annotations: Map your data's questions but the regions (neither says which region each place
   // is in); the base address when publishing, optional, as Publish a dataset asks it (minting takes it).
   ...[['tei', 'places-from-tei'], ['recogito', 'places-from-recogito']].flatMap(([have, recipe]) => [
@@ -79,7 +82,7 @@ const ROUTES = [
 const MEANWHILE = {
   map: { why: 'Map your data starts from a list of place names.', tools: ['read', 'match', 'chora'] },
   publish: { why: 'Publish a dataset starts from a dataset in a PLATO format: bring yours into PLATO first.', tools: ['read', 'publish'] },
-  version: { why: 'Release a new version is not a workflow yet.', tools: ['versions', 'publish'] },
+  version: { why: 'Release a new version starts from a dataset in a PLATO format: bring yours into PLATO first.', tools: ['read', 'versions', 'publish'] },
   convert: { why: 'A conversion is one step, not a workflow.', tools: ['read', 'convert'] },
   match: { why: 'Match two datasets starts from a table of places, or a dataset in a PLATO format: bring yours into PLATO first, or match it with Krisis, which matches any two datasets, one step at a time.', tools: ['read', 'match'] },
   cube: { why: 'Figures as a Data Cube is one tool, not a workflow.', tools: ['figures'] },

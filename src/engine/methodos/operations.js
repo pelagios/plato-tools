@@ -26,6 +26,11 @@ export const OPERATIONS = Object.fromEntries([
   op({ key: 'convert', title: 'Convert the data', tool: 'Metaphrasis',
     takes: { files: { types: ANY }, mapping: { types: ['mapping'], optional: true } }, gives: { dataset: 'dataset' } }),
   op({ key: 'compare', title: 'Compare two versions', tool: 'Mneme', takes: { earlier: { types: ANY }, later: { types: ANY } } }),
+  // Release a new version (plan #34, item 10; src/engine/revise.js): the new version of a published dataset set
+  // against its previous release, everything it deleted or changed put back and withdrawn (plato:Retracts,
+  // plato:Supersedes), so that nothing published is lost; the retractions signed by the reviewer the page remembers.
+  op({ key: 'revise', title: 'Withdraw or replace what the new version changed, so nothing published is lost', tool: 'Mneme',
+    takes: { later: { types: ANY }, earlier: { types: ANY } }, gives: { dataset: 'dataset' } }),
   op({ key: 'publish.report', title: 'Write the FAIR report', tool: 'Agora',
     takes: { dataset: { types: ANY }, previous: { types: ANY, optional: true } }, gives: { deposit: 'deposit' } }),
   op({ key: 'publish.mint', title: 'Give every place and source a permanent address', tool: 'Agora',
