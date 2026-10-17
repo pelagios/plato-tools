@@ -93,7 +93,7 @@ Usage:
                                             licence that asks credit or share-alike needs
                                             --consent (see below); one that allows no commercial
                                             use or no adaptations, or has no licence, is refused.
-  plato-tools wikidata ids SUBJECTS --review WORKFILE --reviewer NAME --allow-host wikidata [--qids FILE] [--user NAME]
+  plato-tools wikidata ids SUBJECTS --review WORKFILE --reviewer NAME --allow-host wikidata [--qids FILE] [--user NAME] [--batch ID]
                                             bring the new items' Q-ids back: from FILE (pasted,
                                             one a line, in the batch's order) and/or your own new
                                             items in Wikidata since the batch (--user, your
@@ -356,6 +356,7 @@ ${QUALIFIER_LISTS.map((l) => `                    ${l.id}: ${l.label}${l.status 
   --user NAME       wikidata ids: your Wikidata user name, sent to Wikidata (and nowhere else) to
                     read the items you created since the batch was written.
   --qids FILE       wikidata ids: a file of the new items' Q-ids, as pasted, in the batch's order.
+  --batch ID        wikidata ids: the batch the Q-ids are checked against (q1, q2, …; default the last).
   --json            print one JSON object per input, one per line, then one for the total.
                     Its "columns", for a table of places, is a list of {column, field, reason},
                     with pattern, level, or separator, levels and firstIsName where the field
@@ -1398,6 +1399,7 @@ async function wikidataCommand(args, o, resources) {
   if (!['search', 'batch', 'ids'].includes(what)) return usage('wikidata takes search, batch or ids, then the dataset.');
   if (o.json && o.brief) return usage('choose --json or --brief, not both.');
   if (!o.review) return usage('wikidata needs --review, the work file of the review (saved by the page, or made by lookup).');
+  if (o.batch !== undefined && what !== 'ids') return usage('--batch is for wikidata ids: which batch the Q-ids are checked against (q1, q2, …).');
   if (rest.length !== 1) return usage(`wikidata ${what} takes one dataset of places; ${rest.length} ${rest.length === 1 ? 'was' : 'were'} given.`);
   const { reviewer, problem } = reviewerOption(o);
   if (problem) return usage(problem);
@@ -1534,6 +1536,12 @@ async function wikidataCommand(args, o, resources) {
     r.said = [T.gate(gate)];
     if (gate.kind === 'refused') { host.cleanup(); r.message = 'the licence does not allow it (above).'; return finishUp(); }
     if (gate.kind === 'consent') {
+      // A statement made for another licence (the dataset relicensed since) is stale: given again, or the batch is not written.
+      if (m.consent && !W.consentFits(m.consent, gate)) {
+        r.said.push(T.consentStale(m.consent.licence, gate.licence));
+        if (!o.consent) { host.cleanup(); r.message = `give --consent again, with --reviewer, for the licence ${gate.licence}: ${W.CONSENT}`; return finishUp(); }
+        m.consent = null;
+      }
       if (!m.consent && !o.consent) { host.cleanup(); r.message = `give --consent, with --reviewer, to state: ${W.CONSENT}`; return finishUp(); }
       if (!m.consent) {
         if (!reviewer) { host.cleanup(); r.message = '--consent needs --reviewer, the name of the person consenting.'; return finishUp(); }
@@ -1569,8 +1577,8 @@ async function wikidataCommand(args, o, resources) {
   // ids: the Q-ids back, each checked, then recorded.
   if (!reviewer) { host.cleanup(); return usage('wikidata ids needs --reviewer: each identity records who made it.'); }
   if (o.qids === undefined && o.user === undefined) { host.cleanup(); return usage('wikidata ids needs --qids FILE (the Q-ids pasted) or --user NAME (your Wikidata user name), or both.'); }
-  const batch = m.batches.at(-1);
-  if (!batch) { host.cleanup(); r.message = T.noBatch; return finishUp(); }
+  const batch = o.batch !== undefined ? m.batches.find((b) => b.id === o.batch) : m.batches.at(-1);
+  if (!batch) { host.cleanup(); if (o.batch !== undefined) return usage(`--batch ${o.batch} is not a batch of this review${m.batches.length ? `; they are ${m.batches.map((b) => b.id).join(', ')}` : ''}.`); r.message = T.noBatch; return finishUp(); }
   const rows = plan.items.filter((it) => batch.places.includes(it.iri)).sort((a, b) => batch.places.indexOf(a.iri) - batch.places.indexOf(b.iri));
   const pairs = [];
   if (o.qids !== undefined) {

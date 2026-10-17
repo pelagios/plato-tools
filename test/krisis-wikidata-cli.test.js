@@ -118,7 +118,7 @@ test('batch: a CC BY dataset needs --consent (recorded with the name and the dat
   const lines = text.split('\n');
   assert.equal(lines[0], `CREATE /* PLATO tools: Lost places of the Trent; ${P('newstead')} */`);
   assert.equal(lines[1], 'LAST\tLen\t"Newstead"');
-  assert.match(lines[2], /^LAST\tDen\t"village in United Kingdom, attested 1296–1540"$/);
+  assert.match(lines[2], /^LAST\tDen\t"village in the United Kingdom, attested 1296–1540"$/);
   assert.match(lines[3], new RegExp(`^LAST\\tP31\\tQ532\\tS854\\t"${P('newstead')}"\\tS813\\t\\+\\d{4}-\\d{2}-\\d{2}T00:00:00Z/11$`));
   assert.match(lines[4], /^LAST\tP625\t@53\.081\/-1\.193\tS854/);
   assert.match(lines[5], /^LAST\tP17\tQ145\tS854/);
@@ -137,6 +137,17 @@ test('batch: a CC BY dataset needs --consent (recorded with the name and the dat
   assert.equal(workOf(dir).mint.batches.length, 2);
   const bad = await cli(['wikidata', 'batch', join(dir, 'trent.json'), '--review', join(dir, 'trent.krisis.json'), '--out', dir, '--overwrite', '--statements', 'labels,p99']);
   assert.equal(bad.code, 2); assert.match(bad.err, /p99 is not one of/);
+  // The dataset relicensed since the statement (CC BY to CC BY-SA): the statement is stale, and the batch is not written without --consent again.
+  const relicensed = JSON.parse(readFileSync(join(dir, 'trent.json'), 'utf8')); relicensed.gazetteer.licence = 'https://creativecommons.org/licenses/by-sa/4.0/';
+  writeFileSync(join(dir, 'trent.json'), JSON.stringify(relicensed));
+  const stale = await cli(['wikidata', 'batch', join(dir, 'trent.json'), '--review', join(dir, 'trent.krisis.json'), '--out', dir, '--overwrite']);
+  assert.equal(stale.code, 2, stale.out + stale.err);
+  assert.match(stale.out, /The statement was made for the dataset's licence CC-BY-4\.0, and its licence is now CC-BY-SA-4\.0: make it again/);
+  assert.match(stale.out, /give --consent again, with --reviewer, for the licence CC-BY-SA-4\.0/);
+  assert.equal(workOf(dir).mint.consent.licence, 'CC-BY-4.0', 'nothing changed by a refusal');
+  const fresh = await cli(['wikidata', 'batch', join(dir, 'trent.json'), '--review', join(dir, 'trent.krisis.json'), '--out', dir, '--overwrite', '--consent', '--reviewer', 'Lu Reviewer']);
+  assert.equal(fresh.code, 0, fresh.out + fresh.err);
+  assert.equal(workOf(dir).mint.consent.licence, 'CC-BY-SA-4.0', 'the statement made again, for the licence now');
   // A licence for non-commercial use is refused, with the reason, and nothing written; one with no search yet has nothing to write.
   const nc = fixture({ licence: 'https://creativecommons.org/licenses/by-nc/4.0/', searched: true });
   const r = await cli(['wikidata', 'batch', join(nc, 'trent.json'), '--review', join(nc, 'trent.krisis.json'), '--out', nc, '--consent', '--reviewer', 'Lu Reviewer']);
@@ -184,6 +195,28 @@ test('ids: pasted Q-ids are checked in the stand-in before being recorded, the u
   assert.equal(w.mint.user, 'Lu Reviewer');
   const atEmail = await cli(['wikidata', 'ids', join(dir, 'trent.json'), '--review', join(dir, 'trent.krisis.json'), '--user', 'lu@example.org', '--reviewer', 'Lu Reviewer', ...allow]);
   assert.equal(atEmail.code, 2); assert.match(atEmail.err, /never an address with @ in it/);
+  // Two batches: with both places given items, there is nothing to write (left out as such); one record taken out (the way
+  // back), a second batch of that one place is written, and its id is checked against the batch chosen by --batch.
+  const b2 = await cli(['wikidata', 'batch', join(dir, 'trent.json'), '--review', join(dir, 'trent.krisis.json'), '--out', dir, '--overwrite', '--statements', 'labels,p31']);
+  assert.equal(b2.code, 1, b2.out + b2.err);
+  assert.match(b2.out, /2 places already given an item/);
+  let w3 = workOf(dir);
+  assert.equal(w3.mint.batches.length, 1, 'no batch recorded for nothing');
+  const { unrecordMinted } = await import('../src/engine/krisis/wikidata.js');
+  unrecordMinted(w3, P('kirkby'));
+  const kc = w3.candidates.find((c) => c.candidate_candidate === 'http://www.wikidata.org/entity/Q78'); kc.decision = { kind: 'not-this', decided_at: AT }; kc.candidate_status = 'rejected';
+  writeFileSync(join(dir, 'trent.krisis.json'), JSON.stringify(w3, null, 2));
+  const b2b = await cli(['wikidata', 'batch', join(dir, 'trent.json'), '--review', join(dir, 'trent.krisis.json'), '--out', dir, '--overwrite', '--statements', 'labels,p31']);
+  assert.equal(b2b.code, 0, b2b.out + b2b.err);
+  assert.deepEqual(workOf(dir).mint.batches.map((b) => [b.id, b.places]), [['q1', [P('newstead'), P('kirkby')]], ['q2', [P('kirkby')]]]);
+  const unknown = await cli(['wikidata', 'ids', join(dir, 'trent.json'), '--review', join(dir, 'trent.krisis.json'), '--user', 'Lu Reviewer', '--reviewer', 'Lu Reviewer', '--batch', 'q9', ...allow]);
+  assert.equal(unknown.code, 2); assert.match(unknown.err, /--batch q9 is not a batch of this review; they are q1, q2/);
+  const againQ1 = await cli(['wikidata', 'ids', join(dir, 'trent.json'), '--review', join(dir, 'trent.krisis.json'), '--user', 'Lu Reviewer', '--reviewer', 'Lu Reviewer', '--batch', 'q1', ...allow]);
+  assert.equal(againQ1.code, 0, againQ1.out + againQ1.err);
+  assert.match(againQ1.out, new RegExp(`${P('kirkby')}: Q78 Verified`));
+  w3 = workOf(dir);
+  assert.equal(w3.mint.qids[P('kirkby')].batch, 'q1', 'checked against q1, as asked (the last is q2)');
+  assert.match(w3.candidates.find((c) => c.candidate_candidate === 'http://www.wikidata.org/entity/Q78').decision.basis, /batch q1 /);
   // Then apply writes the two identities into the dataset, citing Wikidata, as a pure addition.
   const a = await cli(['apply', join(dir, 'trent.json'), '--review', join(dir, 'trent.krisis.json'), '--reviewer', 'Lu Reviewer', '--out', dir, '--json']);
   assert.equal(a.code, 0, a.out + a.err);
