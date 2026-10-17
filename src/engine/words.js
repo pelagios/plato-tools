@@ -1573,6 +1573,10 @@ export const WIKIDATA_WORDS = {
   consentLabel: CONSENT_WORDS,
   consented: (c) => `Confirmed by ${c.by.name} on ${c.at.slice(0, 10)}, for the dataset's licence ${c.licence}.`,
   consentNeeded: 'Confirm the statement above first: the batch is written only once it is made.',
+  consentStale: (was, now) => `The statement was made for the dataset's licence ${was}, and its licence is now ${now}: make it again for this licence.`,
+  minted: (qid) => `Given an item: ${qid}.`,
+  unrecord: 'Take the Q-id out (to make another item)',
+  unrecorded: (qid) => `${qid} taken out of the review: the place may be given an item again. An identity already written into the dataset is withdrawn by a changed decision when you finish.`,
   notFree: (n) => `${plural(n, 'statement was', 'statements were')} left out: taken from a cited source that is not free to copy (a licence that asks more than CC0 allows, or a rights statement).`,
   /** The items (D6, D7). */
   itemsHeading: '3. The items',
@@ -1587,14 +1591,14 @@ export const WIKIDATA_WORDS = {
   ready: (n) => `${plural(n, 'place qualifies', 'places qualify')} for an item.`,
   /** Why a place is left out, by qualifying()'s and planItems()'s reasons. */
   leftOut: {
-    rowState: 'kept out of the review, or left out of the dataset', excluded: 'left out of the batch by you', matched: 'matched to a record (not minted)', linked: 'linked to a gazetteer record already',
+    rowState: 'kept out of the review, or left out of the dataset', excluded: 'left out of the batch by you', matched: 'matched to a record (not minted)', minted: 'already given an item (its Q-id is recorded: to make another, take the record out below)', linked: 'linked to a gazetteer record already',
     undecided: 'with a candidate still to decide', notSearched: 'not yet searched in Wikidata', unanswered: 'searched in Wikidata without an answer (search again)',
     noPoint: 'without a point, and in no region matched to a Wikidata item', noAddress: 'with no web address to cite', outsideBase: 'with an address not under the dataset\'s base address, which it will not serve',
     noSource: 'with no attestation citing a source (Wikidata asks for a serious, public reference)', noName: 'with no name', noKind: 'with no kind of place known: choose one', noLanguage: 'with no name in a known language: give the language above', notFree: 'with no name free to copy',
   },
   leftOutLine: (left) => Object.entries(left).filter(([, v]) => v.length).map(([k, v]) => `${plural(v.length, 'place')} ${WIKIDATA_WORDS.leftOut[k]}`).join('; '),
   whgNotSearched: (n) => `${plural(n, 'of them was', 'of them were')} never looked up in the World Historical Gazetteer: look them up first, so that an item is not made for a place a gazetteer knows.`,
-  warnings: { 'no-language': 'a name with no language was left out', 'description-length': 'the description is not two to twelve words', 'quote-replaced': 'a double quote was written as a closing quotation mark', 'country-unknown': 'the country code is not one the table knows', 'point-not-free': 'the point is copied from a source that is not free, so none is written', 'point-out-of-range': 'the point is not on the globe' },
+  warnings: { 'no-language': 'a name with no language was left out', 'language-unsupported': 'a name whose language tag Wikidata has no code for (a transliteration\'s, such as grc-Latn) was left out', 'romanised-no-language': 'a romanised form was left out: give the language above, and it goes under it', 'description-length': 'the description is not two to twelve words', 'whitespace-replaced': 'a tab or a line break in a text was written as a space', 'country-unknown': 'the country code is not one the table knows', 'point-not-free': 'the point is copied from a source that is not free, so none is written', 'point-out-of-range': 'the point is not on the globe' },
   /** The batch (D8, D10). */
   batchHeading: '4. The batch',
   volume: (c) => `${plural(c.items, 'item')}, ${plural(c.statements, 'statement')}.`,
@@ -1615,6 +1619,7 @@ export const WIKIDATA_WORDS = {
   userLabel: 'Or read your new items from Wikidata, by your Wikidata user name (sent to Wikidata only):',
   readMine: 'Read my new items',
   batchChoose: 'The batch they were made from:',
+  batchOption: (b) => `${b.id}: ${b.at.slice(0, 10)}, ${plural(b.items, 'item')}`,
   noBatch: 'Write a batch first: the Q-ids are checked against its rows.',
   checking: 'Checking the items in Wikidata…',
   verified: (v) => `Verified: the label${v.distanceKm !== null ? `, the point (${v.distanceKm} km away)` : ''}, and the reference to this place.`,

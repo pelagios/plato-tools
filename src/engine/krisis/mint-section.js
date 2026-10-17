@@ -10,10 +10,21 @@ export const CONSENT = 'I hold the rights in this dataset, or have the holder\'s
 export const STATEMENTS = Object.freeze(['labels', 'aliases', 'description', 'p31', 'p625', 'p17', 'p131']);
 export const DEFAULT_STATEMENTS = Object.freeze(Object.fromEntries(STATEMENTS.map((k) => [k, true])));
 // ---- the language of a label ------------------------------------------------------------------------------
-/** A name's language tag as Wikidata's language code: its primary subtag, in lower case; null for none, or a tag that names no language (und, mis, mul, zxx). */
+// The script variants Wikidata has codes for (its term languages), written as it writes them: a tag with a script subtag
+// Wikidata has no code for (grc-Latn: a romanised Greek name) names no slot, and wdLang gives null for it.
+const SCRIPT_VARIANTS = new Set(['sr-latn', 'sr-cyrl', 'zh-hans', 'zh-hant', 'kk-latn', 'kk-cyrl', 'kk-arab', 'uz-latn', 'uz-cyrl', 'tg-latn', 'tg-cyrl', 'ku-latn', 'ku-arab', 'be-tarask', 'gan-hans', 'gan-hant', 'crh-latn', 'crh-cyrl', 'shi-latn', 'shi-tfng', 'tt-latn', 'tt-cyrl', 'ug-latn', 'ug-arab', 'ks-arab', 'ks-deva', 'pa-guru', 'pa-arab', 'ha-arab', 'ha-latn', 'ms-arab', 'ruq-latn', 'ruq-cyrl', 'ruq-grek', 'sms-latn']);
+/**
+ * A name's language tag as Wikidata's language code: the language (its primary subtag, in lower case; a region is
+ * dropped: en-GB is en), with its script where Wikidata has a code for the pair (sr-Latn is sr-latn); null for none, a
+ * tag that names no language (und, mis, mul, zxx), or a script Wikidata has no code for with that language (grc-Latn).
+ */
 export function wdLang(tag) {
-  const p = typeof tag === 'string' ? tag.trim().toLowerCase().split('-')[0] : '';
-  return /^[a-z]{2,3}$/.test(p) && !['und', 'mis', 'mul', 'zxx'].includes(p) ? p : null;
+  const parts = typeof tag === 'string' ? tag.trim().toLowerCase().split('-').filter(Boolean) : [];
+  const p = parts[0] || '';
+  if (!/^[a-z]{2,3}$/.test(p) || ['und', 'mis', 'mul', 'zxx'].includes(p)) return null;
+  const script = parts.slice(1).find((x) => /^[a-z]{4}$/.test(x));
+  if (!script) return p;
+  return SCRIPT_VARIANTS.has(`${p}-${script}`) ? `${p}-${script}` : null;
 }
 
 export const MINT_VERSION = 1;

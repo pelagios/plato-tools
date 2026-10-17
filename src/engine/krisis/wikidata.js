@@ -59,11 +59,11 @@ export const EDIT_GROUPS = 'https://editgroups.toolforge.org/';
 
 // ---- the kind of place as a Wikidata class (P31) --------------------------------------------------------
 /**
- * The classes an item may be an instance of, each with the word the description uses: kinds.js's WIKIDATA table
- * the other way round (what WHG gives as wd candidates' classes), with the AAT concepts Krisis knows for the same
- * kinds (kinds.js WORDS), and former settlement (Q22674925) for a deserted one. Q486972, human settlement, is the
- * class of any settlement whose kind is not one of these. Nothing here is guessed: a kind not in the table is the
- * user's to choose, or the place is left out.
+ * The classes an item may be an instance of, each with the word the description uses (Wikidata's own English label
+ * for the class): kinds.js's WIKIDATA table the other way round (what WHG gives as wd candidates' classes), with the
+ * AAT concepts Krisis knows for the same kinds (kinds.js WORDS), and Q22674925, labelled "former populated place" on
+ * Wikidata, for a deserted one. Q486972, human settlement, is the class of any settlement whose kind is not one of
+ * these. Nothing here is guessed: a kind not in the table is the user's to choose, or the place is left out.
  */
 export const CLASSES = Object.freeze([
   { qid: 'Q486972', word: 'human settlement', aat: ['aat:300008347'], words: ['inhabited place', 'settlement', 'populated place', 'human settlement'] },
@@ -72,7 +72,7 @@ export const CLASSES = Object.freeze([
   { qid: 'Q18511725', word: 'market town', aat: [], words: ['market town'] },
   { qid: 'Q532', word: 'village', aat: ['aat:300008372'], words: ['village'] },
   { qid: 'Q5084', word: 'hamlet', aat: ['aat:300008369'], words: ['hamlet'] },
-  { qid: 'Q22674925', word: 'former settlement', aat: ['aat:300167671'], words: ['deserted settlement', 'deserted village', 'former settlement', 'abandoned village', 'lost village'] },
+  { qid: 'Q22674925', word: 'former populated place', aat: ['aat:300167671'], words: ['deserted settlement', 'deserted village', 'former settlement', 'former populated place', 'abandoned village', 'lost village'] },
   { qid: 'Q102496', word: 'parish', aat: ['aat:300387092', 'aat:300000773'], words: ['parish', 'ancient parish', 'ecclesiastical parish'] },
   { qid: 'Q1115575', word: 'civil parish', aat: [], words: ['civil parish'] },
   { qid: 'Q23397', word: 'lake', aat: ['aat:300008680'], words: ['lake'] },
@@ -118,6 +118,17 @@ export function classOf(place, chosen = null) {
   return null;
 }
 
+/**
+ * The Wikidata language code a name's tag gives (mint-section.js wdLang: the language, with a script variant Wikidata has,
+ * such as sr-latn), `fallback` (the dataset's language) for a name with no tag, or 'unsupported' for a tag Wikidata has
+ * no code for: a transliteration's (grc-Latn, a romanised Greek name), which must not go on the language's own slot.
+ */
+export function wdLangOf(tag, fallback = null) {
+  const t = typeof tag === 'string' ? tag.trim() : '';
+  if (!t) return wdLang(fallback) ?? null;
+  return wdLang(t) ?? 'unsupported';
+}
+
 // ---- countries -------------------------------------------------------------------------------------------
 /** The item of an ISO 3166-1 alpha-2 code (src/vendor/iso-countries.json), { qid, name }, or null. */
 export function countryOf(code) {
@@ -125,6 +136,17 @@ export function countryOf(code) {
   return Object.hasOwn(ISO, c) ? { qid: ISO[c].q, name: ISO[c].name } : null;
 }
 const CODE_OF_QID = new Map(Object.entries(ISO).map(([code, v]) => [v.q, code]));
+// The countries whose names take "the" in a description, as Wikidata's own descriptions write them ("village in the
+// United Kingdom"): a small table by code; a name the table already begins with "The" (the Bahamas, the Gambia) is lowered.
+const THE = new Set(['GB', 'NL', 'US', 'AE', 'PH', 'CF', 'CD', 'CG', 'DO', 'MV', 'MH', 'SB', 'KM', 'SC', 'FM', 'IM', 'FO', 'CK', 'VG', 'VI', 'KY', 'TC', 'FK', 'MP', 'PN', 'IO', 'TF', 'CZ', 'GS', 'UM', 'BQ']);
+/** A country's name as a description says it after "in": with "the" where Wikidata's descriptions have it; null for a code not known. */
+export function countryWords(code) {
+  const c = countryOf(code);
+  if (!c) return null;
+  const k = String(code).trim().toUpperCase();
+  if (/^The /.test(c.name)) return 'the ' + c.name.slice(4);
+  return THE.has(k) ? `the ${c.name}` : c.name;
+}
 /** The code of a country's item, or null: for reading a found item's country (P17) as the dataset writes one. */
 export const codeOfCountry = (qid) => CODE_OF_QID.get(qid) ?? null;
 
@@ -253,7 +275,7 @@ export function regionItem(work, iri) {
 }
 /** The nearest region above the place, matched or not, for the description: its label, or null. */
 export function regionLabel(work, iri) { const k = regionsAbove(work, iri)[0]; return k ? work.regions[k].label ?? null : null; }
-export const LEFT_OUT = ['rowState', 'matched', 'linked', 'undecided', 'notSearched', 'unanswered', 'noPoint', 'noAddress', 'outsideBase', 'noSource', 'noName', 'excluded'];
+export const LEFT_OUT = ['rowState', 'matched', 'minted', 'linked', 'undecided', 'notSearched', 'unanswered', 'noPoint', 'noAddress', 'outsideBase', 'noSource', 'noName', 'excluded'];
 /**
  * The places an item may be made for, and those left out, by reason (LEFT_OUT, each a list of IRIs):
  *   `places`   gather()'s places (with the links the dataset states), else the work file's;
@@ -276,6 +298,9 @@ export function qualifying(work, places = null, { records = null, base = null } 
     const rs = rec.rowState ?? p.rowState;
     if (rs === 'filter' || rs === 'exclude') { leave('rowState'); continue; }
     if (work.mint?.items?.[iri]?.excluded) { leave('excluded'); continue; }
+    // Already given an item (its Q-id recorded, mint.qids): never minted twice, whatever its decisions say since; the way
+    // back is to take the record out (unrecordMinted), which the panel offers.
+    if (work.mint?.qids?.[iri]) { leave('minted'); continue; }
     const mine = cands.filter((c) => c.candidate_source === iri);
     if (mine.some((c) => c.decision?.kind === 'match')) { leave('matched'); continue; }
     if (whgIdOf(iri) || [...(p.identities?.linked || [])].some((x) => whgIdOf(x))) { leave('linked'); continue; }
@@ -301,7 +326,11 @@ export function decimalsFor(precisionKm) {
   return Math.max(0, Math.min(6, Math.ceil(Math.log10(111 / precisionKm))));
 }
 const round = (x, d) => Number(x.toFixed(d));
-const q = (s) => `"${String(s).replace(/[\t\r\n]+/g, ' ').replace(/"/g, '”').trim()}"`;
+// A text as a QuickStatements string: the outer quotes are its (the V1 parser takes the first and the last, so a quote
+// inside is written as it is); a tab or a newline, which would end the command, is a space, and planItems warns of it.
+const q = (s) => `"${String(s).replace(/[\t\r\n]+/g, ' ').trim()}"`;
+/** An address as a QuickStatements string, never altered (an address has no tab or newline, and is cited exactly). */
+const qUrl = (s) => `"${String(s)}"`;
 /** A description as Help:Description asks: lower case to begin, no full stop to end, one space between words. */
 export const tidyDescription = (s) => String(s ?? '').replace(/\s+/g, ' ').trim().replace(/\.+$/, '').replace(/^[A-Z](?![A-Z])/, (c) => c.toLowerCase());
 const wordCount = (s) => (s.trim() ? s.trim().split(/\s+/).length : 0);
@@ -331,16 +360,21 @@ export function planItems({ work, places = null, records = null, options = {} } 
   const items = [];
   for (const iri of sel.ready) {
     if (options.only && !options.only.includes(iri)) continue;
+    if (work.mint?.qids?.[iri]) { left.minted.push(iri); continue; }   // the same guard as qualifying's, should a caller give a ready list of its own
     const place = { iri, ...(byIri.get(iri) || {}), ...(work.places?.[iri] || {}) };
     const edits = work.mint?.items?.[iri] || {};
     const warnings = [], leftOut = [];
     const rec = recs?.get(iri) || null;
     // Names by language: from the records (each name's own tag) where read, else the work file's names under the dataset's language.
     const labels = {}, aliases = {};
-    const put = (text, tag) => {
+    const put = (text, tag, { romanised = false } = {}) => {
       const t = typeof text === 'string' ? text.trim() : '';
-      const lang = wdLang(tag) ?? options.lang ?? null;
       if (!t) return;
+      // A romanised form is in no language of its own: it goes under the dataset's language, else is left out and said.
+      const l = romanised ? (wdLang(options.lang) ?? null) : wdLangOf(tag, options.lang);
+      if (romanised && !l) { if (!warnings.includes('romanised-no-language')) warnings.push('romanised-no-language'); return; }
+      if (l === 'unsupported') { if (!warnings.includes('language-unsupported')) warnings.push('language-unsupported'); return; }
+      const lang = l;
       if (!lang) { if (!warnings.includes('no-language')) warnings.push('no-language'); return; }
       if (!labels[lang]) { labels[lang] = t; return; }
       if (labels[lang].toLowerCase() === t.toLowerCase()) return;
@@ -352,7 +386,7 @@ export function planItems({ work, places = null, records = null, options = {} } 
       // The place's label first, in its own language (the first name that is it), so that it is the label.
       const own = free.flatMap((a) => a.names).find((n) => n.toponym && place.label && n.toponym.trim() === place.label.trim());
       if (own) put(own.toponym, own.language);
-      for (const a of free) for (const n of a.names) { put(n.toponym, n.language); put(n.romanized, n.language); }
+      for (const a of free) for (const n of a.names) { put(n.toponym, n.language); put(n.romanized, null, { romanised: true }); }
     } else for (const n of [place.label, ...(place.names || [])]) put(n, place.langs?.[String(n).trim().toLowerCase()] ?? null);
     // The class first (the user's to choose), then the names: none with a language is no label, none free is no item.
     const cls = classOf(place, edits.kind ?? null);
@@ -367,15 +401,17 @@ export function planItems({ work, places = null, records = null, options = {} } 
     } else if (Array.isArray(place.point)) point = place.point;
     const region = regionItem(work, iri), regionWords = regionLabel(work, iri);
     if (!point && !region) { left.noPoint.push(iri); continue; }
-    const country = (place.ccodes || rec?.ccodes || []).map(countryOf).find(Boolean) || null;
-    if ((place.ccodes || rec?.ccodes || []).length && !country) warnings.push('country-unknown');
+    const codes = place.ccodes || rec?.ccodes || [];
+    const country = codes.map(countryOf).find(Boolean) || null;
+    if (codes.length && !country) warnings.push('country-unknown');
+    const countryName = codes.map(countryWords).find(Boolean) || null;
     const years = rec ? (() => { const ys = free.map((a) => a.years).filter(Boolean); return ys.length ? [Math.min(...ys.map((y) => y[0])), Math.max(...ys.map((y) => y[1]))] : null; })() : null;
-    const prefilled = describe({ kindWord: cls.word, region: regionWords, country: country?.name, years });
+    const prefilled = describe({ kindWord: cls.word, region: regionWords, country: countryName, years });
     const description = typeof edits.description === 'string' && edits.description.trim() ? tidyDescription(edits.description) : prefilled;
     const n = wordCount(description);
     if (n < 2 || n > 12) warnings.push('description-length');
-    // A double quote ends a QuickStatements string: written as a closing quotation mark (q), and said.
-    if ([...Object.values(labels), ...Object.values(aliases).flat(), description].some((t) => t.includes('"'))) warnings.push('quote-replaced');
+    // A tab or a newline in a text would end the command: written as a space (q), and said.
+    if ([...Object.values(labels), ...Object.values(aliases).flat(), description].some((t) => /[\t\r\n]/.test(t))) warnings.push('whitespace-replaced');
     if (point && Math.abs(point[1]) > 90) warnings.push('point-out-of-range');
     items.push({ iri, label: labels[options.lang] ?? Object.values(labels)[0], labels, aliases, description, prefilled, class: cls, point: point ? [round(point[0], decimals), round(point[1], decimals)] : null, decimals,
       country, region, years, leftOut, warnings });
@@ -415,10 +451,11 @@ export function quickStatementsV1(items, { date, title = null, statements = DEFA
   const named = title && !/@/.test(title) ? commentText(title) : null;
   for (const it of items) {
     lines.push(`CREATE /* PLATO tools: ${named ? `${named}; ` : ''}${commentText(it.iri)} */`);
-    const ref = `\tS854\t${q(it.iri)}\tS813\t${when}`;
+    const ref = `\tS854\t${qUrl(it.iri)}\tS813\t${when}`;
     if (st.labels) for (const [lang, text] of Object.entries(it.labels)) lines.push(`LAST\tL${lang}\t${q(text)}`);
     if (st.aliases) for (const [lang, list] of Object.entries(it.aliases)) for (const a of list) lines.push(`LAST\tA${lang}\t${q(a)}`);
-    if (st.description && it.description) lines.push(`LAST\tD${Object.keys(it.labels)[0]}\t${q(it.description)}`);
+    // The description is English by construction (describe), whatever the labels' languages: always Den.
+    if (st.description && it.description) lines.push(`LAST\tDen\t${q(it.description)}`);
     if (st.p31 && it.class) lines.push(`LAST\tP31\t${it.class.qid}${ref}`);
     if (st.p625 && it.point) lines.push(`LAST\tP625\t@${it.point[1]}/${it.point[0]}${ref}`);
     if (st.p17 && it.country) lines.push(`LAST\tP17\t${it.country.qid}${ref}`);
@@ -571,6 +608,25 @@ export function recordMinted(work, iri, qid, { batch, reviewer, how, verified, a
   if (!work.reviewer) work.reviewer = { name: reviewer.name.trim(), ...(reviewer.orcid ? { orcid: reviewer.orcid } : {}) };
   return c;
 }
+
+/**
+ * A recorded Q-id taken out again (the way back from 'minted'): the record goes from mint.qids, the candidate's decision
+ * is cleared (it stays, suggested, for the reviewer to decide again or leave), and the lookup's query for the place goes.
+ * Returns the Q-id taken out, or null when none was recorded. The dataset is not touched: an identity already written
+ * by Finish is withdrawn there by a changed decision, as any answer is (withdraw.js).
+ */
+export function unrecordMinted(work, iri) {
+  const r = work.mint?.qids?.[iri];
+  if (!r) return null;
+  delete work.mint.qids[iri];
+  const l = (work.lookups || []).find((x) => isWikidataService(x.service) && x.parameters?.minted === true);
+  if (l) { delete l.queries[iri]; l.counts.places = Object.keys(l.queries).length; l.counts.answered = l.counts.places; }
+  const c = work.candidates.find((x) => x.candidate_source === iri && x.candidate_candidate === entityIri(r.qid) && x.lookup === l?.id);
+  if (c) { c.decision = null; c.candidate_status = 'suggested'; }
+  return r.qid;
+}
+/** Whether a consent recorded still fits the dataset's licence as the gate reads it now: given again when the licence changed (D3). */
+export const consentFits = (consent, gate) => !!consent && !!gate && consent.licence === gate.licence;
 
 // ---- Wikidata's API: the requests, and its answers as the gazetteer module's candidates -----------------------
 export const API = WIKIDATA_SERVICE.endpoint;

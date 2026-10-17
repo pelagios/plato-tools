@@ -13,8 +13,8 @@ import { readWork, serialiseWork, decide } from '../src/engine/krisis/work.js';
 import { apply } from '../src/engine/krisis/apply.js';
 import { gather } from '../src/engine/krisis/match.js';
 import {
-  qualifying, planItems, quickStatementsV1, mintCollector, mintGate, consentRecord, classOf, countryOf, codeOfCountry, decimalsFor, describe, tidyDescription,
-  readPastedQids, verifyItem, matchItems, pairPasted, recordMinted, recordBatch, mintOf, entityCandidate, regionItem, searchState, batchName, qsDate,
+  qualifying, planItems, quickStatementsV1, mintCollector, mintGate, consentRecord, consentFits, classOf, countryOf, codeOfCountry, countryWords, decimalsFor, describe, tidyDescription,
+  readPastedQids, verifyItem, matchItems, pairPasted, recordMinted, unrecordMinted, recordBatch, mintOf, entityCandidate, regionItem, searchState, batchName, qsDate, wdLangOf,
   CONSENT, CLASSES, MAX_ITEMS, VERIFY_KM, WIKIDATA_SERVICE, ENTITY, ALGORITHM, STATEMENTS, wdLang,
 } from '../src/engine/krisis/wikidata.js';
 
@@ -92,7 +92,7 @@ test('the kinds of place as Wikidata classes: the dataset\'s own class as it is,
   assert.deepEqual(classOf({ typeIds: ['https://www.wikidata.org/wiki/Q7777777'], types: ['moated site'] }), { qid: 'Q7777777', word: null, how: 'dataset-class' });
   assert.deepEqual(classOf({ typeIds: ['http://vocab.getty.edu/aat/300008372'] }), { qid: 'Q532', word: 'village', how: 'kind' });
   assert.deepEqual(classOf({ types: ['Parishes'] }), { qid: 'Q102496', word: 'parish', how: 'kind' });
-  assert.deepEqual(classOf({ types: ['deserted-settlement'] }), { qid: 'Q22674925', word: 'former settlement', how: 'kind' });
+  assert.deepEqual(classOf({ types: ['deserted-settlement'] }), { qid: 'Q22674925', word: 'former populated place', how: 'kind' }, 'Wikidata\'s own label for the class');
   assert.deepEqual(classOf({ types: ['suburb'] }), { qid: 'Q486972', word: 'human settlement', how: 'facet' }, 'a settlement facet with no class of its own');
   assert.equal(classOf({ types: ['moated site'] }), null, 'nothing known');
   assert.deepEqual(classOf({ types: ['moated site'] }, 'Q5084'), { qid: 'Q5084', word: 'hamlet', how: 'chosen' });
@@ -105,9 +105,13 @@ test('countries by ISO code, both ways; language codes; decimals by precision; t
   assert.equal(countryOf('ZZ'), null);
   assert.equal(codeOfCountry('Q145'), 'GB');
   assert.equal(codeOfCountry('Q1'), null);
-  assert.deepEqual(['en', 'en-GB', 'la-Latn', 'grc', 'und', 'mul', 'zxx', '', null].map(wdLang), ['en', 'en', 'la', 'grc', null, null, null, null, null]);
+  // A region is dropped; a script Wikidata has a code for is kept (sr-latn); a transliteration's tag (grc-Latn, la-Latn too: Latin has no such variant) names no slot.
+  assert.deepEqual(['en', 'en-GB', 'la-Latn', 'grc', 'grc-Latn', 'sr-Latn', 'zh-Hant', 'und', 'mul', 'zxx', '', null].map(wdLang), ['en', 'en', null, 'grc', null, 'sr-latn', 'zh-hant', null, null, null, null, null]);
+  assert.deepEqual([wdLangOf('grc-Latn'), wdLangOf('', 'la'), wdLangOf(null, null), wdLangOf('cy-GB', 'en')], ['unsupported', 'la', null, 'cy']);
+  // The article before a country, as Wikidata's descriptions write it: a small table, and "The Bahamas" lowered.
+  assert.deepEqual(['GB', 'fr', 'BS', 'NL', 'US', 'ZZ'].map(countryWords), ['the United Kingdom', 'France', 'the Bahamas', 'the Kingdom of the Netherlands', 'the United States', null]);
   assert.deepEqual([undefined, 0, 0.05, 1, 10, 1000].map(decimalsFor), [6, 6, 4, 3, 2, 0]);
-  assert.equal(describe({ kindWord: 'former settlement', region: 'Nottinghamshire', country: 'United Kingdom', years: [1296, 1540] }), 'former settlement in Nottinghamshire, United Kingdom, attested 1296–1540');
+  assert.equal(describe({ kindWord: 'former populated place', region: 'Nottinghamshire', country: 'the United Kingdom', years: [1296, 1540] }), 'former populated place in Nottinghamshire, the United Kingdom, attested 1296–1540');
   assert.equal(describe({ kindWord: 'village', years: [1296, 1296] }), 'village, attested 1296');
   assert.equal(describe({ kindWord: null }), 'place');
   assert.equal(tidyDescription('  Village in  Kent. '), 'village in Kent');
@@ -175,8 +179,27 @@ test('the plan: labels and aliases by language, the class, the point to its prec
   assert.deepEqual(n.country, { qid: 'Q145', name: 'United Kingdom' });
   assert.equal(n.region, null);
   assert.deepEqual(n.years, [1296, 1540]);
-  assert.equal(n.description, 'village in United Kingdom, attested 1296–1540');
+  assert.equal(n.description, 'village in the United Kingdom, attested 1296–1540', 'the article, as Wikidata\'s descriptions have it');
   assert.deepEqual(n.warnings, []);
+  // A name tagged as a transliteration (grc-Latn) goes on no slot and is said; a romanised form goes under the dataset's language, else is said.
+  const greek = JSON.parse(JSON.stringify(dataset()));
+  greek.spatialEntities[0].attestations[0].names = [{ toponym: '\u039d\u03b5\u03ce\u03c3\u03c4\u03b5\u03b4', language: 'grc', romanized: 'Neosted' }, { toponym: 'Neosted', language: 'grc-Latn' }, { toponym: 'Newstead', language: 'en' }];
+  const gk = await read(greek);
+  const gw = workAfterReview(gk.places); decide(gw, 'l2-2', 'not-this', { at: AT });
+  const g1 = planItems({ work: gw, places: gk.places, records: gk.records, options: { base: X } }).items.find((it) => it.iri === P('newstead'));
+  assert.deepEqual(g1.labels, { grc: '\u039d\u03b5\u03ce\u03c3\u03c4\u03b5\u03b4', en: 'Newstead' });
+  assert.deepEqual(g1.aliases, {}, 'the transliteration is on no slot, the romanised form under no language');
+  assert.ok(g1.warnings.includes('language-unsupported') && g1.warnings.includes('romanised-no-language'), g1.warnings);
+  const g2 = planItems({ work: gw, places: gk.places, records: gk.records, options: { base: X, lang: 'en' } }).items.find((it) => it.iri === P('newstead'));
+  assert.deepEqual(g2.aliases, { en: ['Neosted'] }, 'the romanised form goes under the dataset\'s language');
+  assert.ok(!g2.warnings.includes('romanised-no-language') && g2.warnings.includes('language-unsupported'));
+  // A tab in a name: written as a space, and said; a quote is not a problem.
+  const tabbed = JSON.parse(JSON.stringify(dataset()));
+  tabbed.spatialEntities[0].attestations[0].names[0].toponym = 'New\tstead "the old"';
+  const tb = await read(tabbed);
+  const tw = workAfterReview(tb.places); decide(tw, 'l2-2', 'not-this', { at: AT });
+  const t1 = planItems({ work: tw, places: tb.places, records: tb.records, options: { base: X } }).items.find((it) => it.iri === P('newstead'));
+  assert.deepEqual(t1.warnings, ['whitespace-replaced']);
   // Cliffe: its name is free, its only point is not: no P625, said; it still qualifies with no point? No: no point and no region is left out.
   assert.ok(plan.left.noPoint.includes(P('cliffe')), 'a point copied from a non-free source is no point for the item');
   // Kirkby: no kind: left out until the user chooses one; its untagged name takes the dataset's language, or is warned of.
@@ -209,7 +232,7 @@ test('the batch text, line by line: CREATE with its comment, LAST with labels, a
     'LAST\tLen\t"Newstead"',
     'LAST\tLla\t"Novum Locum"',
     'LAST\tAen\t"Newsted"',
-    'LAST\tDen\t"village in Nottinghamshire, United Kingdom, attested 1296–1540"',
+    'LAST\tDen\t"village in Nottinghamshire, the United Kingdom, attested 1296–1540"',
     `LAST\tP31\tQ532${ref}`,
     `LAST\tP625\t@53.081/-1.193${ref}`,
     `LAST\tP17\tQ145${ref}`,
@@ -220,8 +243,13 @@ test('the batch text, line by line: CREATE with its comment, LAST with labels, a
   const fewer = quickStatementsV1(plan.items, { date: '2026-10-15', title: 'editor@example.org', statements: { aliases: false, p17: false, p131: false } });
   assert.ok(!fewer.includes('@example') && !fewer.includes('Aen') && !fewer.includes('P17') && !fewer.includes('P131') && fewer.includes('P625'));
   assert.equal(fewer.split('\n')[0], `CREATE /* PLATO tools: ${P('newstead')} */`);
-  const quoted = quickStatementsV1([{ ...plan.items[0], labels: { en: 'The "Hall"' }, aliases: {}, description: 'a hall\twith a tab' }], { date: '2026-10-15' });
-  assert.ok(quoted.includes('LAST\tLen\t"The ”Hall”"') && quoted.includes('"a hall with a tab"'), quoted);
+  // A quote inside a text is written as it is (QuickStatements takes the outer quotes); a tab is a space; an address is never altered.
+  const quoted = quickStatementsV1([{ ...plan.items[0], iri: 'https://w3id.org/x/place/a"b', labels: { en: 'The "Hall"' }, aliases: {}, description: 'a hall\twith a tab' }], { date: '2026-10-15' });
+  assert.ok(quoted.includes('LAST\tLen\t"The "Hall""') && quoted.includes('"a hall with a tab"') && quoted.includes('S854\t"https://w3id.org/x/place/a"b"'), quoted);
+  // The description is English by construction: Den, whatever the labels' languages (a Latin-first dataset).
+  const latinFirst = quickStatementsV1([{ ...plan.items[0], labels: { la: 'Novum Locum', en: 'Newstead' }, aliases: {} }], { date: '2026-10-15', statements: { p31: false, p625: false, p17: false, p131: false } });
+  assert.deepEqual(latinFirst.split('\n').slice(1, 4), ['LAST\tLla\t"Novum Locum"', 'LAST\tLen\t"Newstead"', 'LAST\tDen\t"village in Nottinghamshire, the United Kingdom, attested 1296–1540"']);
+  assert.ok(!latinFirst.includes('\tDla\t'), 'never a Latin description');
   assert.throws(() => qsDate('yesterday'), /Not a date/);
   assert.equal(batchName('trent.krisis.json'), 'trent.wikidata.qs.txt');
   assert.equal(quickStatementsV1([], { date: '2026-10-15' }), '');
@@ -335,6 +363,27 @@ test('a verified Q-id is recorded as the reviewer\'s decision, and Finish writes
   assert.ok(l && l.service.title === 'Wikidata' && l.queries[P('newstead')].minted === 'Q4242' && c.lookup === l.id);
   assert.deepEqual(w.mint.qids[P('newstead')], { qid: 'Q4242', how: 'pasted', batch: 'q1', at: AT, verified: { label: true, distanceKm: 0, reference: true } });
   assert.equal(recordMinted(w, P('newstead'), 'Q4242', { batch, reviewer: REVIEWER, how: 'contribs', verified, at: AT }), c, 'recorded again: the same candidate, its decision kept');
+  // Never minted twice: the place is left out as 'minted' whatever its decisions say since (the minted candidate flipped to "not this one"); the way back is the record taken out.
+  decide(w, c.id, 'not-this', { at: AT });
+  const after = qualifying(w, places, { records: records.records, base: X });
+  assert.ok(!after.ready.includes(P('newstead')) && after.leftOut.minted.includes(P('newstead')), JSON.stringify(after));
+  assert.deepEqual(planItems({ work: w, places, records, options: { base: X, lang: 'en' } }).left.minted, [P('newstead')]);
+  decide(w, c.id, 'match', { at: AT });
+  assert.equal(unrecordMinted(w, P('newstead')), 'Q4242');
+  assert.equal(unrecordMinted(w, P('newstead')), null, 'nothing recorded now');
+  assert.equal(w.mint.qids[P('newstead')], undefined);
+  assert.equal(c.decision, null); assert.equal(c.candidate_status, 'suggested');
+  assert.equal(l.queries[P('newstead')], undefined);
+  const back = qualifying(w, places, { records: records.records, base: X });
+  assert.ok(!back.leftOut.minted.includes(P('newstead')) && back.leftOut.undecided.includes(P('newstead')), 'the way back: its candidate is to decide again, and the place can qualify once it is');
+  decide(w, c.id, 'not-this', { at: AT });
+  assert.ok(qualifying(w, places, { records: records.records, base: X }).ready.includes(P('newstead')), 'control: ready again');
+  assert.deepEqual(readWork(serialiseWork(w)), w);
+  recordMinted(w, P('newstead'), 'Q4242', { batch, reviewer: REVIEWER, how: 'pasted', verified, at: AT });
+  // A consent fits the licence it was made for, and no other (the dataset relicensed since).
+  assert.equal(consentFits(consentRecord({ by: REVIEWER, at: AT, licence: 'CC-BY-4.0' }), mintGate({ licence: 'https://creativecommons.org/licenses/by/4.0/' })), true);
+  assert.equal(consentFits(consentRecord({ by: REVIEWER, at: AT, licence: 'CC-BY-4.0' }), mintGate({ licence: 'https://creativecommons.org/licenses/by-sa/4.0/' })), false);
+  assert.equal(consentFits(null, mintGate({ licence: 'https://creativecommons.org/licenses/by/4.0/' })), false);
   const text = serialiseWork(w);
   assert.deepEqual(readWork(text), w, 'the work file reads back');
   // Finish: the identity written, citing Wikidata, and Mneme's version check finds exactly the additions.
