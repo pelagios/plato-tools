@@ -11313,11 +11313,16 @@ def open_map_basemap_checks(pw, url, tmp):
     shut = lambda: page.evaluate("() => { document.getElementById('chora-basemaps').open = false; }")
 
     def not_available():
-        boot(); since = len(requests)
-        before = page.evaluate(RELIEF_STATE)
-        tick()
-        said = soon(page, '() => !!document.getElementById("chora-relief-status")', 20)
-        after = page.evaluate(RELIEF_STATE)
+        # The live site has the file, so it is refused here, whatever the build: a request for it gets a 404.
+        refuse = lambda route: route.fulfill(status=404, body='not found')
+        page.route('**/basemap/relief.pmtiles', refuse)
+        try:
+            boot(); since = len(requests)
+            before = page.evaluate(RELIEF_STATE)
+            tick()
+            said = soon(page, '() => !!document.getElementById("chora-relief-status")', 20)
+            after = page.evaluate(RELIEF_STATE)
+        finally: page.unroute('**/basemap/relief.pmtiles', refuse)
         # It was asked of this site, and of no other.
         return (before['option'] and not before['ticked'] and not before['layer'] and said and after['disabled'] and not after['ticked'] and not after['layer']
                 and after['status'] == 'Shaded relief is not available: the relief file is not on this site.' and relief_asked(since) and not foreign(since)), {
