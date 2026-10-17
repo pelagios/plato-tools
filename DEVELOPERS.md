@@ -3158,7 +3158,9 @@ and the Methodos step `wikidata.items`. The words are `WIKIDATA_WORDS` in words.
   the runner too, so a workflow saved before it was asked carries on). The step is done with the review open,
   whatever the panel recorded (optional); the step that records the decisions takes `wikidata.work ??
   review.work`. In Trace a historical map it runs under both `will-identify` and `will-mint`: a step's `when`
-  may be a list, every condition of which must hold (recipe.js).
+  may be a list, every condition of which must hold (recipe.js). The three recipes' versions were raised (Map
+  your data 3, Match two datasets 2, Trace a historical map 2): a workflow saved under the old version resumes
+  with `restartRemaining()`, so one saved past `apply` restarts from `apply` (the steps before it kept).
 - **Tests:** `test/krisis-wikidata.test.js` (the engine, on a fixture read by the real pipeline, down to Finish and
   the version check), `test/krisis-wikidata-search.test.js` (a fake api.php, the permissions),
   `test/krisis-wikidata-cli.test.js` (the commands against an https stand-in on 127.0.0.1), the Methodos
