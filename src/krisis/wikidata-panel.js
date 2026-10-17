@@ -14,7 +14,7 @@
 // for a permission's line. It runs on the page's thread, as the lookup does, never in the worker.
 import { WIKIDATA_WORDS as T } from '../engine/words.js';
 import {
-  qualifying, planItems, quickStatementsV1, consentRecord, mintOf, recordBatch, readPastedQids, pairPasted, verifyItem, matchItems, recordMinted,
+  qualifying, planItems, quickStatementsV1, consentRecord, consentFits, mintOf, recordBatch, readPastedQids, pairPasted, verifyItem, matchItems, recordMinted, unrecordMinted,
   batchName, CLASSES, STATEMENTS, MAX_ITEMS, WIKIDATA_SERVICE, QUICKSTATEMENTS, BOT_REQUESTS, WIKIPROJECT, EDIT_GROUPS, wdLang,
 } from '../engine/krisis/wikidata.js';
 import { searchPreview, runWikidataSearch, readContribs, readEntities } from '../engine/krisis/wikidata-search.js';
@@ -45,7 +45,7 @@ export function mountWikidata(host) {
   q('download').textContent = T.download;
   q('howto').innerHTML = T.howTo.map((h) => `<li>${escapeHtml(h)}</li>`).join('');
   q('links').innerHTML = [[QUICKSTATEMENTS, 'QuickStatements'], [EDIT_GROUPS, 'Edit groups'], [BOT_REQUESTS, 'Bot approval'], [WIKIPROJECT, 'WikiProject Historical Place']].map(([u, t]) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${t} ↗</a>`).join(' · ');
-  q('paste-label').textContent = T.pasteLabel; q('check').textContent = T.check; q('user-label').textContent = T.userLabel; q('read').textContent = T.readMine;
+  q('paste-label').textContent = T.pasteLabel; q('check').textContent = T.check; q('user-label').textContent = T.userLabel; q('read').textContent = T.readMine; q('batch-label').textContent = T.batchChoose;
   q('record').textContent = T.record(0);
 
   // ---- what the work file holds ----
@@ -63,10 +63,12 @@ export function mountWikidata(host) {
     const g = await host.places();
     const key = `${keyOf()}|${g ? 'g' : '-'}`;
     if (plan && planKey === key) return plan;
-    if (!collected || collected.for !== g) collected = { for: g, records: g ? await host.collect(null) : null };
+    // Kept only once read: a collect refused (the page busy with a run, the dataset not readable yet) is asked again at the next draw.
+    if (!collected || collected.for !== g) { const records = g ? await host.collect(null) : null; collected = records ? { for: g, records } : null; }
     const o = options();
-    plan = planItems({ work: w, places: g?.places ?? null, records: collected.records, options: { statements: o.statements, lang: o.lang, base: host.base() || collected.records?.gazetteer?.uriSpace || null } });
-    planKey = key;
+    plan = planItems({ work: w, places: g?.places ?? null, records: collected?.records ?? null, options: { statements: o.statements, lang: o.lang, base: host.base() || collected?.records?.gazetteer?.uriSpace || null } });
+    // A plan made without the records (the collect refused) is not kept: the next draw asks for them again.
+    planKey = collected ? key : null;
     return plan;
   }
   const invalidate = () => { plan = null; planKey = null; };
@@ -100,6 +102,8 @@ export function mountWikidata(host) {
     const gate = p?.gate ?? null;
     q('gate').textContent = T.gate(gate);
     const m = mintOf(w);
+    // A statement made for another licence (the dataset relicensed since) is stale: taken out, said, and asked again.
+    if (m.consent && gate && !consentFits(m.consent, gate)) { note.batch = T.consentStale(m.consent.licence, gate.licence); m.consent = null; host.changed(); return; }
     const row = q('consent-row');
     row.hidden = gate?.kind !== 'consent';
     q('consent').checked = !!m.consent;
@@ -122,6 +126,10 @@ export function mountWikidata(host) {
     q('batches').textContent = note.batch || m.batches.map((b) => T.written(b)).join(' ');
     // 5. The Q-ids back.
     const last = m.batches.at(-1);
+    // The batch the Q-ids are checked against: the last unless another is chosen (a review may have several).
+    const sel = q('batch'), had = sel.value;
+    sel.innerHTML = m.batches.map((b) => `<option value="${b.id}">${escapeHtml(T.batchOption(b))}</option>`).join('');
+    sel.value = m.batches.some((b) => b.id === (batchFor || had)) ? (batchFor || had) : (last?.id ?? ''); sel.hidden = q('batch-label').hidden = m.batches.length < 2;
     q('ids-status').textContent = note.ids || (last ? '' : T.noBatch);
     q('check').disabled = !last || host.busy(); q('read').disabled = !last || !may || host.busy();
     q('user').value = q('user').value || m.user || '';
@@ -143,7 +151,9 @@ export function mountWikidata(host) {
     // Places left out for want of a kind, with the choice; and those the user left out, with the way back.
     const noKind = p.left.noKind.map((iri) => `<li data-iri="${escapeHtml(iri)}" class="no-kind"><strong>${escapeHtml(work().places[iri]?.label || iri)}</strong> <span class="iri">${escapeHtml(iri)}</span><label>${escapeHtml(T.kindLabel)} <select data-kind>${kinds(null)}</select></label> <small>${escapeHtml(T.leftOut.noKind)}</small></li>`);
     const excluded = p.left.excluded.map((iri) => `<li data-iri="${escapeHtml(iri)}" class="excluded"><strong>${escapeHtml(work().places[iri]?.label || iri)}</strong> <span class="iri">${escapeHtml(iri)}</span> <small>${escapeHtml(T.leftOut.excluded)}</small> <button type="button" data-include>${escapeHtml(T.include)}</button></li>`);
-    box.innerHTML = `<ul>${[...rows, ...noKind, ...excluded].join('')}</ul>`;
+    // Already given an item: said with its Q-id, and the way back (the record taken out) offered.
+    const minted = p.left.minted.map((iri) => `<li data-iri="${escapeHtml(iri)}" class="minted"><strong>${escapeHtml(work().places[iri]?.label || iri)}</strong> <span class="iri">${escapeHtml(iri)}</span> <small>${escapeHtml(T.minted(work().mint?.qids?.[iri]?.qid || '?'))}</small> <button type="button" data-unrecord>${escapeHtml(T.unrecord)}</button></li>`);
+    box.innerHTML = `<ul>${[...rows, ...noKind, ...excluded, ...minted].join('')}</ul>`;
   }
   function drawChecked() {
     const list = q('ids');
@@ -170,6 +180,14 @@ export function mountWikidata(host) {
   });
   el.addEventListener('click', (e) => {
     const b = e.target.closest('button'); const m = mint(); if (!b || !m) return;
+    if (b.matches('[data-unrecord]')) {
+      const iri = b.closest('li').dataset.iri;
+      const qid = unrecordMinted(work(), iri);
+      note.ids = qid ? T.unrecorded(qid) : '';
+      checked = checked.filter((c) => c.iri !== iri);
+      state({ recorded: Object.keys(m.qids).length });
+      invalidate(); host.changed(); return;
+    }
     if (b.matches('[data-exclude]') || b.matches('[data-include]')) {
       const iri = b.closest('li').dataset.iri;
       m.items[iri] = { ...(m.items[iri] || {}) };
@@ -213,12 +231,14 @@ export function mountWikidata(host) {
     const m = mintOf(w);
     if (!p || p.gate?.kind === 'refused' || !p.items.length) return draw();
     if (p.items.length > MAX_ITEMS) { note.batch = T.tooMany(p.items.length, MAX_ITEMS); return draw(); }
+    if (p.gate?.kind === 'consent' && m.consent && !consentFits(m.consent, p.gate)) { note.batch = T.consentStale(m.consent.licence, p.gate.licence); m.consent = null; host.changed(); return; }
     if (p.gate?.kind === 'consent' && !m.consent) { note.batch = T.consentNeeded; return draw(); }
     const date = new Date().toISOString().slice(0, 10);
     const text = quickStatementsV1(p.items, { date, title: collected?.records?.gazetteer?.title ?? null, statements: m.options.statements });
     const name = batchName(host.workName());
     const b = recordBatch(w, { items: p.items, name, sha256: await sha256(text), statements: m.options.statements });
     batchFor = b.id;
+    q('batch').value = b.id;   // the batch just written is the one the Q-ids are checked against, until another is chosen
     host.saveBlob(new Blob([text], { type: 'text/plain' }), name);
     note.batch = `${T.written(b)} Save the review as well: it records the batch.`;
     state({ batchText: text, batch: b.id });
@@ -245,8 +265,11 @@ export function mountWikidata(host) {
       return { ...p, verified: p.verified || verifyItem(e, row), label: e.labels?.en?.value ?? null };
     });
   }
+  /** The batch the Q-ids are checked against: the one chosen, else the last. */
+  const chosenBatch = (m) => m?.batches.find((b) => b.id === q('batch').value) || m?.batches.at(-1);
+  q('batch').addEventListener('change', () => { batchFor = q('batch').value || null; checked = []; note.ids = ''; draw(); });
   q('check').addEventListener('click', async () => {
-    const w = work(); const m = mint(); const b = m?.batches.at(-1);
+    const w = work(); const m = mint(); const b = chosenBatch(m);
     if (!w || !b || host.busy()) return;
     if (!host.mayAsk(svc)) { note.ids = ''; host.needsLine(q('permission'), svc); return draw(); }
     const qids = readPastedQids(q('qids').value);
@@ -259,7 +282,7 @@ export function mountWikidata(host) {
     draw();
   });
   q('read').addEventListener('click', async () => {
-    const w = work(); const m = mint(); const b = m?.batches.at(-1);
+    const w = work(); const m = mint(); const b = chosenBatch(m);
     if (!w || !b || host.busy()) return;
     if (!host.mayAsk(svc)) { host.needsLine(q('permission'), svc); return draw(); }
     const user = q('user').value.trim();

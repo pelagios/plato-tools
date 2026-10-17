@@ -101,6 +101,7 @@ function onMessage({ data }) {
   else if (data.type === 'places') onPlaces(data);   // Krisis: gazetteer lookup
   else if (data.type === 'wikidata-collect') onCollected(data);   // Krisis: Wikidata items
   else if (data.type === 'error' && placesWaiting) onPlaces({ subjects: null, places: null, reason: data.message });
+  else if (data.type === 'error' && collecting) onCollected({ records: null, gazetteer: null, reason: data.message });   // the panel asks again at its next draw
   else if (data.type === 'preview') onPreview(data);
   else if (data.type === 'cluster') spellings.answer(data);   // Hermes: groups of similar spellings
   // Another tab of the main page is running: said in words, and the run may be tried again.

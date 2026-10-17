@@ -1858,6 +1858,18 @@ def krisis_lookup_pattern(page, tmp, url):
 # Krisis: Wikidata items for the places no gazetteer knows (Issue #36; src/krisis/wikidata-panel.js). Wikidata's
 # api.php is never called: page.route answers for www.wikidata.org (a search by name and near a point, the
 # entities, the user's contributions) and records every request.
+# Takes `n` of the working files (OPFS access handles) from a page of the site, as the pool-busy checks' HOLDER does, so that
+# the main page's worker refuses its next run; 'release' lets them go. Evaluated on a main page that is ready.
+WD_HOLDER = """async (n) => {
+  const src = `let held = []; onmessage = async ({ data }) => {
+    if (data === 'release') { for (const h of held) h.close(); held = []; postMessage(0); return; }
+    const o = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('.opfs-sahpool')).getDirectoryHandle('.opaque');
+    for await (const [, h] of o) if (h.kind === 'file' && held.length < data) held.push(await h.createSyncAccessHandle());
+    postMessage(held.length); };`;
+  window.holder = window.holder || new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+  return new Promise((res) => { holder.onmessage = (e) => res(e.data); holder.postMessage(n); });
+}"""
+
 def wikidata_entity(id, label, lon, lat, reference=None):
     refs = [{'snaks': {'P854': [{'datavalue': {'value': reference, 'type': 'string'}}]}}] if reference else []
     return {'id': id, 'type': 'item', 'labels': {'en': {'language': 'en', 'value': label}}, 'descriptions': {'en': {'language': 'en', 'value': 'a village'}}, 'aliases': {},
@@ -1976,7 +1988,7 @@ def krisis_wikidata_case(page, tmp, url):
     dc = step(decide_and_consent)
     check('Wikidata items: the hit decided "not this one", both places qualify; the consent ticked is recorded in the work file with the name and the date, and the download is offered',
           sorted(dc.get('ready') or []) == [a + 'kirkby', a + 'newstead'] and 'Confirmed by Lu Reviewer on' in dc.get('consented', '') and (dc.get('consent in work') or {}).get('by', {}).get('name') == 'Lu Reviewer'
-          and '2 items, 10 statements.' in dc.get('volume', '') and 'village in United Kingdom, attested 1296–1540' in (dc.get('items') or []) and dc.get('statements') == [True] * 7, dc)
+          and '2 items, 10 statements.' in dc.get('volume', '') and 'village in the United Kingdom, attested 1296–1540' in (dc.get('items') or []) and dc.get('statements') == [True] * 7, dc)
 
     def batch():
         with page.expect_download(timeout=30_000) as d: page.click('#wikidata-download')
@@ -1988,7 +2000,7 @@ def krisis_wikidata_case(page, tmp, url):
     ref = f'\tS854\t"{a}newstead"\tS813\t+'
     check('Wikidata items: the batch downloaded is QuickStatements v1 text: CREATE with its comment, LAST with the label, the description and P31, P625, P17 each referenced to the place and the date; recorded as q1, with the how-to',
           b.get('name') == 'mint.wikidata.qs.txt' and lines[0] == f'CREATE /* PLATO tools: Lost places of the Trent; {a}newstead */' and lines[1] == 'LAST\tLen\t"Newstead"'
-          and lines[2] == 'LAST\tDen\t"village in United Kingdom, attested 1296–1540"' and lines[3].startswith('LAST\tP31\tQ532' + ref) and lines[4].startswith('LAST\tP625\t@53.081/-1.193' + ref) and lines[5].startswith('LAST\tP17\tQ145' + ref)
+          and lines[2] == 'LAST\tDen\t"village in the United Kingdom, attested 1296–1540"' and lines[3].startswith('LAST\tP31\tQ532' + ref) and lines[4].startswith('LAST\tP625\t@53.081/-1.193' + ref) and lines[5].startswith('LAST\tP17\tQ145' + ref)
           and lines[6].startswith(f'CREATE /* PLATO tools: Lost places of the Trent; {a}kirkby */') and b.get('batches') == ['q1'] and 'Batch q1 written: mint.wikidata.qs.txt (2 items)' in b.get('said', '')
           and 'Open QuickStatements' in b.get('howto', '') and 'autoconfirmed' in b.get('howto', ''), {k: v for k, v in b.items() if k != 'text'} | {'lines': lines[:7]})
 
@@ -2025,6 +2037,42 @@ def krisis_wikidata_case(page, tmp, url):
           ib.get('recorded') == 2 and ib.get('qids') == {a + 'kirkby': ('Q78', 'contribs'), a + 'newstead': ('Q77', 'pasted')}
           and sorted(ib.get('decisions') or []) == [('http://www.wikidata.org/entity/Q77', 'match', 'exactMatch'), ('http://www.wikidata.org/entity/Q78', 'match', 'exactMatch')] and '1 identity recorded in the review' in ib.get('status', ''), ib)
 
+    def again():
+        # Never minted twice: both places are "already given an item"; Kirkby's record taken out (the way back), its hit
+        # decided "not this one", a second batch of it alone written; then its id read against the first batch, chosen.
+        s = wait_state(page, lambda s: sorted(((s.get('wikidata') or {}).get('left') or {}).get('minted') or []) == [a + 'kirkby', a + 'newstead'], 30, 'minted')
+        minted = (s.get('wikidata') or {}).get('left', {}).get('minted')
+        page.click(f'#wikidata-items li[data-iri="{a}kirkby"] [data-unrecord]')
+        s = wait_state(page, lambda s: (s.get('wikidata') or {}).get('recorded') == 1, 10, 'unrecorded')
+        unrecorded = {'status': page.inner_text('#wikidata-ids-status'), 'qids': list(((s.get('work') or {}).get('mint') or {}).get('qids') or {}), 'kirkby decision': next(((c.get('decision') or {}).get('kind') for c in (s.get('work') or {}).get('candidates', []) if c['candidate_candidate'].endswith('Q78')), 'none')}
+        # Its candidate (Q78) is to decide again: the review, at Kirkby (the places are shown one at a time), shows it; "not this one" lets the place qualify.
+        for _ in range(6):
+            if 'Q78' in page.inner_text('#review-place'): break
+            page.click('#review-next')
+        if 'Q78' not in page.inner_text('#review-place'): raise RuntimeError('the review does not show Q78 again: ' + page.inner_text('#review-subject'))
+        page.keyboard.press('n')
+        s = wait_state(page, lambda s: (s.get('wikidata') or {}).get('ready') == [a + 'kirkby'], 30, 'ready again')
+        with page.expect_download(timeout=30_000) as d: page.click('#wikidata-download')
+        s = wait_state(page, lambda s: (s.get('wikidata') or {}).get('batches') == ['q1', 'q2'], 10, 'q2')
+        selector = {'shown': page.is_visible('#wikidata-batch'), 'options': page.eval_on_selector_all('#wikidata-batch option', 'os => os.map((o) => o.value)'), 'chosen': page.input_value('#wikidata-batch')}
+        page.select_option('#wikidata-batch', 'q1')
+        before = len(calls)
+        page.click('#wikidata-read')
+        s = wait_state(page, lambda s: ((s.get('wikidata') or {}).get('checked') or [{}])[0].get('qid') == 'Q78' and 'since the batch' in page.inner_text('#wikidata-ids-status'), 30, 'read q1')
+        since = [c['url'] for c in calls[before:] if c['list'] == 'usercontribs']
+        page.click('#wikidata-record')
+        s = wait_state(page, lambda s: (s.get('wikidata') or {}).get('recorded') == 2, 10, 'recorded against q1')
+        q = ((s.get('work') or {}).get('mint') or {}).get('qids') or {}
+        batches = ((s.get('work') or {}).get('mint') or {}).get('batches') or []
+        return {'minted': minted, 'unrecorded': unrecorded, 'selector': selector, 'since': since, 'kirkby': q.get(a + 'kirkby'), 'q1 at': batches[0].get('at') if batches else None, 'q2 places': batches[1].get('places') if len(batches) > 1 else None}
+    ag = step(again)
+    check('Wikidata items: a place given an item is never minted twice (both "already given an item"); the Q-id taken out again is the way back, its candidate to decide anew',
+          sorted(ag.get('minted') or []) == [a + 'kirkby', a + 'newstead'] and 'Q78 taken out of the review' in (ag.get('unrecorded') or {}).get('status', '') and (ag.get('unrecorded') or {}).get('qids') == [a + 'newstead'] and (ag.get('unrecorded') or {}).get('kirkby decision') is None, ag)
+    check('Wikidata items: a second batch (q2) of the one place; the batch the Q-ids are checked against is chosen (q1), and the id is read since that batch and recorded against it',
+          (ag.get('selector') or {}).get('shown') is True and (ag.get('selector') or {}).get('options') == ['q1', 'q2'] and (ag.get('selector') or {}).get('chosen') == 'q2' and ag.get('q2 places') == [a + 'kirkby']
+          and len(ag.get('since') or []) == 1 and f"ucstart={urllib.parse.quote(ag.get('q1 at') or 'x', safe='')}" in (ag.get('since') or [''])[0] and (ag.get('kirkby') or {}).get('batch') == 'q1' and (ag.get('kirkby') or {}).get('qid') == 'Q78',
+          {k: ag.get(k) for k in ('selector', 'since', 'kirkby', 'q1 at', 'q2 places', 'error')})
+
     def finish():
         cites = page.inner_text('#finish-cites')
         page.check('input[name="review-output"][value="attestations"]'); page.click('#finish')
@@ -2034,6 +2082,34 @@ def krisis_wikidata_case(page, tmp, url):
     f = step(finish)
     atts = (f.get('out') or {}).get('attestations', [])
     ids = sorted((x['about'], i['object'], i['identityType'], (x.get('citations') or [{}])[0].get('source', {}).get('title')) for x in atts for i in x.get('identities', []))
+    def held_then():
+        # The worker's collect can fail (another tab holds the working files: pool-busy): the panel, opened with the places
+        # already read (the lookup panel's preview read them), must not hang on the refusal, and must read the records at
+        # its next draw once the files are free. A fresh review, the panel closed until the files are held.
+        grants(True)
+        page.set_input_files('#picker', [str(dataset)])
+        s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), 60, 'detection')
+        if s.get('phase') != 'detected': raise RuntimeError(f'not detected: {s.get("phase")}')
+        page.set_input_files('#workfile', [str(work)])
+        wait_state(page, lambda s: s.get('phase') == 'reviewing', 30, 'review')
+        if not page.evaluate("() => document.getElementById('lookup').open"): page.click('#lookup > summary')
+        page.wait_for_function("() => /Would look up/.test(document.getElementById('lookup-preview').textContent)", timeout=60_000)   # the places read once, and kept
+        holder = page.context.new_page()
+        try:
+            holder.goto(url)
+            if wait_state(holder, lambda s: s.get('phase') == 'ready', 30, 'ready').get('phase') != 'ready': raise RuntimeError('the holder page did not start')
+            held = holder.evaluate(WD_HOLDER, 2)
+            page.click('#wikidata > summary')
+            during = wait_state(page, lambda s: (s.get('wikidata') or {}).get('ready') is not None, 30, 'the panel while the files are held')
+            gate_during = page.inner_text('#wikidata-gate')
+            released = holder.evaluate(WD_HOLDER, 'release')
+        finally: holder.close()
+        page.click('#wikidata > summary'); page.click('#wikidata > summary')   # closed and opened: drawn again
+        page.wait_for_function("() => /CC-BY-4\\.0|public domain|No batch/.test(document.getElementById('wikidata-gate').textContent)", timeout=60_000)
+        return {'held': held, 'released': released, 'drawn while held': during.get('wikidata', {}).get('ready') is not None, 'gate during': gate_during, 'gate after': page.inner_text('#wikidata-gate')}
+    ht = step(held_then)
+    check('Wikidata items: the panel opened while another tab holds the working files (the worker refuses) draws without the records, saying the licence is not known yet, and reads them at its next draw once the files are free, instead of hanging or keeping the refusal',
+          ht.get('held') == 2 and ht.get('released') == 0 and ht.get('drawn while held') is True and 'not known yet' in ht.get('gate during', '') and 'CC-BY-4.0' in ht.get('gate after', ''), ht)
     check('Wikidata items: Finish writes one attestation per place, its identity to the new item, citing Wikidata, with no address with @ in it anywhere',
           'Wikidata (https://www.wikidata.org/)' in f.get('cites', '') and ids == [(a + 'kirkby', 'http://www.wikidata.org/entity/Q78', 'exactMatch', 'Wikidata'), (a + 'newstead', 'http://www.wikidata.org/entity/Q77', 'exactMatch', 'Wikidata')]
           and '@example' not in json.dumps(f.get('out')) and all('krisis-wikidata 1' in x.get('notes', '') for x in atts), {k: f.get(k) for k in ('cites', 'phase', 'report', 'error')} if not atts else ids)
