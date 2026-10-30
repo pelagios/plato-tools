@@ -53,7 +53,7 @@ UTF-8 JSON, an object with these keys (`minor` and `left` optional):
 | `created` | ISO 8601 date and time |
 | `workflow` | `{ "id", "name", "recipe": { "key", "version" }, "at" }`: `id` is 1 to 64 of `A-Z a-z 0-9 _ -`, beginning with a letter or digit; `name` is the record's name (its first 255 characters); `at` is the id of the step it is at, or null when every step is done. Each must agree with the record. |
 | `parts` | the entries after the manifest, at least one, at most 1000, the record first: see below |
-| `left` | optional: `[{ "name", "size", "sha256", "why" }]`, files the record names that are not in the project; `why` is `"left-out"` (the user chose to leave it out), `"not-kept"` (the browser that saved it no longer kept it) or, from 1.1, `"too-large"` (left out so that the project fits WHG's Workbench: see "Stored in WHG") |
+| `left` | optional: `[{ "name", "size", "sha256", "why" }]`, files the record names that are not in the project; `why` is `"left-out"` (the user chose to leave it out; or always, for a Hermes work file of a text, which keeps the text itself and is never put in a project), `"not-kept"` (the browser that saved it no longer kept it) or, from 1.1, `"too-large"` (left out so that the project fits WHG's Workbench: see "Stored in WHG") |
 
 Each part has exactly the keys of its role, and may have `"optional": true`:
 

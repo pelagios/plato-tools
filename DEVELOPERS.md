@@ -1020,6 +1020,47 @@ re-exported from `iiif.js` by `index.js` (`test/georef-exports.test.js`). The fi
 and IIIF manifests with reference values from Allmaps' own code, are described in
 `test/fixtures/georef/README.md`.
 
+#### Place names in a text, the engine's phase 2 (Issue #27; plan #34 item 12; branch `text-phase2`)
+
+Stephen's decisions of 30 October 2026 for Places from a text, built in `src/engine/hermes/text/`; nothing on
+the page uses them yet (no page, no CLI, `text.find` and `text.review` still declared `available: <reason>`).
+- **`text.dataset`** (`dataset.js`, `datasetFrom(work, text, { base })`; Q1 A, Q2 A). `attestationsFrom` writes
+  an attestation only for a name the reviewer also linked to a place ("evidence about nothing" otherwise),
+  and stays as it was. A text's names arrive with no address, as a table's do, so every confirmed name is
+  evidence that the text names a place called so and gets a place, for the standard tail (batched WHG
+  lookup, review, Chora, publishing) to identify: one place for each spelling (NFC, case-sensitive), one
+  attestation for each mention, citing `characters N to M`; a decision's `separate: true` gives that
+  occurrence a place of its own; an address the reviewer pasted is what its attestation is about, not made
+  a new place. Addresses are `<base>place/text-<16 hex>`, a hash of the text and the spelling (not of a
+  position or a name alone); the base address is required. The output is an attestation-centric document
+  (`newSpatialEntities` and the attestations on their own), or a `DataError` saying that nothing is
+  confirmed. The operation `text.dataset` is declared in `operations.js`, not available until the page.
+- **Offsets and the text as given** (`normalise.js`, `decode.js`; Q7 B). A model is sent the composed (NFC)
+  text with line feeds, and what it finds is mapped back by segments (a character and its marks, a CR LF)
+  to the characters of the text as given: an NFD or CRLF file keeps offsets true to itself, and the
+  attestation's toponym is the file's form. A name that begins or ends inside a character that has no
+  composed form is `text-mention-invalid`. If the segments do not put together to NFC of the whole, the
+  chunk is one segment (`coarse`) and no inner span maps: wrong offsets are never recorded. NFKC is never
+  used. A UTF-8 byte order mark is not a character and not counted (`text.bom` records it); UTF-16 and
+  other encodings are refused in words, never decoded leniently.
+- **Token estimates by script** (`prices.js`; Q8 A). `SCRIPT_RATIOS` (Latin 3.5 characters to a token, as
+  before; Greek, polytonic Greek, Cyrillic, Arabic, Chinese/Japanese/Korean, other) are guesses rounded towards
+  too many tokens, each labelled `estimate: true`; **none is measured**, and they belong to a tokenizer. A mixed
+  text is counted run by run. `calibrate(chunks, { chunk, usage })` replaces them with the first part's real
+  count and says whether the corrected run crosses the second confirmation where the first estimate did not.
+  A provider's count endpoint is never used.
+- **A reviewer adds a name the model missed** (`addMention`, Q9 A): a result of provider `reviewer`, one name,
+  the reviewer's name in it, no usage; `suggestions()` marks it `added` and always lists it; its attestation's
+  note says it was added by the contributor and not suggested by a model; `reviewProgress` counts `added`.
+- **The text is kept in the work file** (`text.content`, checked against `text.sha256`; `source.rights`, the
+  text's rights statement). A copy for sharing (`withoutText`) leaves it out and carries, in `context`, the 60
+  code points either side of each name, quoted, with the rights statement (or a plain saying that none was
+  given). A project never holds a work file with the text: `writeProject` and `fitProject` (WHG) move a
+  `work.hermes-text` file to `left` (`left-out`) and refuse a review that has the text in it. **Decided here, not by Stephen:** a work file of a text is therefore not in a project at all until the
+  page's branch gives it a role carrying the copy for sharing (a project minor, which also reaches WHG's Workbench).
+- Tests: `test/hermes-text-normalise.test.js`, `-tokens`, `-work`, `-dataset`, `-project`
+  (`test/hermes-text-helpers.js` is their scripted provider).
+
 ## The version check
 
 What it reports, and why, is in the guide:
