@@ -19,7 +19,7 @@ after(() => { for (const d of made) rmSync(d, { recursive: true, force: true });
 const TABLE = join(FX, 'example-statistics.csv'), COLUMNS = join(FX, 'example-statistics.columns.json');
 const BASE = 'https://whgazetteer.org/example/';
 
-test('convert --columns with figures --to ntriples --cube writes the cube, and datacube passes all five checks over their counts', () => {
+test('convert --columns with figures --to ntriples --cube writes the cube, and datacube passes all nine checks (IC-1 to IC-14 and P-1 to P-4) over their counts', () => {
   const out = scratch();
   const c = cli('convert', '--to', 'ntriples', '--cube', '--columns', COLUMNS, '--base', BASE, '--out', out, TABLE);
   assert.equal(c.code, 0, c.out + c.err);
@@ -27,7 +27,7 @@ test('convert --columns with figures --to ntriples --cube writes the cube, and d
   assert.match(c.out, /Wrote .*example-statistics\.nt/); assert.match(c.out, /Wrote .*example-statistics\.codes\.nt/);
   const d = cli('datacube', join(out, 'example-statistics.nt'));
   assert.equal(d.code, 0, d.out);
-  assert.equal((d.out.match(/ passes, /g) || []).length, 5, d.out);
+  assert.equal((d.out.match(/ passes, /g) || []).length, 9, d.out);
   assert.match(d.out, /IC-11 {2}passes, 20 evaluated/);
   assert.match(d.out, /IC-12 {2}passes, 5 evaluated/);
 });
