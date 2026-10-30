@@ -67,7 +67,8 @@ const firstCps = (s, n) => { const a = Array.from(s); return a.length > n ? a.sl
 
 /**
  * A chunk's reply, read and aligned. `reply` is the model's text; `chunk` is { text, start } (start in
- * code points of the whole text). Returns { ok, mentions, counts, examples }:
+ * code points of the whole text; `text` what the model was sent, and, when that is not the text as given,
+ * `given` that text and `map` its map back, normalise.js). Returns { ok, mentions, counts, examples }:
  *   ok        false when the reply as a whole could not be used (counts then says why);
  *   mentions  [{ start, end, text, kind, kindGiven? }], start and end in code points of the whole text;
  *   counts    { kind: number } for each kind of TEXT_KINDS met;
@@ -108,10 +109,18 @@ export function readReply(reply, chunk) {
     // Found by UTF-16 search, a name may begin or end inside a character (half of a surrogate pair): it
     // must be exactly the characters of its span.
     if (sliceCodePoints(text, pick.cp, pick.cp + len) !== m.text) { note('text-mention-invalid', `a name that is not whole characters of the text: ${JSON.stringify(m.text)}`); continue; }
+    // A chunk sent as composed text (normalise.js, forModel) has its span mapped back to the text as given: a
+    // name that begins or ends inside a composed character is not a span of it.
+    let span = [pick.cp, pick.cp + len], shown = m.text;
+    if (chunk.map) {
+      span = chunk.map.toOriginal(pick.cp, pick.cp + len);
+      if (!span) { note('text-mention-invalid', `a name that begins or ends inside a character of the text: ${JSON.stringify(m.text)}`); continue; }
+      shown = sliceCodePoints(chunk.given, span[0], span[1]);
+    }
     taken.add(pick.i + ':' + m.text.length);
-    const start = chunk.start + pick.cp;
+    const start = chunk.start + span[0];
     const kind = typeof m.kind === 'string' ? m.kind.trim().toLowerCase() : '';
-    const out = { start, end: start + len, text: m.text, kind };
+    const out = { start, end: chunk.start + span[1], text: shown, kind };
     if (!KINDS.includes(kind)) { note('text-kind-unknown', m.kind); out.kindGiven = String(m.kind).slice(0, 40); out.kind = 'other'; }
     mentions.push(out);
   }

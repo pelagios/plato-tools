@@ -12,12 +12,15 @@
 // count of each kind refused. Never the key, never a header, never an address with a query.
 //
 // The shape, version 1:
-//   { hermes_text: 1, created_at, source: { title, uri? }, language?, text: { name, sha256, characters },
+//   { hermes_text: 1, created_at, source: { title, uri? }, language?, text: { name, sha256, characters, bom? },
 //     prompt: { version, sha256 }, schema_version, chunking: { target, overlap },
 //     results: [{ chunk: { index, start, end, sha256 }, provider, model, model_returned, prompt_version,
 //       prompt_sha256, settings, generated_at, usage: { input, output }, mentions: [{ start, end, text, kind, kindGiven? }],
 //       refused: { kind: n } }],
 //     review: { reviewer: null | { name, orcid? }, decisions: { <suggestion id>: decision } } }
+// `text.bom`: the file began with a UTF-8 byte order mark, not a character of the text and not counted in
+// any offset. The text is the text as given (a decomposed or CRLF file stays so): the model is sent a
+// composed copy and what it finds is mapped back (normalise.js), so every offset is true to the file.
 // A suggestion's id is its span as the model's mention was aligned, "<start>-<end>", and stays its id
 // when the reviewer adjusts the span. A decision:
 //   { status: 'confirmed' | 'rejected', decided_at, start?, end?, type?, place?, place_from? }
@@ -55,8 +58,11 @@ function checkSource(source) {
   for (const k of Object.keys(source)) if (k !== 'title' && k !== 'uri') throw new DataError(`The text's source may have a title and an address only, not "${k}".`);
 }
 
-/** A new work file for `text` (a string, the decoded text). */
-export function newWork({ text, name = 'text.txt', source, language, chunking = CHUNKING, now = new Date().toISOString() } = {}) {
+/**
+ * A new work file for `text` (a string, the decoded text: decode.js). `bom`: the file began with a UTF-8
+ * byte order mark, which is not in `text` and is not counted in the offsets.
+ */
+export function newWork({ text, name = 'text.txt', source, language, bom = false, chunking = CHUNKING, now = new Date().toISOString() } = {}) {
   if (typeof text !== 'string' || !text.length) throw new DataError('There is no text to look in.');
   checkSource(source);
   if (language !== undefined && language !== null && language !== '' && !isLanguageTag(language)) throw new DataError(`"${language}" is not a language tag, such as la, grc or en-GB.`);
@@ -64,7 +70,7 @@ export function newWork({ text, name = 'text.txt', source, language, chunking = 
     hermes_text: WORK_VERSION,
     created_at: now,
     source: { title: source.title.trim(), ...(source.uri ? { uri: source.uri } : {}) },
-    text: { name: String(name), sha256: sha256(text), characters: cpLength(text) },
+    text: { name: String(name), sha256: sha256(text), characters: cpLength(text), ...(bom ? { bom: true } : {}) },
     prompt: { version: PROMPT_VERSION, sha256: PROMPT_SHA256 },
     schema_version: SCHEMA_VERSION,
     chunking: { target: chunking.target, overlap: chunking.overlap },
@@ -191,6 +197,7 @@ export function readWork(input) {
   try { checkSource(w.source); } catch (e) { bad(e.message[0].toLowerCase() + e.message.slice(1)); }
   if (w.language !== undefined && !isLanguageTag(w.language)) bad('its language is not a language tag.');
   if (!isObject(w.text) || typeof w.text.name !== 'string' || !/^[0-9a-f]{64}$/.test(w.text.sha256) || !isCount(w.text.characters)) bad('it does not say which text it is of (text: name, sha256, characters).');
+  if (w.text.bom !== undefined && w.text.bom !== true) bad('it notes a byte order mark as something other than true.');
   if (!isObject(w.prompt) || typeof w.prompt.version !== 'string' || !/^[0-9a-f]{64}$/.test(w.prompt.sha256)) bad('it does not say which prompt it was made with (prompt).');
   if (!isObject(w.chunking) || !Number.isInteger(w.chunking.target) || !Number.isInteger(w.chunking.overlap)) bad('it does not say how the text was cut (chunking).');
   if (!Array.isArray(w.results)) bad('it has no list of results.');

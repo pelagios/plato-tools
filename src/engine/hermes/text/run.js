@@ -17,6 +17,7 @@ import { chunkText, halve, dedupeMentions } from './chunk.js';
 import { readReply, addCounts } from './validate.js';
 import { checkText, isDone, addResult } from './work.js';
 import { LlmError } from './providers/request.js';
+import { forModel } from './normalise.js';
 
 export const MIN_HALF = 500;
 
@@ -63,7 +64,9 @@ export async function runExtraction({ work, text, provider, model, signal, onPro
  * reply was cut off.
  */
 export async function extractChunk(provider, chunk, { model, signal, language }) {
-  const r = await provider.extract(chunk, { model, signal, language });
+  // The model is sent the composed text with line feeds; what it finds is mapped back to the text as given (normalise.js).
+  const sent = forModel(chunk);
+  const r = await provider.extract(sent, { model, signal, language });
   const usage = { input: r.usage?.input || 0, output: r.usage?.output || 0 };
   if (r.truncated) {
     const parts = halve(chunk, { min: MIN_HALF / 2 });
@@ -80,7 +83,7 @@ export async function extractChunk(provider, chunk, { model, signal, language })
     // The halves overlap (halve), so a name in the overlap may be found in both: it is kept once.
     return { mentions: dedupeMentions(mentions).kept, counts, usage, model: r.model, settings: { ...r.settings, halved: true } };
   }
-  const read = readReply(r.reply, chunk);
+  const read = readReply(r.reply, sent);
   if (!read.ok) { const kind = Object.keys(read.counts)[0]; return { failed: kind, example: read.examples[kind], mentions: [], counts: read.counts, usage, model: r.model, settings: r.settings }; }
   return { mentions: read.mentions, counts: read.counts, usage, model: r.model, settings: r.settings };
 }

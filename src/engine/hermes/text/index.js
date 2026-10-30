@@ -8,6 +8,8 @@ export { redact, clip } from './redact.js';
 export { PRICES, PRICE_STALE_DAYS, CHARS_PER_TOKEN, CONFIRM_CHUNKS, CONFIRM_USD, estimateChunk, estimateRun, estimateWords, THINKING_ALLOWANCE, priceOf, costOf, needsSecondConfirmation } from './prices.js';
 export { WORK_VERSION, TYPE_KINDS, newWork, readWork, serialiseWork, checkText, isDone, addResult, suggestions, setReviewer, decide, reviewProgress } from './work.js';
 export { attestationsFrom, attestationsDocument, sourceOf, locatorOf, unlinkedCsv } from './attest.js';
+export { normalised, forModel } from './normalise.js';
+export { decodeText } from './decode.js';
 export { runExtraction, extractChunk, MIN_HALF } from './run.js';
 export { DEFAULT_CEILING_USD, MAX_CEILING_USD, ConsentError, CeilingError, isThisComputer, parseCeiling, assessRun, consentWords, giveConsent, limitProvider } from './consent.js';
 export { KeyError, guardKey, readiness, planSend } from './ask.js';
