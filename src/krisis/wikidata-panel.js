@@ -14,7 +14,7 @@
 // for a permission's line. It runs on the page's thread, as the lookup does, never in the worker.
 import { WIKIDATA_WORDS as T } from '../engine/words.js';
 import {
-  qualifying, planItems, quickStatementsV1, consentRecord, consentFits, mintOf, recordBatch, readPastedQids, pairPasted, verifyItem, matchItems, recordMinted, unrecordMinted,
+  qualifying, planItems, quickStatementsV1, consentRecord, consentFits, mintOf, recordBatch, readPastedQids, pairPasted, verifyItem, matchItems, recordMinted, unrecordMinted, batchRows as batchRowsOf,
   batchName, CLASSES, STATEMENTS, MAX_ITEMS, WIKIDATA_SERVICE, QUICKSTATEMENTS, BOT_REQUESTS, WIKIPROJECT, EDIT_GROUPS, wdLang,
 } from '../engine/krisis/wikidata.js';
 import { searchPreview, runWikidataSearch, readContribs, readEntities } from '../engine/krisis/wikidata-search.js';
@@ -246,14 +246,8 @@ export function mountWikidata(host) {
   });
 
   // ---- 5. the Q-ids back ----
-  const rowsOf = async (b) => { const p = await thePlan(); return (p?.items || []).filter((it) => b.places.includes(it.iri)).sort((x, y) => b.places.indexOf(x.iri) - b.places.indexOf(y.iri)); };
-  /** The items of a batch again, for the rows: a place left out or decided since is no longer in the plan, so its row comes from the batch's record and the work file. */
-  async function batchRows(b) {
-    const rows = await rowsOf(b);
-    const w = work();
-    for (const iri of b.places) if (!rows.some((r) => r.iri === iri)) rows.push({ iri, labels: { und: w.places[iri]?.label || iri }, point: w.places[iri]?.point ?? null, fromWork: true });
-    return rows.sort((x, y) => b.places.indexOf(x.iri) - b.places.indexOf(y.iri));
-  }
+  /** The rows of a batch, for the pairing: its own places in its order, those no longer in the plan (recorded, decided or left out since) from the work file. */
+  const batchRows = async (b) => batchRowsOf(b, (await thePlan())?.items || [], work());
   async function verifyPairs(pairs, b) {
     const ctl = new AbortController();
     const fetch = host.fetch(ctl);

@@ -231,3 +231,22 @@ test('ids: pasted Q-ids are checked in the stand-in before being recorded, the u
   assert.match(id['@id'], new RegExp(`^${P('newstead')}#a-[0-9a-f]{8}`));
   assert.ok(!JSON.stringify(out).includes('@example'), 'no address with @ anywhere');
 });
+
+test('ids: after one place is recorded, the whole list pasted in the batch\'s order still sets each id against its own place (W4)', { skip: NO_TLS }, async () => {
+  const dir = fixture({ searched: true });
+  const b = await cli(['wikidata', 'batch', join(dir, 'trent.json'), '--review', join(dir, 'trent.krisis.json'), '--out', dir, '--consent', '--reviewer', 'Lu Reviewer']);
+  assert.equal(b.code, 0, b.out + b.err);
+  const allow = ['--api', api, '--allow-host', `https://127.0.0.1:${server.address().port}`, '--allow-host', 'wikidata'];
+  const ids = (file) => cli(['wikidata', 'ids', join(dir, 'trent.json'), '--review', join(dir, 'trent.krisis.json'), '--qids', join(dir, file), '--reviewer', 'Lu Reviewer', ...allow]);
+  writeFileSync(join(dir, 'first.txt'), 'Q77\n');
+  const first = await ids('first.txt');
+  assert.equal(first.code, 0, first.out + first.err);
+  assert.deepEqual(Object.keys(workOf(dir).mint.qids), [P('newstead')], 'control: Newstead is recorded, and is no longer in the plan');
+  // The whole list, as the how-to says to paste it: Newstead's id first.
+  writeFileSync(join(dir, 'all.txt'), 'Q77\nQ78\n');
+  const all = await ids('all.txt');
+  assert.equal(all.code, 0, all.out + all.err);
+  assert.match(all.out, /2 ids set against the batch's rows\./);
+  assert.match(all.out, new RegExp(`${P('kirkby')}: Q78 Verified`));
+  assert.deepEqual(Object.entries(workOf(dir).mint.qids).map(([iri, r]) => [iri, r.qid]), [[P('newstead'), 'Q77'], [P('kirkby'), 'Q78']]);
+});

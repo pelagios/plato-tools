@@ -1668,7 +1668,8 @@ async function wikidataCommand(args, o, resources) {
   if (o.qids === undefined && o.user === undefined) { host.cleanup(); return usage('wikidata ids needs --qids FILE (the Q-ids pasted) or --user NAME (your Wikidata user name), or both.'); }
   const batch = o.batch !== undefined ? m.batches.find((b) => b.id === o.batch) : m.batches.at(-1);
   if (!batch) { host.cleanup(); if (o.batch !== undefined) return usage(`--batch ${o.batch} is not a batch of this review${m.batches.length ? `; they are ${m.batches.map((b) => b.id).join(', ')}` : ''}.`); r.message = T.noBatch; return finishUp(); }
-  const rows = plan.items.filter((it) => batch.places.includes(it.iri)).sort((a, b) => batch.places.indexOf(a.iri) - batch.places.indexOf(b.iri));
+  // The batch's own places in its order, as the page has them: a place recorded or decided since is no longer in the plan, and without its row the pasted list pairs wrongly.
+  const rows = W.batchRows(batch, plan.items, work);
   const pairs = [];
   if (o.qids !== undefined) {
     let text;
@@ -1702,7 +1703,9 @@ async function wikidataCommand(args, o, resources) {
   }
   let recorded = 0;
   for (const p of pairs) {
-    if (p.verified?.ok) { W.recordMinted(work, p.iri, p.qid, { batch, reviewer, how: p.how, verified: p.verified }); recorded++; r.items.push(`${p.iri}: ${p.qid} ${T.verified(p.verified)}`); }
+    const had = m.qids[p.iri]?.qid;
+    if (p.verified?.ok && had && had !== p.qid) r.items.push(`${p.iri}: ${p.qid} Not recorded: the place already has ${had} recorded (one item a place); take that record out first.`);
+    else if (p.verified?.ok) { W.recordMinted(work, p.iri, p.qid, { batch, reviewer, how: p.how, verified: p.verified }); recorded++; r.items.push(`${p.iri}: ${p.qid} ${T.verified(p.verified)}`); }
     else r.items.push(`${p.iri}: ${p.qid} ${p.verified?.missing ? 'Not recorded: there is no such item in Wikidata.' : T.notVerified(p.verified)}`);
   }
   r.counts = { pairs: pairs.length, recorded };

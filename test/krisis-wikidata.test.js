@@ -14,7 +14,7 @@ import { apply } from '../src/engine/krisis/apply.js';
 import { gather } from '../src/engine/krisis/match.js';
 import {
   qualifying, planItems, quickStatementsV1, mintCollector, mintGate, consentRecord, consentFits, classOf, countryOf, codeOfCountry, countryWords, decimalsFor, describe, tidyDescription,
-  readPastedQids, verifyItem, matchItems, pairPasted, recordMinted, unrecordMinted, recordBatch, mintOf, entityCandidate, regionItem, searchState, batchName, qsDate, wdLangOf,
+  readPastedQids, verifyItem, matchItems, pairPasted, batchRows, recordMinted, unrecordMinted, recordBatch, mintOf, entityCandidate, regionItem, searchState, batchName, qsDate, wdLangOf,
   CONSENT, CLASSES, MAX_ITEMS, VERIFY_KM, WIKIDATA_SERVICE, ENTITY, ALGORITHM, STATEMENTS, wdLang,
 } from '../src/engine/krisis/wikidata.js';
 
@@ -434,6 +434,43 @@ test('a verified Q-id is recorded as the reviewer\'s decision, and Finish writes
   const again = await apply({ subjects: await detect([out]), work: serialiseWork(r.work), options: { reviewer: REVIEWER } }, env());
   assert.ok(again.report.items.some((i) => i.kind === 'nothing-new'), JSON.stringify(again.report.items.map((i) => i.kind)));
   assert.equal(again.outputs.length, 0);
+});
+
+test('the rows a batch is paired with are the batch\'s own places, in its order, whether or not each is still in the plan: a place recorded or decided since keeps its row (W4)', async () => {
+  const d = dataset();   // Kirkby given a kind, so that it qualifies
+  d.spatialEntities.find((e) => e['@id'] === P('kirkby')).attestations[0].types = [{ label: 'village' }];
+  const { places, records } = await read(d);
+  const w = workAfterReview(places);
+  decide(w, 'l2-2', 'not-this', { at: AT });
+  const plan = planItems({ work: w, places, records, options: { base: X, lang: 'en', only: [P('newstead'), P('kirkby')] } });
+  assert.deepEqual(plan.items.map((i) => i.iri), [P('newstead'), P('kirkby')]);
+  const batch = recordBatch(w, { items: plan.items, name: 'trent.wikidata.qs.txt', sha256: 'b'.repeat(64), at: AT });
+  recordMinted(w, P('newstead'), 'Q4242', { batch, reviewer: REVIEWER, how: 'pasted', verified: verifyItem(entity('Q4242'), plan.items[0]), at: AT });
+  const later = planItems({ work: w, places, records, options: { base: X, lang: 'en' } });
+  assert.ok(!later.items.some((i) => i.iri === P('newstead')), 'control: the recorded place has dropped out of the plan');
+  const rows = batchRows(batch, later.items, w);
+  assert.deepEqual(rows.map((r) => [r.iri, !!r.fromWork]), [[P('newstead'), true], [P('kirkby'), false]]);
+  // The whole list pasted in the batch's order pairs each id with its own place.
+  assert.deepEqual(pairPasted(['Q4242', 'Q4343'], rows).pairs, [{ qid: 'Q4242', iri: P('newstead') }, { qid: 'Q4343', iri: P('kirkby') }]);
+  assert.equal(verifyItem(entity('Q4242'), rows[0]).ok, true, 'a row made from the work file verifies the item it is recorded for');
+});
+
+test('a place with a Q-id recorded takes no second one: the way is to take the record out first, and then another Q-id is recorded (W3)', async () => {
+  const { places, records } = await read();
+  const w = workAfterReview(places);
+  decide(w, 'l2-2', 'not-this', { at: AT });
+  const plan = planItems({ work: w, places, records, options: { base: X, lang: 'en', only: [P('newstead')] } });
+  const batch = recordBatch(w, { items: plan.items, name: 'trent.wikidata.qs.txt', sha256: 'b'.repeat(64), at: AT });
+  const args = (q) => [w, P('newstead'), q, { batch, reviewer: REVIEWER, how: 'pasted', verified: verifyItem(entity(q), plan.items[0]), at: AT }];
+  recordMinted(...args('Q4242'));
+  const before = JSON.stringify(w);
+  assert.throws(() => recordMinted(...args('Q4343')), /already has Q4242.*take that record out/s);
+  assert.equal(JSON.stringify(w), before, 'nothing changed by the refusal: one candidate, one record');
+  assert.equal(w.candidates.filter((c) => c.candidate_source === P('newstead') && c.decision?.kind === 'match').length, 1);
+  // The presence beside it: with the record taken out, the other Q-id is recorded.
+  assert.equal(unrecordMinted(w, P('newstead')), 'Q4242');
+  recordMinted(...args('Q4343'));
+  assert.equal(w.mint.qids[P('newstead')].qid, 'Q4343');
 });
 
 test('the cap and the constants the page and the command line say', () => {

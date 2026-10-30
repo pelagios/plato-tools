@@ -535,6 +535,17 @@ export function verifyItem(entity, item, statements = DEFAULT_STATEMENTS) {
   return { ok: (label !== null || reference !== null) && label !== false && reference !== false && near !== false, label, distanceKm: d, near, reference };
 }
 /**
+ * The rows of a batch, one per place of it in its order, for pairing Q-ids with and verifying them: the plan's item where
+ * the place is still in the plan (`items`), else a row from its record and the work file (`fromWork`: a place recorded,
+ * decided or left out since is no longer in the plan, but its Q-id is still in the pasted list, and without its row every
+ * later id would pair with the wrong place).
+ */
+export function batchRows(batch, items, work) {
+  const rows = items.filter((it) => batch.places.includes(it.iri));
+  for (const iri of batch.places) if (!rows.some((r) => r.iri === iri)) rows.push({ iri, labels: { und: work.places[iri]?.label || iri }, point: work.places[iri]?.point ?? null, fromWork: true });
+  return rows.sort((x, y) => batch.places.indexOf(x.iri) - batch.places.indexOf(y.iri));
+}
+/**
  * Each entity matched to the batch row whose address it carries as a reference (the strong key), then verified
  * (verifyItem). `entities` is { Qn: entity }, `items` the batch's items (planItems'). Returns { matched: [{ qid, iri,
  * verified }], unmatched: [qid] (an item of the user's that carries no address of the batch), twice: [{ iri, qids }]
@@ -585,7 +596,7 @@ export const wikidataAttribution = () => ({ sources: { wd: { license: { spdx_id:
  * Wikidata's entity form), under the lookup that holds the Q-ids, decided 'match' as an exactMatch with a basis naming
  * the batch, so that Finish writes the identity like any other (identity.js, apply.js). `how` is 'pasted' or
  * 'contribs'; `verified` verifyItem()'s finding, which must be ok. Returns the candidate. A place already matched to
- * that item keeps its decision.
+ * that item keeps its decision; one with another Q-id recorded refuses (unrecordMinted first).
  */
 export function recordMinted(work, iri, qid, { batch, reviewer, how, verified, at = new Date().toISOString(), label = null, point = null } = {}) {
   if (!Object.hasOwn(work.places, iri)) throw new Error(`recordMinted: ${iri} is not a place of the review`);
@@ -594,6 +605,9 @@ export function recordMinted(work, iri, qid, { batch, reviewer, how, verified, a
   if (!['pasted', 'contribs'].includes(how)) throw new TypeError(`recordMinted: how must be pasted or contribs, not ${how}`);
   checkReviewer(reviewer, 'recordMinted: the reviewer');
   if (/@/.test(reviewer.name)) throw new TypeError('recordMinted: the reviewer is named by an address with @ in it, which is never written: give a name.');
+  // One identity a place: a second Q-id would be a second exactMatch, and unrecordMinted takes out only the one record.
+  const had = work.mint?.qids?.[iri]?.qid;
+  if (had && had !== qid) throw new Error(`recordMinted: ${iri} already has ${had} recorded: take that record out first, to record ${qid} instead.`);
   const l = mintedLookup(work, at);
   const target = entityIri(qid);
   let c = work.candidates.find((x) => x.candidate_source === iri && x.candidate_candidate === target);
