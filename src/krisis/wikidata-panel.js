@@ -163,7 +163,7 @@ export function mountWikidata(host) {
   }
 
   // ---- edits: the statements, the language, a description, a kind, a place left out ----
-  el.addEventListener('change', (e) => {
+  el.addEventListener('change', async (e) => {
     const m = mint(); if (!m) return;
     const t = e.target;
     if (t.matches('[data-statement]')) { m.options.statements = { ...m.options.statements, [t.dataset.statement]: t.checked }; invalidate(); host.changed(); }
@@ -172,7 +172,10 @@ export function mountWikidata(host) {
       if (t.checked) {
         const who = host.reviewer();
         if (!who) { t.checked = false; host.askName(); note.batch = T.needName; draw(); return; }
-        try { m.consent = consentRecord({ by: who, licence: plan?.gate?.licence ?? null }); } catch (err) { t.checked = false; note.batch = err.message; draw(); return; }
+        // The consent is for the licence as the gate reads it now (an edit empties the plan until the next draw): never recorded for none.
+        const gate = (await thePlan())?.gate;
+        if (!gate) { t.checked = false; note.batch = T.consentNoLicence; draw(); return; }
+        try { m.consent = consentRecord({ by: who, licence: gate.licence }); } catch (err) { t.checked = false; note.batch = err.message; draw(); return; }
       } else m.consent = null;
       note.batch = ''; host.changed();
     } else if (t.matches('[data-description]')) { const iri = t.closest('li').dataset.iri; m.items[iri] = { ...(m.items[iri] || {}), description: t.value }; if (!t.value.trim()) delete m.items[iri].description; invalidate(); host.changed(); }
@@ -229,7 +232,8 @@ export function mountWikidata(host) {
     const w = work(); if (!w || host.busy()) return;
     const p = await thePlan();
     const m = mintOf(w);
-    if (!p || p.gate?.kind === 'refused' || !p.items.length) return draw();
+    // No gate (the plan made without the dataset's records) is no licence read: the batch is not written.
+    if (!p || !p.gate || p.gate.kind === 'refused' || !p.items.length) return draw();
     if (p.items.length > MAX_ITEMS) { note.batch = T.tooMany(p.items.length, MAX_ITEMS); return draw(); }
     if (p.gate?.kind === 'consent' && m.consent && !consentFits(m.consent, p.gate)) { note.batch = T.consentStale(m.consent.licence, p.gate.licence); m.consent = null; host.changed(); return; }
     if (p.gate?.kind === 'consent' && !m.consent) { note.batch = T.consentNeeded; return draw(); }

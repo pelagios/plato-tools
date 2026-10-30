@@ -1592,6 +1592,7 @@ export const WIKIDATA_WORDS = {
   consentLabel: CONSENT_WORDS,
   consented: (c) => `Confirmed by ${c.by.name} on ${c.at.slice(0, 10)}, for the dataset's licence ${c.licence}.`,
   consentNeeded: 'Confirm the statement above first: the batch is written only once it is made.',
+  consentNoLicence: 'The dataset\'s licence has not been read yet (the dataset is not readable now, or the page is busy), so there is nothing to consent for: try again in a moment.',
   consentStale: (was, now) => `The statement was made for the dataset's licence ${was}, and its licence is now ${now}: make it again for this licence.`,
   minted: (qid) => `Given an item: ${qid}.`,
   unrecord: 'Take the Q-id out (to make another item)',
@@ -1617,7 +1618,7 @@ export const WIKIDATA_WORDS = {
   },
   leftOutLine: (left) => Object.entries(left).filter(([, v]) => v.length).map(([k, v]) => `${plural(v.length, 'place')} ${WIKIDATA_WORDS.leftOut[k]}`).join('; '),
   whgNotSearched: (n) => `${plural(n, 'of them was', 'of them were')} never looked up in the World Historical Gazetteer: look them up first, so that an item is not made for a place a gazetteer knows.`,
-  warnings: { 'no-language': 'a name with no language was left out', 'language-unsupported': 'a name whose language tag Wikidata has no code for (a transliteration\'s, such as grc-Latn) was left out', 'romanised-no-language': 'a romanised form was left out: give the language above, and it goes under it', 'description-length': 'the description is not two to twelve words', 'whitespace-replaced': 'a tab or a line break in a text was written as a space', 'country-unknown': 'the country code is not one the table knows', 'point-not-free': 'the point is copied from a source that is not free, so none is written', 'point-out-of-range': 'the point is not on the globe' },
+  warnings: { 'no-language': 'a name with no language was left out', 'language-unsupported': 'a name whose language tag Wikidata has no code for (a transliteration\'s, such as grc-Latn) was left out', 'romanised-no-language': 'a romanised form was left out: give the language above, and it goes under it', 'description-length': 'the description is not two to twelve words', 'whitespace-replaced': 'a tab or a line break in a text was written as a space', 'description-clash': 'another item of the batch has the same English label and description, which Wikidata refuses for the second: edit one description apart', 'country-unknown': 'the country code is not one the table knows', 'point-not-free': 'the point is copied from a source that is not free, so none is written', 'point-out-of-range': 'the point is not on the globe' },
   /** The batch (D8, D10). */
   batchHeading: '4. The batch',
   volume: (c) => `${plural(c.items, 'item')}, ${plural(c.statements, 'statement')}.`,

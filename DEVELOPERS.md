@@ -3289,6 +3289,8 @@ and the Methodos step `wikidata.items`. The words are `WIKIDATA_WORDS` in words.
   recorded with the name and the date; never a name with @ in it); no commercial use, no adaptations, a
   rights statement, no licence or one not known is refused. Per statement, an attestation whose cited source
   is not free (`attestationLicences` against CC0) contributes nothing, and the plan says so (`leftOut`).
+  A source given as a bare address (a citation's `source` as a URI string) has no licence to read, and counts as free
+  as a source with none stated does (the same as Agora's reading of it): the reviewer's CC0 statement is what covers it.
 - **The plan (D6, D7)** (`planItems`, from `mintCollector`'s records, read in the worker (`wikidata-collect`)
   or by the command line): a label per language and the other names as aliases (a name with no language takes
   the dataset's, else is left out), the description prefilled "<kind> in <region>, <country>, attested
@@ -3301,6 +3303,10 @@ and the Methodos step `wikidata.items`. The words are `WIKIDATA_WORDS` in words.
   made by `scripts/make-iso-countries.mjs`; CC0, see its NOTICE) and P131 only from a region of the region
   review matched to a Wikidata item (`regionItem`). No date property. Each statement is a tick-box
   (`mint.options.statements`).
+- **Checks beside the plan**: two items of a batch with the same English label and description are warned of
+  (`description-clash`: Wikidata refuses the second); the batch is not written, nor consent recorded, while the plan has
+  no licence gate (the dataset's records not read), and the Q-ids are verified against the statements the batch
+  carried (`verifyItem(entity, item, batch.statements)`: a check whose statement was off is not made).
 - **The batch (D5, D8, D10)** (`quickStatementsV1`): QuickStatements v1 text, downloaded as `<stem>.wikidata.qs.txt`:
   `CREATE /* PLATO tools: <title>; <place> */`, then `LAST` with Lxx, Axx, Dxx and each statement with the
   references `S854 "<the place's address>"` and `S813 +<date>T00:00:00Z/11`. A double quote in a text is written

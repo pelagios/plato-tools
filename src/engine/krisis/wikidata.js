@@ -425,6 +425,15 @@ export function planItems({ work, places = null, records = null, options = {} } 
     items.push({ iri, label: labels[options.lang] ?? Object.values(labels)[0], labels, aliases, description, prefilled, class: cls, point: point ? [round(point[0], decimals), round(point[1], decimals)] : null, decimals,
       country, region, years, leftOut, warnings });
   }
+  // Wikidata refuses a second item with the same label and description in a language, and the description is English: the
+  // second of two items with one English label and one description is made with no description (and the batch goes on).
+  const twins = new Map();
+  for (const it of items) {
+    if (!it.labels.en || !it.description) continue;
+    const key = `${it.labels.en.normalize('NFC').toLowerCase()}\t${it.description.toLowerCase()}`;
+    twins.set(key, [...(twins.get(key) || []), it]);
+  }
+  for (const group of twins.values()) if (group.length > 1) for (const it of group) it.warnings.push('description-clash');
   const count = { items: items.length, statements: items.reduce((n, it) => n + statementCount(it, statements), 0) };
   return { items, left, gate, statements, count, whgNotSearched: sel.whgNotSearched };
 }

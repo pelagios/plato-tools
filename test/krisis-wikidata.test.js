@@ -460,6 +460,22 @@ test('the rows a batch is paired with are the batch\'s own places, in its order,
   assert.equal(verifyItem(entity('Q4242'), rows[0]).ok, true, 'a row made from the work file verifies the item it is recorded for');
 });
 
+test('two items of one batch with the same English label and description are warned of: Wikidata refuses the second (W7)', async () => {
+  const d = dataset();
+  const twin = JSON.parse(JSON.stringify(d.spatialEntities[0])); twin['@id'] = P('newstead-two');
+  d.spatialEntities.push(twin);
+  const { places, records } = await read(d);
+  const w = workAfterReview(places); decide(w, 'l2-2', 'not-this', { at: AT });
+  const plan = planItems({ work: w, places, records, options: { base: X, lang: 'en', only: [P('newstead'), P('newstead-two')] } });
+  assert.deepEqual(plan.items.map((i) => i.description), [plan.items[0].description, plan.items[0].description], 'control: the same description');
+  assert.ok(plan.items.every((i) => i.warnings.includes('description-clash')), JSON.stringify(plan.items.map((i) => i.warnings)));
+  // The presence beside it: one description edited apart, or one place alone, and there is nothing to warn of.
+  mintOf(w).items[P('newstead-two')] = { description: 'a lost village on the Trent' };
+  const apart = planItems({ work: w, places, records, options: { base: X, lang: 'en', only: [P('newstead'), P('newstead-two')] } });
+  assert.ok(apart.items.every((i) => !i.warnings.includes('description-clash')), JSON.stringify(apart.items.map((i) => i.warnings)));
+  assert.ok(!planItems({ work: w, places, records, options: { base: X, lang: 'en', only: [P('newstead')] } }).items[0].warnings.includes('description-clash'));
+});
+
 test('a place with a Q-id recorded takes no second one: the way is to take the record out first, and then another Q-id is recorded (W3)', async () => {
   const { places, records } = await read();
   const w = workAfterReview(places);
