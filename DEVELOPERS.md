@@ -3288,15 +3288,19 @@ and the Methodos step `wikidata.items`. The words are `WIKIDATA_WORDS` in words.
   the dataset's, else is left out), the description prefilled "<kind> in <region>, <country>, attested
   <first>–<last>" (two to twelve words, lower case, no full stop; editable), P31 from the kind (`classOf`:
   a Wikidata class the dataset names as it is, else kinds.js's AAT concept or word through `CLASSES`, a
-  settlement of no listed kind Q486972, else the user chooses or the place is left out), P625 with as many
-  decimals as `precisionKm` allows (`decimalsFor`), P17 from the country code (`src/vendor/iso-countries.json`,
+  settlement of no listed kind Q486972, else the user chooses or the place is left out), P625 written with as many
+  decimals as `precisionKm` allows (`decimalsFor`: the digits written and compared, not a precision Wikidata keeps:
+  QuickStatements v1 has no syntax for one and stores every `@lat/lon` at 1e-6 degrees, so a coarse point is
+  stored claiming about 0.1 m), P17 from the country code (`src/vendor/iso-countries.json`,
   made by `scripts/make-iso-countries.mjs`; CC0, see its NOTICE) and P131 only from a region of the region
   review matched to a Wikidata item (`regionItem`). No date property. Each statement is a tick-box
   (`mint.options.statements`).
 - **The batch (D5, D8, D10)** (`quickStatementsV1`): QuickStatements v1 text, downloaded as `<stem>.wikidata.qs.txt`:
   `CREATE /* PLATO tools: <title>; <place> */`, then `LAST` with Lxx, Axx, Dxx and each statement with the
   references `S854 "<the place's address>"` and `S813 +<date>T00:00:00Z/11`. A double quote in a text is written
-  as a closing quotation mark and warned of; the title never goes in with an @ in it. At most `MAX_ITEMS`
+  as it is (the V1 parser takes the first and the last quote of the text as its own) and an address is never
+  altered; a tab or newline in a text becomes a space, and is warned of (`whitespace-replaced`); the title never
+  goes in with an @ in it. At most `MAX_ITEMS`
   (250) a batch; above it the words point to Wikidata's bot approval and WikiProject Historical Place. An
   unpublished dataset is warned of, not refused. The batch is recorded (`recordBatch`: q1, q2, …, when, the
   places in order, the file's SHA-256). These tools never write to Wikidata (D9): the how-to says to log in

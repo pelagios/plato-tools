@@ -22,7 +22,8 @@
 //
 // What is written (D5, D6, D10): a label and aliases per language, a description (D7, editable), P31 from
 // the place's kind (kinds.js; a Wikidata class the dataset names is used as it is), P625 from the point
-// (as many decimals as its precision allows), P17 from the country codes (src/vendor/iso-countries.json)
+// (as many decimals as its precision allows; QuickStatements v1 stores every point at a fixed precision of 1e-6 degrees
+// whatever is written, so the digits say nothing to Wikidata of how exact the point is), P17 from the country codes (src/vendor/iso-countries.json)
 // and P131 only from a region of the region review matched to a Wikidata item. No date property: the
 // attested years go into the description. Every statement carries a reference, S854 to the place's own
 // address and S813 the date, and every CREATE a comment naming the dataset and the place. At most
@@ -320,7 +321,12 @@ export function qualifying(work, places = null, { records = null, base = null } 
 }
 
 // ---- the plan: one item per place -------------------------------------------------------------------------
-/** How many decimals a coordinate keeps for a precision in kilometres (0.01° is about 1.1 km): none given, 6. */
+/**
+ * How many decimals a coordinate is written with for a precision in kilometres (0.01° is about 1.1 km): none given, 6. This
+ * is what is written and what verifyItem compares, not what Wikidata keeps: QuickStatements v1 has no syntax for a
+ * coordinate's precision and stores every @lat/lon at 1e-6 degrees (its parser, quickstatements.php), so a point of 50 km
+ * is stored claiming about 0.1 m. The item's own reference is where the place's real precision stays.
+ */
 export function decimalsFor(precisionKm) {
   if (!(typeof precisionKm === 'number' && precisionKm > 0)) return 6;
   return Math.max(0, Math.min(6, Math.ceil(Math.log10(111 / precisionKm))));
