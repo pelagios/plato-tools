@@ -1,7 +1,11 @@
 // Hermes, place names in a text: what a run may cost, estimated before anything is sent.
 //
-// Tokens are estimated from characters (one token for about 3.5), never counted by a provider's own
-// token-counting endpoint, which would mean sending the text. Tokens are always shown. Money is shown
+// Tokens are estimated from characters, never counted by a provider's own token-counting endpoint,
+// which would mean sending the text. The ratio depends on the script (SCRIPT_RATIOS): one token for
+// about 3.5 characters of Latin, but nearer one for each character of polytonic Greek or Chinese
+// (Stephen's decision of 30 October 2026, Q8 A). Every ratio is an ESTIMATE, rounded towards too many
+// tokens, and the real count the provider gives for the first part of a run replaces them for the rest
+// (calibrate). Tokens are always shown. Money is shown
 // only as "about", with the date the prices were recorded, and only for a model in the table below,
 // and not at all once the table is more than PRICE_STALE_DAYS old: prices change, and a stale figure
 // is worse than none (the maintainer's decision, 2026-10-01).
@@ -11,6 +15,63 @@
 import { PROMPT, OUTPUT_SCHEMA } from './prompt.js';
 
 export const CHARS_PER_TOKEN = 3.5;
+/**
+ * Characters (code points) to a token, by script. NOT MEASURED: each is a guess that errs towards
+ * too many tokens, and is labelled so. The Latin ratio is the one used before there were others; the
+ * rest are for the scripts a text of places is likely to be in, and "other" for any other letters.
+ * The ratios belong to a tokenizer, and tokenizers change between model generations: the first part's
+ * real count corrects them (calibrate).
+ */
+export const SCRIPT_RATIOS = Object.freeze({
+  latin: Object.freeze({ charsPerToken: CHARS_PER_TOKEN, estimate: true }),
+  greek: Object.freeze({ charsPerToken: 1.5, estimate: true }),
+  'polytonic-greek': Object.freeze({ charsPerToken: 1, estimate: true }),
+  cyrillic: Object.freeze({ charsPerToken: 2, estimate: true }),
+  arabic: Object.freeze({ charsPerToken: 2, estimate: true }),
+  cjk: Object.freeze({ charsPerToken: 1, estimate: true }),
+  other: Object.freeze({ charsPerToken: 1.5, estimate: true }),
+});
+/** How each script is named in the words of an estimate. */
+const SCRIPT_NAMES = { greek: 'Greek', 'polytonic-greek': 'polytonic Greek', cyrillic: 'Cyrillic', arabic: 'Arabic', cjk: 'Chinese, Japanese or Korean', other: 'other scripts' };
+
+// A letter's script; anything else (a digit, a space, punctuation, a mark) goes with the letters around it.
+const LETTER_SCRIPTS = [
+  ['greek', /\p{Script=Greek}/u], ['cyrillic', /\p{Script=Cyrillic}/u], ['arabic', /\p{Script=Arabic}/u],
+  ['cjk', /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u], ['latin', /\p{Script=Latin}/u],
+];
+const LETTER = /\p{L}/u;
+// What makes Greek polytonic: the Greek Extended block (U+1F00 to U+1FFF), and the marks that only polytonic
+// Greek uses (psili U+0313, dasia U+0314, perispomeni U+0342, ypogegrammeni U+0345), which a decomposed
+// text has apart from its letters.
+const isPolytonic = (ch) => { const c = ch.codePointAt(0); return (c >= 0x1f00 && c <= 0x1fff) || c === 0x313 || c === 0x314 || c === 0x342 || c === 0x345; };
+
+/**
+ * The tokens a text is estimated to take, counted run by run in each script: { tokens, scripts },
+ * `scripts` the code points counted in each (a run of Greek is polytonic if any of it is). Not
+ * rounded. A mixed text (Latin with a Greek quotation) is counted by what each part is.
+ */
+export function tokensOf(text) {
+  const scripts = {};
+  let run = 'latin', runCount = 0, polytonic = false;
+  const flush = () => {
+    if (!runCount) return;
+    const name = run === 'greek' && polytonic ? 'polytonic-greek' : run;
+    scripts[name] = (scripts[name] || 0) + runCount;
+    runCount = 0; polytonic = false;
+  };
+  for (const ch of text) {
+    if (LETTER.test(ch)) {
+      const script = (LETTER_SCRIPTS.find(([, re]) => re.test(ch)) || ['other'])[0];
+      if (script !== run) { flush(); run = script; }
+    }
+    runCount++;
+    if (run === 'greek' && isPolytonic(ch)) polytonic = true;
+  }
+  flush();
+  let tokens = 0;
+  for (const [name, n] of Object.entries(scripts)) tokens += n / SCRIPT_RATIOS[name].charsPerToken;
+  return { tokens, scripts };
+}
 export const PRICE_STALE_DAYS = 90;
 /** Over either, the user is asked a second time before a run starts. */
 export const CONFIRM_CHUNKS = 200;
@@ -64,23 +125,25 @@ export const THINKING_ALLOWANCE = Object.freeze({ low: 0.25, medium: 0.6, high: 
 const OVERHEAD_CHARS = PROMPT.length + JSON.stringify(OUTPUT_SCHEMA).length + 60;
 
 /**
- * One chunk's tokens, estimated: { input, output: { low, high } }. Output is a range: a text dense with
- * names gives a long list, and a model that thinks before answering spends tokens doing so, more at
- * higher `effort` (THINKING_ALLOWANCE).
+ * One chunk's tokens, estimated: { input, output: { low, high }, scripts }, `scripts` the code points
+ * counted in each script (SCRIPT_RATIOS). Output is a range: a text dense with names gives a long
+ * list, and a model that thinks before answering spends tokens doing so, more at higher `effort`
+ * (THINKING_ALLOWANCE).
  */
 export function estimateChunk(chunk, { effort = null } = {}) {
-  const chars = typeof chunk === 'string' ? chunk.length : chunk.text.length;
-  const text = Math.ceil(chars / CHARS_PER_TOKEN);
+  const { tokens, scripts } = tokensOf(typeof chunk === 'string' ? chunk : chunk.text);
+  const text = Math.ceil(tokens);
   const thinking = THINKING_ALLOWANCE[effort ?? 'default'] ?? THINKING_ALLOWANCE.default;
-  return { input: Math.ceil((chars + OVERHEAD_CHARS) / CHARS_PER_TOKEN), output: { low: 20 + Math.ceil(text * 0.05), high: 200 + Math.ceil(text * (0.6 + thinking)) } };
+  return { input: Math.ceil(tokens + OVERHEAD_CHARS / CHARS_PER_TOKEN), output: { low: 20 + Math.ceil(text * 0.05), high: 200 + Math.ceil(text * (0.6 + thinking)) }, scripts };
 }
 
-/** A whole run's estimate: { characters, chunks, input, output: { low, high }, effort }. */
+/** A whole run's estimate: { characters, chunks, input, output: { low, high }, effort, scripts }. */
 export function estimateRun(chunks, { effort = null } = {}) {
-  const out = { characters: 0, chunks: chunks.length, input: 0, output: { low: 0, high: 0 }, effort };
+  const out = { characters: 0, chunks: chunks.length, input: 0, output: { low: 0, high: 0 }, effort, scripts: {} };
   for (const c of chunks) {
     const e = estimateChunk(c, { effort });
     out.characters += c.text.length; out.input += e.input; out.output.low += e.output.low; out.output.high += e.output.high;
+    for (const [k, n] of Object.entries(e.scripts)) out.scripts[k] = (out.scripts[k] || 0) + n;
   }
   return out;
 }
@@ -116,9 +179,35 @@ const tokens = (n) => n.toLocaleString('en-GB');
 export function estimateWords(estimate, cost) {
   const t = `About ${tokens(estimate.input)} tokens in and ${tokens(estimate.output.low)} to ${tokens(estimate.output.high)} out, for ${tokens(estimate.chunks)} ${estimate.chunks === 1 ? 'part' : 'parts'} of the text`;
   const asOf = `prices as of ${cost.pricesOf}${PRICES.verified?.on === PRICES.checkedOn ? '' : ', not checked against the provider\'s page'}`;
-  if (cost.usd) return `${t}: about ${usd(cost.usd.low)} to ${usd(cost.usd.high)}, at ${asOf}.`;
-  if (cost.why === 'stale') return `${t}. No cost is shown: the ${asOf} are more than ${PRICE_STALE_DAYS} days old.`;
-  return `${t}. No cost is shown: there is no price recorded for this model (${asOf}).`;
+  // Scripts other than Latin are counted at estimated ratios, and it says so: the first part's real count replaces them.
+  const others = Object.keys(estimate.scripts || {}).filter((k) => k !== 'latin');
+  const note = others.length ? ` Counted at estimated ratios for ${others.map((k) => SCRIPT_NAMES[k]).join(', ')} text, not measured; the real count of the first part replaces them once it is sent.` : '';
+  if (cost.usd) return `${t}: about ${usd(cost.usd.low)} to ${usd(cost.usd.high)}, at ${asOf}.${note}`;
+  if (cost.why === 'stale') return `${t}. No cost is shown: the ${asOf} are more than ${PRICE_STALE_DAYS} days old.${note}`;
+  return `${t}. No cost is shown: there is no price recorded for this model (${asOf}).${note}`;
 }
 
 export const needsSecondConfirmation = (estimate, cost) => estimate.chunks > CONFIRM_CHUNKS || (cost?.usd ? cost.usd.high > CONFIRM_USD : false);
+
+/**
+ * The estimate for a whole run, corrected by the real count the provider gave for its first part:
+ * `first` is { chunk, usage: { input, output } } for the part sent, `chunks` all the parts. The ratios
+ * are scaled so that the first part's estimate is what it took (`scale`, from the input tokens only:
+ * the output is the model's own); a provider that gave no count leaves the estimate as it was
+ * (`source: 'estimate'`). Returns { scale, source: 'first-part' | 'estimate', estimate, cost, ask }:
+ * `ask` is true when the corrected run crosses the second confirmation (over CONFIRM_CHUNKS parts or
+ * CONFIRM_USD) where the first estimate did not, so that the user is asked again before the next part
+ * is sent; a run already confirmed a second time is not asked a third. `before` is { estimate, cost }
+ * as first shown. Nothing is sent to count tokens.
+ */
+export function calibrate(chunks, first, { effort = null, provider, model, now = new Date(), table = PRICES, before } = {}) {
+  const guess = estimateChunk(first.chunk, { effort }).input;
+  const used = first.usage?.input;
+  const known = Number.isFinite(used) && used > 0 && guess > 0;
+  const scale = known ? used / guess : 1;
+  const raw = estimateRun(chunks, { effort });
+  const estimate = known ? { ...raw, input: Math.ceil(raw.input * scale), output: { low: Math.ceil(raw.output.low * scale), high: Math.ceil(raw.output.high * scale) } } : raw;
+  const cost = costOf(estimate, provider, model, { now, table });
+  const crossedBefore = before ? needsSecondConfirmation(before.estimate, before.cost) : false;
+  return { scale, source: known ? 'first-part' : 'estimate', estimate, cost, ask: !crossedBefore && needsSecondConfirmation(estimate, cost) };
+}
