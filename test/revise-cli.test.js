@@ -65,6 +65,13 @@ test('a wrong command exits 2 with its mistake: no --previous, no --reviewer, a 
   problem([p2, '--previous', p1, '--reviewer', 'R', '--orcid', 'nope', '--out', d], /give the ORCID in full/);
   problem([p2, '--previous', p1, '--reviewer', 'R', '--date', 'yesterday', '--out', d], /--date yesterday is not a date/);
   problem([p2, p1, '--previous', p1, '--reviewer', 'R', '--out', d], /revise takes one dataset, the new version; 2 were given/);
+  // A reviewer named by an address with @ is refused (it would be written into the retractions and the release report), and never echoed.
+  const email = cli('revise', p2, '--previous', p1, '--reviewer', 'lu@example.org', '--release', 'v2', '--out', d);
+  assert.equal(email.code, 2, email.out + email.err); assert.match(email.err, /--reviewer is named by an address with @ in it, which is never written: give a name\./);
+  assert.ok(!(email.out + email.err).includes('lu@example'), 'the address is not repeated');
+  const badName = cli('revise', p2, '--previous', p1, '--reviewer', 'R', '--release', 'v 2', '--out', d, '--json');
+  assert.equal(badName.code, 2, badName.out + badName.err);
+  assert.ok(JSON.parse(badName.out).items.some((i) => i.kind === 'bad-release'), badName.out);
   const other = cli('check', p1, '--date', '2026-10-17');
   assert.equal(other.code, 2); assert.match(other.err, /--date is for revise/);
   assert.deepEqual(readdirSync(d).sort(), ['v1.json', 'v2.json'], 'nothing written');

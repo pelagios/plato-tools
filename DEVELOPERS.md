@@ -1110,7 +1110,8 @@ a new version" (below).
   and what it added, and nothing is guessed there), and the place has exactly one attestation removed
   and exactly one added of the same kind (the same facets present: names, geometries, timespans,
   types, properties, relations, identities) citing the same sources, the added one supersedes the
-  removed one (`paired`, each named). Anything else is retracted, and added. A row the previous
+  removed one (`paired`, each named; an added attestation with a meta of its own, such as Contradicts, is not
+  paired: an attestation's meta is one object, and Supersedes would overwrite it). Anything else is retracted, and added. A row the previous
   release had withdrawn is never inherited by a row put back with the same content (the Fable review
   of 17 October 2026): the dead twin is put back as it was, and the row is a new attestation under an
   address of its own, told from the twin by Agora's counter.
@@ -1173,11 +1174,16 @@ a new version" (below).
   dataset is; the command line writes it too (`<stem>.release.json`, beside `<stem>-revised.json`); in
   Methodos it stays beside the dataset, which alone is the step's result (the adapter and the page
   leave it out of the hand-off).
-- **Refused in words, nothing written**: no reviewer (`no-reviewer`); a previous release whose
+- **A changed attestation with a meta of its own** (R1, review of 30 October 2026): the new form is written as it
+  is and the old form is retracted beside it (`meta-kept`), where a meta-less one is written with Supersedes.
+- **Refused in words, nothing written**: no reviewer (`no-reviewer`), or one named by an address with @ in it
+  (`bad-reviewer`: `checkReviewer` refuses it everywhere, since a name is written into every retraction and the
+  release report); a release name an address cannot hold (`bad-release`, Agora's `releaseProblem`); a previous release whose
   attestations have no addresses (`previous-unaddressed`, naming the `-with-ids.jsonl` copy to give); a facet with an address of its own changed or no longer
   described (`facet-changed`, D4, version 1: the attestation pointing to it was kept as it was, so the
   version check of the output finds the facet changed, and the words say to put it back and record the
-  correction under a new address in a superseding attestation); an answer changed without withdrawing
+  correction under a new address in a superseding attestation; refused against a draft previous release too, whatever the
+  version check's severity there, since what is written is a published release); an answer changed without withdrawing
   the earlier one (`answered-both-ways`, passed through as the error it is: a changed decision is
   Krisis's to withdraw).
 - **Checked before it is handed on**, as Krisis's finishing checks its output: the whole output is

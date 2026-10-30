@@ -54,7 +54,7 @@ import { PLATO } from '../lib/context.js';
 import { sha256 } from '../lib/sha256.js';
 import { collectWithdrawn, resolveWithdrawn, list } from '../formats/shared.js';
 import { digester, mintAddress, TEXT as MINT_TEXT } from './agora/mint.js';
-import { normaliseBase } from './agora/address.js';
+import { normaliseBase, releaseProblem } from './agora/address.js';
 import { baseFor, RETRACTS, digestsOf } from './krisis/withdraw.js';
 import { checkReviewer, NOT_READ_KINDS } from './krisis/work.js';
 import { fileSha256 } from './krisis/digest.js';
@@ -67,6 +67,8 @@ const n = (x) => (x || 0).toLocaleString('en-GB');
 const plural = (k, one, many = one + 's') => `${n(k)} ${k === 1 ? one : many}`;
 // A meta type, written in full or with the context's plato: prefix.
 const metaType = (m) => (isObject(m) && typeof m.metaType === 'string' ? (m.metaType.startsWith('plato:') ? PLATO + m.metaType.slice(6) : m.metaType) : null);
+/** Whether an attestation carries a meta of its own (a relation such as Contradicts, or a withdrawal): PLATO's meta is one object, so it takes no second. */
+const hasMeta = (a) => isObject(a) && a.meta !== undefined && a.meta !== null;
 /** The withdrawal an attestation's meta makes, if any: { kind: 'retracted' | 'superseded', target }. */
 export function withdrawalOf(a) {
   for (const m of [].concat(a?.meta || [])) {
@@ -79,6 +81,7 @@ export function withdrawalOf(a) {
 export const TEXT = {
   'no-reviewer': 'The revision does not say who makes it: give the maintainer\'s name (the reviewer\'s, under Krisis\'s review), which each retraction records as its contributor: a Gazetteer retracts the attestations it made, and a maintainer signs for it. Nothing was written.',
   'bad-reviewer': 'The reviewer cannot be recorded as PLATO records a contributor, so nothing was written',
+  'bad-release': 'The release name cannot be part of an address (it is the last part of <base>release/<name>): it must be letters, digits and . _ ~ - only, not starting with a dot. Nothing was written. The example is the name given.',
   'previous-not-read': 'The previous release could not be read to the end, so nothing was written.',
   'previous-unaddressed': 'Attestations of the previous release have no web address of their own (@id), so nothing can retract or replace them. Give the copy with addresses that the site was made from (<name>-with-ids.jsonl, which minting wrote), not the working copy before minting. Nothing was written.',
   'previous-has-problems': 'The previous release has problems of its own, which revising does not list. Check it by itself to see them.',
@@ -97,6 +100,7 @@ export const TEXT = {
   'cannot-withdraw-outside-base': 'An attestation the new version deleted is about a place whose address is not under the base address, so no address can be made for its retraction, and it was not written. Give the place an address under the base, or put the attestation back. Nothing was written; the example names the place.',
   'cannot-close-chain': 'An attestation withdrawn here had itself replaced one of another place, which the revision had already written, so the earlier one could not be retracted with it and would become current again. This is a limit of the tools: put the attestation back as it was, and withdraw it by hand under the other place. Nothing was written.',
   'facet-changed': 'A name, location, date, type, property or citation that attestations of the previous release point to by its web address says something different in the new version, or is no longer described. Those attestations were not changed, but what they say was, and this revision does not repair that: put it back as it was, and record the correction as a new one (a name, a date, a location) under a new address, in a new attestation that replaces the old one (plato:Supersedes). Nothing was written; the example names it.',
+  'meta-kept': 'An attestation of the new version that changes one of the previous release carries a relation of its own (meta, such as plato:Contradicts), and an attestation\'s meta is one object, so it cannot also say plato:Supersedes. It is written as it is, and the previous form is retracted beside it (plato:Retracts). The example names the attestation replaced.',
   superseded: 'An attestation of the previous release says something different in the new version: it is put back as it was, and the new form is written beside it, replacing it (plato:Supersedes). The example names the attestation replaced.',
   retracted: 'An attestation of the previous release is not in the new version: it is put back as it was, and withdrawn by a new attestation that retracts it (plato:Retracts), signed by the maintainer for the Gazetteer. The example names it.',
   paired: 'An attestation of the previous release is not in the new version, and one of the same kind, citing the same source, was added to the same place in its stead, with nothing else of that kind deleted or added there: the deleted one is put back, and the added one replaces it (plato:Supersedes). The example names the one replaced, and its place.',
@@ -174,6 +178,7 @@ async function revising({ earlier, later, options }, env) {
   const contributor = { name: reviewer.name.trim(), ...(reviewer.orcid ? { orcid: reviewer.orcid } : {}) };
   const date = options.date || new Date().toISOString();
   const release = typeof options.release === 'string' && options.release.trim() ? options.release.trim() : null;
+  if (release && releaseProblem(release)) { rep.error('bad-release', TEXT['bad-release'], release); return fail(); }
   const context = env.resources.context;
   const db = await env.openDb();
   const statements = [];
@@ -347,7 +352,7 @@ async function revising({ earlier, later, options }, env) {
           // The second use of an address the previous release knows: the keeper is the original, and
           // this one replaces it; else the keeper replaced it already, and this one is added.
           const r = byId.get(id);
-          if (r && digests[keeper.get(id)] === r.d && !withdrawalOf(a)) { supersede(a, r); return; }
+          if (r && digests[keeper.get(id)] === r.d && !hasMeta(a)) { supersede(a, r); return; }
           a = without(a); id = null;
         }
         const r = id !== null ? byId.get(id) : null;
@@ -362,8 +367,10 @@ async function revising({ earlier, later, options }, env) {
             out.push({ a: stamp(without(a)), how: 'new' }); counts.added++;
             return;
           }
-          if (withdrawalOf(a)) {
-            // The new form withdraws something of its own (an attestation's meta is one object): the old is retracted beside it.
+          if (hasMeta(a)) {
+            // The new form has a meta of its own, a withdrawal or another relation (an attestation's meta is one object, and Supersedes would
+            // overwrite it): it is written as it is, and the old is retracted beside it.
+            if (!withdrawalOf(a)) rep.warning('meta-kept', TEXT['meta-kept'], id);
             out.push({ a: stamp(without(a)), how: 'new' }); counts.added++;
             retract(id, NOTE.retracted); counts.removed++; rep.warning('retracted', TEXT.retracted, id);
             closeChain(old, id);
@@ -386,7 +393,7 @@ async function revising({ earlier, later, options }, env) {
         }
         // Added (an address of the user's own is kept, as minting keeps any).
         out.push({ a: stamp(a), how: 'new' }); counts.added++;
-        if (!withdrawalOf(a)) added.push(out.length - 1);
+        if (!hasMeta(a)) added.push(out.length - 1);
       });
       // What the previous release had of this place that the new version has not.
       const removed = [];
@@ -548,7 +555,8 @@ async function revising({ earlier, later, options }, env) {
     for (const i of c.report.items) {
       if (i.kind === 'answered-both-ways') rep.add('error', i.kind, i.message, i.examples[0], i.count);   // passed through as the error it is: a decision changed is Krisis's to withdraw
       else if (CHANGED.has(i.kind)) { rep.add('error', 'not-append-only', `${TEXT['not-append-only']} ${i.message}`, i.examples[0], i.count); for (const x of i.explained || []) rep.explain('not-append-only', x.example, x.earlier, x.later); }
-      else if (FACET.has(i.kind) && i.severity === 'error') { rep.add('error', 'facet-changed', TEXT['facet-changed'], i.examples[0], i.count); for (const x of i.explained || []) rep.explain('facet-changed', x.example, x.earlier, x.later); }
+      // Whatever its severity: against a draft the version check only warns, but what is written is a published release, and the kept attestations cannot say what they said.
+      else if (FACET.has(i.kind)) { rep.add('error', 'facet-changed', TEXT['facet-changed'], i.examples[0], i.count); for (const x of i.explained || []) rep.explain('facet-changed', x.example, x.earlier, x.later); }
       else if (i.kind === 'unreadable' || i.kind === 'version-not-read') rep.add('error', 'not-checked', `${TEXT['not-checked']}: ${i.message}`, i.examples[0], i.count);
       else if (!SAID.has(i.kind)) rep.add(i.severity === 'error' ? 'error' : 'warning', i.kind, i.message, i.examples[0], i.count);
     }

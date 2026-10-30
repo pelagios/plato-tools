@@ -16,6 +16,8 @@ import { publish } from '../src/engine/agora/index.js';
 import { run } from '../src/engine/pipeline.js';
 import { collectWithdrawn, resolveWithdrawn } from '../src/formats/shared.js';
 import { summary } from '../src/engine/words.js';
+import { PLATO } from '../src/lib/context.js';
+import { checkReviewer } from '../src/engine/krisis/work.js';
 
 const X = 'https://example.org/g/';
 const P = (k) => `${X}place/${k}`;
@@ -491,4 +493,67 @@ test('the pieces: the output\'s name, the header found in the writer\'s text, th
   assert.deepEqual(withdrawalOf({ meta: { targetAttestation: 'x', metaType: SUPERSEDES } }), { kind: 'superseded', target: 'x' });
   assert.equal(withdrawalOf({ meta: { targetAttestation: 'x', metaType: 'plato:Contradicts' } }), null);
   assert.equal(withdrawalOf({}), null);
+});
+
+// ---- the review's findings (R1 to R4) -----------------------------------------------------------------------
+const CONTRADICTS = { targetAttestation: `${P('a')}#a-11111111`, metaType: PLATO + 'Contradicts' };
+
+test('a changed attestation that carries a relation of its own (meta: Contradicts) keeps it: PLATO\'s meta is one object, so the old form is retracted beside it instead of replaced by it (R1)', async () => {
+  const later = v2();
+  later.spatialEntities[0].attestations[1] = att('a:22222222', 'Alfa respelt', { meta: CONTRADICTS });
+  const { r, doc } = await revised(v1(), later, { release: 'v2' });
+  assert.equal(r.report.errors, 0, JSON.stringify(r.report.items));
+  const a = atts(doc, 'a');
+  const mine = a.find((x) => x.names?.[0].toponym === 'Alfa respelt');
+  assert.deepEqual(mine.meta, CONTRADICTS, 'the new form says what it said');
+  assert.equal(status(doc)['place/a#a-22222222'], 'retracted', 'the old form is withdrawn all the same');
+  assert.deepEqual(a.slice(0, 2), v1().spatialEntities[0].attestations, 'the previous release\'s attestations as they were');
+  assert.ok(r.report.items.some((i) => i.kind === 'meta-kept'), 'said');
+  // The presence beside it: the same change without a meta is superseded, as the table of rules has it.
+  const plain = await revised(v1(), v2(), { release: 'v2' });
+  assert.equal(status(plain.doc)['place/a#a-22222222'], 'superseded');
+  // The tables case: no addresses in the new version, one deleted and one added of a kind would be paired, and the pairing would write Supersedes over the meta.
+  const tables = v2();
+  tables.spatialEntities[0].attestations = [att('a:11111111', 'Alpha'), att('a:22222222', 'Alfa respelt', { meta: CONTRADICTS })].map(({ '@id': _, ...x }) => x);
+  const paired = await revised(v1(), tables, { release: 'v2' });
+  assert.equal(paired.r.report.errors, 0, JSON.stringify(paired.r.report.items));
+  assert.deepEqual(atts(paired.doc, 'a').find((x) => x.names?.[0].toponym === 'Alfa respelt').meta, CONTRADICTS, 'not paired over');
+  assert.equal(status(paired.doc)['place/a#a-22222222'], 'retracted');
+  assert.equal(paired.r.report.counts.paired, 0);
+  const free = JSON.parse(JSON.stringify(tables)); delete free.spatialEntities[0].attestations[1].meta;
+  assert.equal((await revised(v1(), free, { release: 'v2' })).r.report.counts.paired, 1, 'control: without the meta the same two are paired');
+});
+
+test('the release name is one an address can hold (Agora\'s rule): "v 2", "2.0/final" and ".hidden" are refused, nothing written; "v2", "2.0" and "r_1~b" pass (R2)', async () => {
+  for (const bad of ['v 2', '2.0/final', '.hidden', 'v2?']) {
+    const x = await revised(v1(), v2(), { release: bad });
+    assert.ok(x.r.incomplete && x.kinds.includes('bad-release'), `${bad}: ${JSON.stringify(x.r.report.items)}`);
+    assert.equal(x.text, null, 'nothing written');
+    assert.deepEqual(x.item('bad-release').examples, [bad]);
+  }
+  for (const good of ['v2', '2.0', 'r_1~b']) assert.equal((await revised(v1(), v2(), { release: good })).r.report.errors, 0, good);
+});
+
+test('a facet changed is refused when the previous release is a draft too: the revised dataset is written as published, and cannot say again what the kept attestations said (R3)', async () => {
+  const shared = { ...v1(), spatialEntities: [place('a', 'A', [{ ...att('a:11111111', 'Alpha'), names: [{ '@id': X + 'name/alpha', toponym: 'Alpha' }] }])] };
+  shared.gazetteer = { ...G, status: 'draft' };
+  const facet = JSON.parse(JSON.stringify(shared)); facet.spatialEntities[0].attestations[0].names[0].toponym = 'Alpha, respelt'; facet.gazetteer = { ...G, '@id': X, version: undefined, status: 'draft' };
+  const f = await revised(shared, facet, { release: 'v2' });
+  assert.ok(f.r.incomplete && f.kinds.includes('facet-changed'), JSON.stringify(f.r.report.items));
+  assert.equal(f.text, null, 'nothing written');
+  // The presence beside it: the same draft, the facet as it was, is revised (and said to be a draft).
+  const same = await revised(shared, { ...JSON.parse(JSON.stringify(shared)), gazetteer: { ...G, '@id': X, version: undefined, status: 'draft' } }, { release: 'v2' });
+  assert.equal(same.r.report.errors, 0, JSON.stringify(same.r.report.items));
+  assert.ok(same.kinds.includes('earlier-not-published'));
+});
+
+test('a reviewer named by an address with @ in it is refused, in words that do not repeat it: it would be written into every retraction and the release report (R4)', async () => {
+  const email = 'lu.reviewer@example.org';
+  assert.throws(() => checkReviewer({ name: email }), (e) => /address with @ in it/.test(e.message) && !e.message.includes(email));
+  assert.deepEqual(checkReviewer({ name: 'Lu Reviewer' }), { name: 'Lu Reviewer' }, 'presence beside it');
+  const x = await revised(v1(), v2(), { release: 'v2', reviewer: { name: email } });
+  assert.ok(x.r.incomplete && x.kinds.includes('bad-reviewer'), JSON.stringify(x.r.report.items));
+  assert.equal(x.text, null, 'nothing written');
+  assert.ok(!JSON.stringify(x.r.report).includes(email), 'the address is not in the report');
+  assert.ok(!JSON.stringify(x.r.report).includes('@example'), 'nor any part of it');
 });

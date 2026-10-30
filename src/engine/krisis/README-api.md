@@ -10,7 +10,7 @@ Status: IMPLEMENTED; engine and CLI tests pass (test/krisis.test.js, test/krisis
     later: a `decided_at` that is not an ISO date-time, a place key or `candidate_candidate` that is
     not an IRI, the same (candidate_source, candidate_candidate) pair twice.
   - `checkReviewer({ name, orcid? }, where?)` — throws `DataError` unless it is PLATO's
-    contributorObject (a name that is not blank; an ORCID written in full,
+    contributorObject (a name that is not blank and is not an address with `@` in it, which would be written into the data; an ORCID written in full,
     `https://orcid.org/0000-0000-0000-0000`). The page checks the reviewer with it before saving or
     finishing, and never stores an ORCID it refuses.
   - `DATE_TIME`, `isIri` — the rules `readWork` and `recordIdentity` share.

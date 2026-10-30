@@ -101,6 +101,8 @@ const isNames = (n) => Array.isArray(n) && n.every((x) => typeof x === 'string')
 /** A reviewer as PLATO's contributorObject has one: a name, and an ORCID if given. Throws DataError otherwise. */
 export function checkReviewer(r, where = 'The reviewer') {
   if (!isObject(r) || typeof r.name !== 'string' || !r.name.trim()) throw new DataError(`${where} must have a name.`);
+  // A name is written into the data (a contributor, a consent, a report): never an address with @ in it, and the message does not repeat it.
+  if (/@/.test(r.name)) throw new DataError(`${where} is named by an address with @ in it, which is never written: give a name.`);
   if (r.orcid !== undefined && (typeof r.orcid !== 'string' || !ORCID.test(r.orcid))) throw new DataError(`${where}'s ORCID must be written in full, as https://orcid.org/0000-0000-0000-0000.`);
   for (const k of Object.keys(r)) if (k !== 'name' && k !== 'orcid') throw new DataError(`${where} may have a name and an ORCID only, not "${k}".`);
   return r;

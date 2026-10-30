@@ -1420,7 +1420,7 @@ function reviewer() {
 function reviewerProblem() {
   const r = reviewer();
   if (!r) return null;
-  try { checkReviewer(r); return null; } catch { return W.badOrcid; }
+  try { checkReviewer(r); return null; } catch (e) { return /@/.test(e.message) ? e.message : W.badOrcid; }
 }
 // The lists of qualifiers (engine/krisis/qualifiers.js), a checkbox each in the options, with its
 // language, "unmeasured" where it is, and what it holds; those on by default are checked.
