@@ -1,3 +1,4 @@
+import { FIGURES_TEXT } from './hermes/figures-text.js';
 // Collects problems and losses without letting them grow with the data: each kind keeps a count
 // and a handful of examples, however many times it occurs.
 export class Report {
@@ -259,6 +260,8 @@ Object.assign(LOSS_TEXT, {
   'preview-partial': 'This is a preview of the first records only: the rest of the file was not read, and nothing was checked as a whole or written. The example says why the records shown may not be all there are, or not in the order a conversion writes them. Check or convert the file to read all of it.',
   'workbook-whole': 'A workbook is read whole into memory, so a very large one may not fit: save the sheet as CSV (UTF-8) and choose the CSV file, which is read a row at a time.',
   'generic-same-id-label': "The rows read as one place, as they share an id, give different names, so none is picked as the place's label: the label is the id, and every name stays in its own row's attestation. The example gives the id and the names. If the rows are not one place, give them ids of their own.",
+  // A table of figures (src/engine/hermes/figures.js): the words are in figures-text.js, beside the kinds.
+  ...FIGURES_TEXT,
   // Hermes, place names in a text (src/engine/hermes/text/validate.js, TEXT_KINDS): what a language model's reply had that the tools did not take.
   'text-reply-not-json': "The model's reply to a part of the text is not JSON, so nothing was taken from it. That part has no result, and is sent again if the run is resumed.",
   'text-reply-not-mentions': "The model's reply to a part of the text is JSON, but not the list of place names asked for, so nothing was taken from it. That part has no result, and is sent again if the run is resumed. The example says what was wrong.",

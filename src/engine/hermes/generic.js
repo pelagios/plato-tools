@@ -25,7 +25,7 @@ import { LOSS_TEXT } from '../report.js';
 import { tableIds } from '../../formats/tables.js';
 // The tables reader's own forms for a workbook's numbers and dates, so that a sheet reads alike either way.
 import { numberText, dateText } from '../pipeline.js';
-import { resolveColumns, applyColumns, expandSplits, splitRow, GENERIC_KINDS, FEATURE_ID, FIELDS, OTHER } from './columns.js';
+import { resolveColumns, applyColumns, expandSplits, splitRow, GENERIC_KINDS, FEATURE_ID, FIELDS, OTHER, FIGURE_FIELDS } from './columns.js';
 import { containerKey, CONTAINED_IN } from './within.js';
 import { sha256 } from '../../lib/sha256.js';
 /** The id a region is minted with, under the base address: "region-" and 16 hex digits of the SHA-256 of its containerKey. */
@@ -73,7 +73,8 @@ async function open(input, sheet = input.sheet) {
   return t;
 }
 /** The workbook's sheet a run reads: options.sheet when the options are a run's (not a mapping alone), else the input's. */
-const sheetIn = (input, options) => (input.container === 'workbook' && options && savedColumns(options) !== options && typeof options.sheet === 'string' ? options.sheet : input.sheet);
+export const sheetIn = (input, options) => (input.container === 'workbook' && options && savedColumns(options) !== options && typeof options.sheet === 'string' ? options.sheet : input.sheet);
+export { open as openTable };   // the table of figures' reader (figures.js) opens its table as this one does
 /**
  * The input with `name` as the workbook's sheet to read, or the input as it is when no name is
  * given; a name the workbook does not have is a DataError naming the sheets it has.
@@ -344,7 +345,7 @@ export function savedColumns(given) {
 }
 /**
  * 'attestation-centric' when a column holds the places' web addresses, or when rows with the same
- * id are one place (options.sameId, with an id column), else 'place-centric'. `options` are the
+ * id are one place (options.sameId, with an id column), or for a table of figures (figures.js), else 'place-centric'. `options` are the
  * run's options (`options.columns` a saved mapping, else the guess is used); a saved mapping alone is
  * still accepted (savedColumns).
  */
@@ -353,7 +354,7 @@ export async function genericProfile(input, options) {
   const { mapping } = await mappingOf(input, saved, sheetIn(input, options));
   const fields = Object.values(mapping);
   const sameId = saved !== options && options?.sameId === true && fields.includes('id');
-  return fields.includes('address') || sameId ? 'attestation-centric' : 'place-centric';
+  return fields.includes('address') || sameId || fields.some((f) => FIGURE_FIELDS.has(f)) ? 'attestation-centric' : 'place-centric';
 }
 
 /**

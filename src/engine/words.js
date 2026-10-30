@@ -1,5 +1,6 @@
 // What the tools say about a run, in the browser (src/app.js) and in the terminal (bin/), so that
 // both give the same messages in the same words.
+import { conservation } from './hermes/figures-text.js';
 export function fmtBytes(n) { return n > 1e9 ? (n / 1e9).toFixed(2) + ' GB' : n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : n > 1e3 ? Math.round(n / 1e3) + ' KB' : n + ' bytes'; }
 export function fmtTime(ms) { const s = Math.round(ms / 1000); return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`; }
 export const FORMAT_NAMES = { tables: 'PLATO spreadsheet tables', 'plato-json': 'a PLATO JSON document', 'plato-jsonl': 'PLATO JSON Lines', ntriples: 'RDF (N-Triples)', nquads: 'RDF (N-Quads)', turtle: 'RDF (Turtle)', lpf: 'a Linked Places Format FeatureCollection', 'lpf-seq': 'a Linked Places Format sequence', 'w3c-annotations': 'W3C Web Annotations (as Recogito exports them)' };
@@ -64,9 +65,11 @@ export function summary(report, action) {
   const onImages = (k) => (k === 'annotations' && c['regions on images'] ? `, ${(c['regions placed'] || 0).toLocaleString('en-GB')} of ${count(c['regions on images'], 'regions on images')} placed on a map` : '');
   const counted = ['annotations', 'place names', 'rows', 'features', 'places', 'attestations', 'identity relations', 'candidates', 'candidates given', 'triples', 'triples written', 'table rows', 'observations'].filter((k) => c[k]).map((k) => count(c[k], k) + regions(k) + onImages(k)).join(', ');
   const nErr = report.errors;
+  // A table of figures says what became of every cell of its columns of figures (hermes/figures-text.js).
+  const cells = conservation(c);
   return {
     problems: nErr ? `${nErr.toLocaleString('en-GB')} problem${nErr === 1 ? '' : 's'} found.` : 'No problems found.',
-    counted: counted ? `Read ${counted}.` : '',
+    counted: counted ? `Read ${counted}.${cells ? ' ' + cells : ''}` : cells || '',
   };
 }
 

@@ -19,6 +19,7 @@ import { validateTables, checkTableRules, checkAboutRules, aboutToGazetteer, gaz
 import { AnnotationReader, ANNOTATION_KINDS } from '../formats/annotations.js';
 import { teiSource } from './hermes/tei.js';
 import { genericSource, genericProfile } from './hermes/generic.js';
+import { figuresSource, readsFigures, codesToNTriples } from './hermes/figures.js';
 import { lineChunks, lines, jsonDocument, annotationItems, TABLE_SHEETS, DataError, sheetOf, zipEntries, zipEntryText } from './input.js';
 import { csvRecords, textChunks, papaRecords, papaRow } from '../formats/csv.js';
 import { Report, LOSS_TEXT, droppedText, FORMAT_WORDS, WORKBOOK_TEXT, dateTimeWords, CANDIDATE_CHECK_TEXT, candidatesNotGivenText } from './report.js';
@@ -611,6 +612,7 @@ export function sourceFor(input, env, rep, options = {}, action = 'check', hooks
     : input.format === 'tables' ? tablesSource(input, env, rep, options, action, hooks)
     : input.format === 'w3c-annotations' ? annotationSource(input, rep)
     : input.format === 'tei' ? teiSource(input, rep, options, hooks)
+    : (input.format === 'csv' || input.format === 'geojson') && readsFigures(options.columns) ? figuresSource(input, rep, options, DEFAULT_TABLE_BASE)
     : input.format === 'csv' || input.format === 'geojson' ? genericSource(input, rep, options, DEFAULT_TABLE_BASE)
     : ['ntriples', 'nquads', 'turtle'].includes(input.format) ? rdfSource(input.files[0], input.format, rep) : null;
 }
@@ -749,6 +751,8 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
 
   // A reader that read on past part of its input it could not read (a sheet of the tables) says so.
   let short = false;
+  // A table of figures (hermes/figures.js) also gives its code lists, last: written beside the output.
+  let figureCodes = null;
   if (!needsStore) {
     let header = null;
     for await (const ev of source) {
@@ -806,6 +810,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
         if (ev.type === 'triple') { store.add(ev.s, ev.p, ev.o); if (++batch % 50000 === 0) { store.endBatch(); store.beginBatch(); beat('loading', { triples: store.count }); } continue; }
         if (ev.type === 'late-header') { lateHeader(ev); continue; }
         if (ev.type === 'not-a-list') { notAList(ev); continue; }
+        if (ev.type === 'codes') { figureCodes = ev.value; continue; }
         // The header goes to the store's converter alone, which reports what it cannot use: given to
         // `dry` as well, each of its problems was reported twice. The candidate checks still read it.
         if (ev.type === 'header') { header = ev.value; w.header(header); figures.header(header); cands?.dataset(header); if (!V.header(header)) rep.error('schema', `The document header does not match the PLATO JSON Schema: ${ajvMessage(V.header.errors)}`); continue; }
@@ -945,6 +950,12 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   figures.finish();
   for (const c of membershipCycles(membership)) rep.error('membership-cycle', 'A route, itinerary or network is, through its members, a member of itself (MemberOf, followed round, comes back to where it started)', c);
   if (writer) await writer.close();
+  // The code lists of a table of figures, which PLATO JSON has no place for: N-Triples beside the output, for the targets that hold figures.
+  if (figureCodes && writer && action === 'convert' && ['plato-json', 'plato-jsonl', 'ntriples'].includes(target)) {
+    const sink = await textOutput(env, (options.name || input.files[0].name).replace(/\.(gz)$/i, '').replace(/\.[^.]+$/, '') + '.codes.nt', options);
+    sink.write(codesToNTriples(figureCodes));
+    outputs.push(await sink.close());
+  }
   progress({ phase: 'done', ...rep.counts, elapsedMs: Date.now() - t0 });
   // A writer whose output is knowingly short (identity relations it held back and lost), or a reader
   // that could not read part of its input (a sheet of the tables), ends the run incomplete, as a file

@@ -211,7 +211,7 @@ export function isMappingEntry(v) {
  * headed "columns" and "clusters" has an entry for each (isMappingEntry), never two objects that are not.
  */
 export function isMatchingEnvelope(x) {
-  return isObject(x) && isObject(x.columns) && isObject(x.clusters) && !(isMappingEntry(x.columns) && isMappingEntry(x.clusters));
+  return isObject(x) && isObject(x.columns) && isObject(x.clusters) && !isObject(x.table) && !(isMappingEntry(x.columns) && isMappingEntry(x.clusters));
 }
 /** A saved matching as the mapping and the confirmed groups it holds: { columns, clusters } (clusters undefined when none). */
 export function splitMatching(saved) {

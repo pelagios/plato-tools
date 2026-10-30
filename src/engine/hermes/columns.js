@@ -42,7 +42,27 @@ export const FIELDS = {
   end: { single: true, words: 'the latest date: a year (such as -0500 or 1066) or an ISO date' },
   within: { single: false, words: 'a region the place lies in (a parish, a county, a country…), with its level: 1 for the widest, then 2, 3…; given as {"field": "within", "level": 2}' },
   split: { single: false, words: 'several regions in one cell, narrowest first, such as "Rotherhithe, Surrey, England": split on a separator into levels, given as {"field": "split", "separator": ", ", "levels": [3, 2, 1], "firstIsName": true}' },
+  // A table of figures (a census, a return; figures.js): the roles that make a column a coordinate or a
+  // figure. Their entries carry what they need, and the table's own description goes beside the columns.
+  period: { single: true, words: 'the period the figures are for, as the table gives it: a year, an ISO date, or two years (1851-1861)' },
+  dimension: { single: false, words: 'a coordinate of the figures in the same row (occupation, sex, age group…), each different value a code of that dimension; given as {"field": "dimension", "dimension": "occupation"}' },
+  value: { single: false, words: 'a figure, one to a row, its coordinates the row\'s dimension columns; given as {"field": "value", "measure": "persons"}' },
+  figure: { single: false, words: 'a figure whose coordinates are the column\'s own (a table with the categories across): {"field": "figure", "coordinates": {"occupation": "Farmers"}, "measure": "persons", "totalOf": ["Farmers", "Miners"]}' },
 };
+/** The fields that make a table a table of figures. */
+export const FIGURE_FIELDS = new Set(['period', 'dimension', 'value', 'figure']);
+const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+/**
+ * A saved mapping with the table's description beside it, { columns: { column: field }, table: { … } }
+ * (figures.js; `table` may be left out), or null for any other thing. A mapping alone with columns
+ * headed "columns" and "table" has an entry for each (a string, or an object with a `field`), never
+ * two objects that are not.
+ */
+export function figuresSpec(saved) {
+  if (!isObject(saved) || !isObject(saved.columns) || (saved.table !== undefined && !isObject(saved.table))) return null;
+  const entry = (v) => typeof v === 'string' || (isObject(v) && typeof v.field === 'string');
+  return entry(saved.columns) && (saved.table === undefined || entry(saved.table)) ? null : saved;
+}
 export const OTHER = { note: 'kept in the notes, as "column: value"', skip: 'not carried over; the report says so' };
 
 /**
@@ -149,6 +169,7 @@ const FIELD_WORDS = {
   gridref: 'a grid reference',
   id: 'an identifier', address: "the place's web address", type: 'a type', language: 'a language', source: 'a source', date: 'a date', start: 'a start date', end: 'an end date',
   within: 'a region the place lies in', split: 'several regions in one cell',
+  period: 'the period of the figures', dimension: 'a coordinate of the figures', value: 'a figure', figure: 'a figure',
 };
 
 // ---- containing regions ("within") ------------------------------------------------------------------
@@ -303,7 +324,7 @@ export function guessColumns(headers, sampleRows = [], headerText = {}, { ownGeo
       ? `; ${have} the form of ${GAZETTEER_WORDS[s.gazetteer]} ids, which are made into web addresses with the pattern ${s.pattern} once you confirm that pattern, and are kept in the notes until then`
       : `; but ${have} the form of ${GAZETTEER_WORDS[s.gazetteer]} ids, so it can be read as the place's web address, made with the pattern ${s.pattern}, once you confirm that pattern`;
   }
-  return { mapping, patterns: Object.create(null), levels, splits: Object.create(null), suggested, reasons, gazetteer: gazetteerColumns(headers, headerText) };
+  return { mapping, patterns: Object.create(null), levels, splits: Object.create(null), figures: Object.create(null), suggested, reasons, gazetteer: gazetteerColumns(headers, headerText) };
 }
 // How many of a column's sampled values are web addresses: "49 of its 50 sampled values are web addresses".
 const webAddresses = (k, n) => (n === 1 ? 'its one sampled value is a web address' : k === n ? `all ${n} of its sampled values are web addresses` : `${k} of its ${n} sampled values ${k === 1 ? 'is a web address' : 'are web addresses'}`);
@@ -318,6 +339,9 @@ const webAddresses = (k, n) => (n === 1 ? 'its one sampled value is a web addres
  * guess's suggestions for the columns it keeps as notes, when it has no address column.
  */
 export function resolveColumns(headers, sampleRows, saved, headerText, options) {
+  // A table of figures: its columns are the mapping, and its description (`table`) goes back beside it.
+  const spec = figuresSpec(saved);
+  if (spec) return { ...resolveColumns(headers, sampleRows, spec.columns, headerText, options), table: spec.table };
   if (saved === undefined || saved === null) return { ...guessColumns(headers, sampleRows, headerText, options), problems: [] };
   const problems = [];
   if (typeof saved !== 'object' || Array.isArray(saved)) {
@@ -325,7 +349,7 @@ export function resolveColumns(headers, sampleRows, saved, headerText, options) 
     return { ...guessColumns(headers, sampleRows, headerText, options), problems };
   }
   const mapping = Object.create(null), patterns = Object.create(null), reasons = Object.create(null), taken = new Map();
-  const levels = Object.create(null), splits = Object.create(null), usedLevels = new Map(), unlevelled = [];
+  const levels = Object.create(null), splits = Object.create(null), figures = Object.create(null), usedLevels = new Map(), unlevelled = [];
   const values = (h) => (sampleRows || []).map((r) => cellText(r?.[h])).filter(Boolean);
   for (const h of headers) {
     if (!Object.hasOwn(saved, h)) {
@@ -360,10 +384,15 @@ export function resolveColumns(headers, sampleRows, saved, headerText, options) 
     const bad = misplaced.length ? `${misplaced.map((k) => `"${k}"`).join(' and ')} ${misplaced.length === 1 ? 'goes' : 'go'} with ${misplaced.includes('level') ? '"within"' : '"split"'}, not "${f}"`
       : f === 'within' && entry && Object.hasOwn(given, 'level') && !isLevel(given.level) ? `the level ${JSON.stringify(given.level)} is not a whole number of 1 or more (1 is the widest)`
         : f === 'split' ? splitProblem(given) : null;
-    if (bad) {
-      mapping[h] = 'note'; reasons[h] = `the mapping given cannot be used for it (${bad}), so it is kept in the notes`;
-      problems.push({ kind: 'generic-mapping', example: `${h}: ${bad}` });
+    const wrong = bad || (entry ? figureEntryProblem(f, given) : null);
+    if (wrong) {
+      mapping[h] = 'note'; reasons[h] = `the mapping given cannot be used for it (${wrong}), so it is kept in the notes`;
+      problems.push({ kind: 'generic-mapping', example: `${h}: ${wrong}` });
       continue;
+    }
+    if (entry && FIGURE_FIELDS.has(f)) {
+      const { dimension, measure, coordinates, totalOf } = given;
+      figures[h] = Object.assign(Object.create(null), dimension !== undefined ? { dimension } : {}, measure !== undefined ? { measure } : {}, coordinates !== undefined ? { coordinates: { ...coordinates } } : {}, totalOf !== undefined ? { totalOf: [...totalOf] } : {});
     }
     if (f === 'within' && entry && Object.hasOwn(given, 'level')) {
       // Two columns cannot be one level: the second is kept in the notes.
@@ -403,7 +432,31 @@ export function resolveColumns(headers, sampleRows, saved, headerText, options) 
     const guess = guessColumns(headers, sampleRows, headerText, options);
     for (const [h, s] of Object.entries(guess.suggested)) if (mapping[h] === 'note') suggested[h] = s;
   }
-  return { mapping, patterns, levels, splits, suggested, reasons, problems, gazetteer: gazetteerColumns(headers, headerText) };
+  return { mapping, patterns, levels, splits, figures, suggested, reasons, problems, gazetteer: gazetteerColumns(headers, headerText) };
+}
+
+// The keys a figure role takes in its entry, and what is wrong with an entry that has others or has them wrongly.
+const FIGURE_KEYS = { dimension: ['dimension'], value: ['measure'], figure: ['coordinates', 'measure', 'totalOf'] };
+const text = (v) => typeof v === 'string' && v.trim() !== '';
+/** What is wrong with the figure keys of an entry of a saved mapping ("dimension", "measure", "coordinates", "totalOf"), in words, or null. */
+function figureEntryProblem(f, given) {
+  const own = FIGURE_KEYS[f] || [];
+  for (const k of ['dimension', 'measure', 'coordinates', 'totalOf']) {
+    if (!Object.hasOwn(given, k)) continue;
+    if (!own.includes(k)) return `"${k}" goes with ${k === 'dimension' ? '"dimension"' : k === 'measure' ? '"value" or "figure"' : '"figure"'}, not "${f}"`;
+  }
+  if (Object.hasOwn(given, 'dimension') && !text(given.dimension)) return 'the dimension\'s name must be text, such as "occupation"';
+  if (Object.hasOwn(given, 'measure') && !text(given.measure)) return 'the measure\'s name must be text, such as "persons"';
+  if (Object.hasOwn(given, 'coordinates')) {
+    const c = given.coordinates;
+    if (!isObject(c) || !Object.keys(c).length) return 'its coordinates must be an object naming a code for each dimension, {"occupation": "Farmers"}';
+    for (const [d, v] of Object.entries(c)) if (!text(d) || !(text(v) || typeof v === 'number')) return `the coordinate ${JSON.stringify(d)} must be given a code as text, such as "Farmers"`;
+  }
+  if (Object.hasOwn(given, 'totalOf')) {
+    const t = given.totalOf;
+    if (!Array.isArray(t) || !t.length || !t.every(text) || new Set(t).size !== t.length) return 'totalOf must be a list of the columns this one is the printed total of, each once, such as ["Farmers", "Miners"]';
+  }
+  return null;
 }
 
 /** What is wrong with a "split" entry of a saved mapping, in words, or null when nothing is. */
@@ -430,10 +483,11 @@ export function levelChoices(level, used = []) {
  * --columns, or on the page): each column's field, or { field: 'address', pattern } for a column
  * whose addresses are made through a pattern.
  */
-export function mappingToSave(mapping, patterns = {}, levels = {}, splits = {}) {
+export function mappingToSave(mapping, patterns = {}, levels = {}, splits = {}, figures = {}) {
   const out = Object.create(null);
   for (const [h, f] of Object.entries(mapping)) {
     if (f === 'address' && Object.hasOwn(patterns, h)) out[h] = { field: f, pattern: patterns[h] };
+    else if (FIGURE_FIELDS.has(f) && Object.hasOwn(figures, h) && Object.keys(figures[h]).length) out[h] = { field: f, ...figures[h] };
     else if (f === 'within' && Object.hasOwn(levels, h)) out[h] = { field: f, level: levels[h] };
     // No levels (no sampled cell had a part): left out, as --columns refuses an empty list and guesses them again.
     else if (f === 'split' && Object.hasOwn(splits, h)) out[h] = { field: f, separator: splits[h].separator, ...(splits[h].levels.length ? { levels: [...splits[h].levels] } : {}), firstIsName: !!splits[h].firstIsName };

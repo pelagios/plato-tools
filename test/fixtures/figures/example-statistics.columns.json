@@ -1,0 +1,26 @@
+{
+  "columns": {
+    "County": "name",
+    "Year": "period",
+    "Occupation": { "field": "dimension", "dimension": "occupation" },
+    "Sex": { "field": "dimension", "dimension": "sex" },
+    "Persons": { "field": "value", "measure": "persons" }
+  },
+  "table": {
+    "title": "Occupations of persons aged 20 and over, 1851 (illustrative)",
+    "description": "Persons aged 20 and over, by occupation and sex, for each county. The figures here are invented.",
+    "source": "Census of Great Britain, 1851: occupations (illustrative)",
+    "dimensions": {
+      "occupation": { "total": "All" },
+      "sex": {
+        "iri": "http://purl.org/linked-data/sdmx/2009/dimension#sex",
+        "total": "T",
+        "codes": {
+          "T": "http://purl.org/linked-data/sdmx/2009/code#sex-T",
+          "M": "http://purl.org/linked-data/sdmx/2009/code#sex-M",
+          "F": "http://purl.org/linked-data/sdmx/2009/code#sex-F"
+        }
+      }
+    }
+  }
+}
