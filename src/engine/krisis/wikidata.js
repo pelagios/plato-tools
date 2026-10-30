@@ -343,7 +343,10 @@ const wordCount = (s) => (s.trim() ? s.trim().split(/\s+/).length : 0);
 /** The description prefilled (D7): "<kind> in <region>, <country>, attested <first>–<last>", from what is known. */
 export function describe({ kindWord, region, country, years }) {
   const where = [region, country].filter(Boolean).join(', ');
-  const when = years ? `attested ${years[0] === years[1] ? years[0] : `${years[0]}–${years[1]}`}` : '';
+  const [from, to] = years || [];
+  // A year before the common era is negative (-500 is 500 BCE, as PLATO has it): written as BCE, the era said at the end of a range, and at both ends when it crosses.
+  const span = from === to ? (from < 0 ? `${-from} BCE` : `${from}`) : from < 0 && to < 0 ? `${-from}–${-to} BCE` : from < 0 ? `${-from} BCE–${to} CE` : `${from}–${to}`;
+  const when = years ? `attested ${span}` : '';
   const head = `${kindWord || 'place'}${where ? ` in ${where}` : ''}`;
   return tidyDescription(when ? `${head}, ${when}` : head);
 }

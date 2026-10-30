@@ -114,6 +114,11 @@ test('countries by ISO code, both ways; language codes; decimals by precision; t
   assert.equal(describe({ kindWord: 'former populated place', region: 'Nottinghamshire', country: 'the United Kingdom', years: [1296, 1540] }), 'former populated place in Nottinghamshire, the United Kingdom, attested 1296–1540');
   assert.equal(describe({ kindWord: 'village', years: [1296, 1296] }), 'village, attested 1296');
   assert.equal(describe({ kindWord: null }), 'place');
+  // Years before the common era are negative (PLATO: -500 is 500 BCE) and are written as Wikidata's descriptions write them (W8).
+  assert.equal(describe({ kindWord: 'village', years: [-500, -200] }), 'village, attested 500–200 BCE');
+  assert.equal(describe({ kindWord: 'village', years: [-500, -500] }), 'village, attested 500 BCE');
+  assert.equal(describe({ kindWord: 'village', years: [-50, 70] }), 'village, attested 50 BCE–70 CE', 'across the era the two ends say which');
+  assert.equal(describe({ kindWord: 'village', years: [1296, 1540] }), 'village, attested 1296–1540', 'presence beside it: the common era is written as before');
   assert.equal(tidyDescription('  Village in  Kent. '), 'village in Kent');
   assert.equal(tidyDescription('UK village'), 'UK village', 'a capital that is an initialism is kept');
 });
