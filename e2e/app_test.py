@@ -8460,6 +8460,11 @@ def chora_checks(pw, url, tmp):
                 and 'OpenStreetMap' in text and 'Keep my working data between visits' in text and 'Remember my token in this browser' in text
                 and page.query_selector('header .privacy') is None), {'opened': opened, 'closed': closed}
     attempt('Chora: the Permissions panel opens from the header with the focus on its heading, Esc closes it and the focus returns; no privacy banner', panel_chora)
+    def panel_llm():
+        fresh(); opened, closed, text = panel_cycle(page)
+        return ('Language-model services' in text and 'learns every word of the text you send it, and which key sent it' in text and 'Anthropic' in text
+                and 'Language-model keys' in text and 'No key is held.' in text and 'never saved' not in text), {'opened': opened, 'text': text[:400]}
+    attempt('Chora: the Permissions panel lists the language-model services with what they learn (every word of the text, which key sent it), Anthropic undecided, and says no key is held', panel_llm)
     def forged():
         INJECT = 'https://evil.example.org; script-src *'
         fresh({'basemap:https://forged.example.org': {'state': 'allowed', 'at': '2026-09-01T10:00:00Z', 'added': True}, f'basemap:{INJECT}': {'state': 'allowed'}, 'basemap:nosuch': {'state': 'allowed'}})
