@@ -28,7 +28,7 @@ const { nodeResources, gatherInputs, openFiles, isSystemError, NodeHost } = awai
 const { toolsCommit } = await import('../src/node/build-info.js');
 const { fmtBytes, fmtTime, formatName, progressText, summary, groups, draftNote, explainedLines, gazetteerWarnings, LOOKUP_WORDS } = await import('../src/engine/words.js');
 const { mappingOf, withSheet } = await import('../src/engine/hermes/generic.js');
-const { FIELDS, mappingToSave } = await import('../src/engine/hermes/columns.js');
+const { FIELDS, FIGURE_FIELDS, mappingToSave } = await import('../src/engine/hermes/columns.js');
 const { teiReadingRefusal } = await import('../src/engine/hermes/tei.js');
 const { preview, previewRefusal, previewLine, PREVIEW_LIMIT } = await import('../src/engine/hermes/preview.js');
 const { PREVIEW_WORDS } = await import('../src/engine/words.js');
@@ -176,6 +176,12 @@ Options:
                     used until it is given here. A region the place lies in (a parish, a
                     county, a country…) is {"field": "within", "level": N}, 1 the widest:
                     such columns are guessed from their headings, widest first.
+                    A table of figures (a census, a return) is described the same way, with
+                    the roles period, dimension, value and figure for its columns and the
+                    table's own description beside them: {"columns": {…}, "table": {"title":
+                    "…", "source": "…", "dimensions": {"occupation": {"total": "All"}}}}.
+                    Convert it to N-Triples with --cube for a Data Cube; the code lists are
+                    written to a second file, NAME.codes.nt.
   --split COLUMN=SEP[:LEVELS]
                     check, convert, preview: a table of places' column of several regions in
                     one cell, narrowest first ("Rotherhithe, Surrey, England"), split on SEP
@@ -1016,11 +1022,12 @@ async function runOne(item, action, o, resources, host, live, seen) {
       // In the file's order: an object would put a column whose heading is a number first. A column
       // made into web addresses through a pattern has it beside its field; a region its level; a
       // split its separator, levels and firstIsName.
-      const saved = mappingToSave(m.mapping, m.patterns, m.levels, m.splits);
+      const saved = mappingToSave(m.mapping, m.patterns, m.levels, m.splits, m.figures);
       r.columns = m.headers.map((column) => ({ column, field: m.mapping[column], ...(typeof saved[column] === 'object' ? (({ field, ...rest }) => rest)(saved[column]) : {}), reason: m.reasons[column] }));
       r.columnWarnings = gazetteerWarnings(m.mapping, m.gazetteer, { cli: true, suggested: m.suggested, patterns: m.patterns });
       const fields = Object.values(m.mapping);
-      r.profile = fields.includes('address') || (reading.sameId && fields.includes('id')) ? 'attestation-centric' : 'place-centric';
+      r.profile = fields.includes('address') || (reading.sameId && fields.includes('id')) || fields.some((f) => FIGURE_FIELDS.has(f)) ? 'attestation-centric' : 'place-centric';
+      if (m.table) r.table = m.table;
     } catch (e) { if (e?.name !== 'DataError') throw e; /* the run reports what stops the reader */ }
   }
   const progress = live ? (p) => process.stderr.write(`\r\x1b[K${item.label}: ${progressText(p)}`) : undefined;
@@ -1067,11 +1074,12 @@ function describe(r, action, brief) {
 /** How a table of places' columns were read: one line each, with why, then the whole as JSON for --columns. */
 function columnLines(r) {
   const w = Math.min(24, Math.max(...r.columns.map((c) => c.column.length)));
+  const asMapping = `{${r.columns.map((c) => { const { column, field, reason, ...rest } = c; return `${JSON.stringify(column)}:${JSON.stringify(Object.keys(rest).length ? { field, ...rest } : field)}`; }).join(',')}}`;
   return [
     `  Columns${r.sheet ? ` of the sheet ${JSON.stringify(r.sheet)}` : ''} read as (to change this, save the JSON below to a file, edit it, and give it with --columns FILE${r.sheets?.length > 1 ? '; another sheet with --sheet NAME' : ''}):`,
     ...r.columns.map((c) => `    ${c.column.padEnd(w)}  ${c.field.padEnd(16)}  ${c.reason || ''}`),
     // The mapping as --columns takes it, written in the file's order, a pattern column in its object form.
-    `    {${r.columns.map((c) => { const { column, field, reason, ...rest } = c; return `${JSON.stringify(column)}:${JSON.stringify(Object.keys(rest).length ? { field, ...rest } : field)}`; }).join(',')}}`,
+    `    ${r.table ? `{"columns":${asMapping},"table":${JSON.stringify(r.table)}}` : asMapping}`,   // a table of figures with its description
     ...(r.columnWarnings || []).map((w) => `  Note: ${w}`),
   ];
 }
