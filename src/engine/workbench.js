@@ -17,7 +17,7 @@
 // refusal is a WorkbenchError, whose `kind` says what the page does next and whose message says why in
 // words. Nothing here retries on its own but a 429, once, through withPause().
 import { Sha256 } from './krisis/digest.js';
-import { writeProject, FORMAT, VERSION, MINOR } from './methodos/project.js';
+import { writeProject, withheldTexts, FORMAT, VERSION, MINOR } from './methodos/project.js';
 import { fmtBytes } from './words.js';
 
 /** Where the Workbench is: every path below is under it. */
@@ -113,6 +113,8 @@ export const titleOf = (record) => String(record?.name || 'PLATO tools workflow'
  * `own(ref)` says whether a file is the user's own. `refuse` is the secrets no part may hold (writeProject).
  */
 export async function fitProject({ record, files = [], left = [], review = null, tools, refuse = [], now, own = () => false, bodyOf = (snapshot) => ({ snapshot }), max = BODY_MAX }) {
+  // A work file of a text is never in a project (it keeps the text): not left out here to make room, either.
+  ({ files, left } = withheldTexts(files, left));
   const order = [...files.filter((f) => own(f.ref)), ...files.filter((f) => !own(f.ref)).sort((a, b) => b.ref.size - a.ref.size)];
   const out = [];
   const workflow = { id: record.id, name: record.name, created: record.created };

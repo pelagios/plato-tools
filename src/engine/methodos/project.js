@@ -25,7 +25,12 @@
 //                                   project saved before opens, and written if a caller gives one
 //   file      files/<sha256>        a file the record names: the user's own (`own`: true) or one a step
 //                                   made; `name` is the record's name for it
-//
+// A Hermes work file of a text (hand-off type work.hermes-text) is never a part: it keeps the text itself,
+// which may be someone else's and is not ours to hand on, so it is listed in `left` ('left-out') and not
+// written, to a file as to WHG; and a review that is such a file with its text in it is refused. The copy
+// for sharing (src/engine/hermes/text/work.js, withoutText) leaves the text out and quotes the passages
+// around each name with the text's rights statement: it may be the review.
+
 // Versions. `version` is the major: a reader refuses a greater one. `minor` (default 0) is what a
 // writer may add without breaking a reader of the same major: a reader opens a greater minor, says so,
 // and ignores the keys it does not know; at its own minor or below, a key it does not know is damage.
@@ -88,6 +93,20 @@ export function stepAt(record) {
   if (!record || record.status === 'completed') return null;
   if (record.current) return record.steps.find((s) => s.id === record.current) || null;
   return record.steps.find((s) => ['stopped', 'failed', 'cancelled'].includes(s.state)) || record.steps.find((s) => s.state === 'pending') || null;
+}
+/**
+ * The files and the left-out list of a project, with the Hermes work files of a text moved from the one to
+ * the other (see the top of this file): { files, left }. Used by writeProject, and by fitProject first, so that
+ * it does not leave other files out to make room for a file that would not be written.
+ */
+export function withheldTexts(files = [], left = []) {
+  const text = (x) => x?.ref?.type === 'work.hermes-text';
+  return { files: files.filter((x) => !text(x)), left: [...left, ...files.filter(text).map((x) => ({ ref: x.ref, why: 'left-out' }))] };
+}
+/** Whether `text` is a Hermes work file of a text that has the text itself in it (work.js, `text.content`). */
+function holdsText(text) {
+  if (!text.includes('"hermes_text"')) return false;
+  try { const w = JSON.parse(text); return isObject(w) && Object.hasOwn(w, 'hermes_text') && isObject(w.text) && typeof w.text.content === 'string'; } catch { return false; }
 }
 /** The project's file name: the record's name, made safe, and .platoproj. */
 export function projectName(record) {
@@ -209,8 +228,9 @@ function handbackOf(hb, id) {
  * included, is refused, and the project is not saved (the caller aborts what `write` was given). A part
  * or a project over 4 GiB is refused, as a zip without ZIP64 cannot hold it. Returns { manifest, size }.
  */
-export async function writeProject({ record, files = [], left = [], review = null, handback = null, tools, now = new Date(), refuse = [] }, write) {
+export async function writeProject({ record, files: given = [], left: leftGiven = [], review = null, handback = null, tools, now = new Date(), refuse = [] }, write) {
   if (!record || !Array.isArray(record.steps)) no('There is no workflow to save.');
+  const { files, left } = withheldTexts(given, leftGiven);
   const named = refsIn(record), own = new Set(ownIn(record).map((r) => r.sha256));
   const holds = (what) => no(`${what} holds your WHG token or another key, which a project never does, so the project was not saved.`);
   // The JSON parts: each searched as text before it is encoded, so that it is not held again to be searched.
@@ -221,6 +241,7 @@ export async function writeProject({ record, files = [], left = [], review = nul
   if (review) {
     if (!nameOk(review.name)) no(`The review open is called "${review.name}", which is not a name a project can keep.`);
     if (review.text.length * 3 > LIMITS.review && enc.encode(review.text).length > LIMITS.review) no(`The review open (${review.name}) is over ${MB(LIMITS.review)}, more than a project holds: save it on its own ("Save the review") and leave the project without it.`);
+    if (holdsText(review.text)) no(`The review open (${review.name}) holds the text itself, which a project never does: it may be someone else's. Save the review without its text (the copy for sharing quotes the passages around each name, with the text's rights statement), and the project again.`);
     if (secretSearch(refuse).text(review.text)) holds(`The review ${review.name}`);
     small.push({ path: REVIEW, role: 'review', name: review.name, bytes: enc.encode(review.text) });
   }
