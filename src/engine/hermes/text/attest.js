@@ -15,7 +15,7 @@
 //   notes        the model, provider, prompt and date of the suggestion (words.js, hermesTextNote)
 // No @id: whatever saves it mints one.
 import { PLATO } from '../../../lib/context.js';
-import { checkReviewer } from '../../krisis/work.js';
+import { checkReviewer, isIri } from '../../krisis/work.js';
 import { hermesTextNote } from '../../words.js';
 import { sliceCodePoints } from './chunk.js';
 import { checkText, suggestions } from './work.js';
@@ -25,7 +25,9 @@ const AC = 'https://w3id.org/plato/schemas/attestation-centric.schema.json';
 
 /** The text, as a PLATO source. */
 export function sourceOf(work) {
-  return { ...(work.source.uri ? { '@id': work.source.uri } : {}), title: work.source.title, authorityType: 'source' };
+  // The rights statement is a licence, in PLATO's sense, only when it is a web address (source.licence is one).
+  const licence = work.source.rights && /^https?:\/\/\S+$/i.test(work.source.rights) && isIri(work.source.rights) ? work.source.rights : null;
+  return { ...(work.source.uri ? { '@id': work.source.uri } : {}), title: work.source.title, authorityType: 'source', ...(licence ? { licence } : {}) };
 }
 
 /** The locator of a span. */
@@ -63,7 +65,7 @@ export function attestationsFrom(work, text, { reviewer = work.review.reviewer }
       created: d.decided_at,
       notes: hermesTextNote({
         model: s.model_returned || s.model, provider: s.provider, prompt: s.prompt_version, date: s.generated_at.slice(0, 10),
-        kindGuess: d.type ? null : s.kind, adjustedFrom: d.start !== undefined ? [s.start, s.end] : null,
+        kindGuess: d.type || s.added ? null : s.kind, adjustedFrom: d.start !== undefined ? [s.start, s.end] : null, addedBy: !!s.added,
       }),
     };
     if (d.type) a.types = [{ label: d.type }];

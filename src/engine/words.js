@@ -466,16 +466,26 @@ export function krisisNote(kind, algorithm) {
 }
 /**
  * The note an attestation made from a language model's suggestion carries (src/engine/hermes/text/
- * attest.js): who suggested it, with which prompt and when, and that a person confirmed and linked it;
- * the model's guess at the kind of place when the reviewer did not confirm one; and the span the model
- * gave when the reviewer adjusted it.
+ * attest.js and dataset.js): who suggested it, with which prompt and when, and that a person confirmed
+ * it (and linked it to a place, when `linked`); the model's guess at the kind of place when the reviewer
+ * did not confirm one; and the span the model gave when the reviewer adjusted it. A name the reviewer
+ * added (`addedBy`) says that, and that no model suggested it.
  */
-export function hermesTextNote({ model, provider, prompt, date, kindGuess, adjustedFrom }) {
-  let n = `Suggested by ${model} (${provider}), prompt ${prompt}, ${date}; confirmed and linked by the contributor.`;
+export function hermesTextNote({ model, provider, prompt, date, kindGuess, adjustedFrom, addedBy = false, linked = true }) {
+  let n = addedBy
+    ? `Added by the contributor, who marked it in the text: no model suggested it (${date})${linked ? '; linked by the contributor' : ''}.`
+    : `Suggested by ${model} (${provider}), prompt ${prompt}, ${date}; confirmed ${linked ? 'and linked ' : ''}by the contributor.`;
   if (kindGuess) n += ` The model's guess at the kind of place, not confirmed: ${kindGuess}.`;
   if (adjustedFrom) n += ` The contributor adjusted the span from characters ${adjustedFrom[0]} to ${adjustedFrom[1]}.`;
   return n;
 }
+/** Words of a work file of place names in a text (src/engine/hermes/text/work.js, dataset.js). */
+export const TEXT_WORDS = {
+  /** The rights statement of a copy of a work file for sharing, when none was given with the text. */
+  noRights: "No statement of the text's rights was given when this file was made: the quotations in it are the contributor's to answer for.",
+  /** What a copy for sharing holds in place of the text. */
+  quotedContext: "The text itself is not in this file. The passages quoted around each name are short, and are under the text's own rights, stated with them.",
+};
 /** What finishing a review with the dataset output says (src/engine/krisis/apply.js), and matching's own warnings. */
 export const KRISIS_TEXT = {
   /** A list of qualifiers asked for that there is not (src/engine/krisis/qualifiers.js). */

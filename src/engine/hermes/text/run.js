@@ -15,7 +15,7 @@
 //   given) stops the run: the next chunk would be refused alike. The error is passed on as it is.
 import { chunkText, halve, dedupeMentions } from './chunk.js';
 import { readReply, addCounts } from './validate.js';
-import { checkText, isDone, addResult } from './work.js';
+import { checkText, isDone, addResult, REVIEWER_PROVIDER } from './work.js';
 import { LlmError } from './providers/request.js';
 import { forModel } from './normalise.js';
 
@@ -30,6 +30,7 @@ export const MIN_HALF = 500;
 export async function runExtraction({ work, text, provider, model, signal, onProgress, maxChunks, now = () => new Date().toISOString() }) {
   checkText(work, text);
   if (typeof model !== 'string' || !model) throw new TypeError('runExtraction: choose a model; there is no default.');
+  if (provider.id === REVIEWER_PROVIDER) throw new TypeError('runExtraction: "reviewer" is the name of the results a person adds by hand, not of a provider.');
   const chunks = chunkText(text, work.chunking);
   const pending = chunks.filter((c) => !isDone(work, c, provider.id, model));
   const out = { done: 0, skipped: chunks.length - pending.length, failed: [], cancelled: false, stopped: null, usage: { input: 0, output: 0 }, counts: {}, of: chunks.length };

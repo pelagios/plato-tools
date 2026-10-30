@@ -6,7 +6,8 @@ export { PROMPT, PROMPT_VERSION, PROMPT_SHA256, SCHEMA_VERSION, OUTPUT_SCHEMA, K
 export { readReply, addCounts, TEXT_KINDS, MAX_REPLY, MAX_MENTIONS } from './validate.js';
 export { redact, clip } from './redact.js';
 export { PRICES, PRICE_STALE_DAYS, CHARS_PER_TOKEN, SCRIPT_RATIOS, tokensOf, calibrate, CONFIRM_CHUNKS, CONFIRM_USD, estimateChunk, estimateRun, estimateWords, THINKING_ALLOWANCE, priceOf, costOf, needsSecondConfirmation } from './prices.js';
-export { WORK_VERSION, TYPE_KINDS, newWork, readWork, serialiseWork, checkText, isDone, addResult, suggestions, setReviewer, decide, reviewProgress } from './work.js';
+export { WORK_VERSION, TYPE_KINDS, REVIEWER_PROVIDER, CONTEXT_CHARACTERS, newWork, readWork, serialiseWork, checkText, isDone, addResult, suggestions, setReviewer, addMention, decide, reviewProgress, textOf, keepText, withoutText } from './work.js';
+export { hermesTextNote, TEXT_WORDS } from '../../words.js';
 export { attestationsFrom, attestationsDocument, sourceOf, locatorOf, unlinkedCsv } from './attest.js';
 export { normalised, forModel } from './normalise.js';
 export { decodeText } from './decode.js';
