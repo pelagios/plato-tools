@@ -117,7 +117,7 @@ GitHub Actions workflow, every time the dataset changes; it is never committed i
 
 - \`index.html\`, the dataset's home page; \`index.jsonld\`, its description for machines.
 - \`place/<id>/index.html\` and \`place/<id>.jsonld\` for each place${opts.turtle ? ', and `place/<id>.ttl`' : ''}; the same under \`source/\` for each source.
-- \`download/\`: the whole dataset as PLATO JSON Lines, N-Triples and spreadsheet tables.
+- \`download/\`: the whole dataset as PLATO JSON Lines, N-Triples and spreadsheet tables, and, where it holds statistical figures, the N-Triples again as RDF Data Cube.
 - \`404.html\`, which GitHub Pages shows for any address it has no file for.
 ${opts.leftOut ? `
 This site leaves out ${opts.leftOut.toLocaleString('en-GB')} places (it holds those listed in \`${opts.onlyPath || 'the --only file'}\`),

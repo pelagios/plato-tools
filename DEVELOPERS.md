@@ -298,6 +298,15 @@ gives the design and the two commands.
   attestation's place) and `sdmx-dimension:refPeriod` (an `xsd:gYear` or `xsd:date` when the date
   is one year or one day), declared in each table's structure. Reading an export back leaves out
   only these derived statements.
+- **Figures on Agora's site** (`site/html.js` `figure()`; `test/agora-figures.test.js`). A place's page never
+  prints a figure as `label: value`, which would say that the county has the number: it shows the value with its
+  coordinates (`dimensions`) under its table's title (the document's `dataSets`), the universe as a link, the
+  attributes, and, for a figure with no coordinates, says so and that it is not a statement about the place; one
+  that lacks a dimension its table's structure lists says which. A figure whose `@id` is a fragment of its place's
+  address is an element of the page with that id, as an attestation is, so its address leads to it. The site's
+  downloads add the Data Cube (`download/<name>-cube.nt.gz`, the N-Triples made with `--cube`) only for a dataset
+  that holds figures. Not done: pages for tables and code lists (the
+  addresses of a table and of its concepts are not ones the site serves).
 - **`datacube`** (`src/lib/datacube.js`) checks integrity constraints IC-1, IC-2, IC-11, IC-12 and
   IC-14, IC-12 by grouping rather than by pairs, and says beside each verdict how many
   things it evaluated; a constraint with nothing to evaluate is not tested, never passed. IC-14
