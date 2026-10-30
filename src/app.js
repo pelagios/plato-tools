@@ -176,7 +176,7 @@ async function storageCheck() {
   } catch { w.hidden = true; }
 }
 
-const buttons = (disabled) => { for (const id of ['check', 'check-candidates', 'convert', 'compare', 'revise', 'publish', 'match', 'resume', 'finish', 'preview', 'regions-start']) $(id).disabled = disabled; if (!disabled) gateOnColumns(); };
+const buttons = (disabled) => { for (const id of ['check', 'check-candidates', 'datacube', 'convert', 'compare', 'revise', 'publish', 'match', 'resume', 'finish', 'preview', 'regions-start']) $(id).disabled = disabled; if (!disabled) gateOnColumns(); };
 // Krisis: a table of places is matched, and its review finished, by the matching of its columns: until
 // the worker's answer about them arrives, Match and Finish wait, or the table would be read by the guess.
 const columnsPending = () => isTable(input) && !columns && !state.columns?.error;
@@ -198,7 +198,7 @@ function start(action, earlier) {
   // Krisis: a review on the page is put away (and its keys with it) while anything but its own finishing runs.
   if (action !== 'apply') { $('review').hidden = true; lockColumns(); }
   // Methodos: the run is told, as the operation a workflow's step names, with the files it runs on.
-  runOp = action === 'publish' ? `publish.${$('part').value}` : action;
+  runOp = action === 'publish' ? `publish.${$('part').value}` : action === 'datacube' ? 'check.cube' : action;
   // A match, with the other dataset (a workflow may choose it at this step); a Finish, with what it makes ('dataset' or 'attestations').
   // Mneme's revision and the version check: the files chosen are the new (later) version, and `earlier` the previous release, which
   // a workflow chooses at the revise step and takes again at its compare and its publishing (the "Previous release" under Options).
@@ -869,6 +869,7 @@ drop.ondrop = (e) => {
   choose(list); keepChoice(list);
 };
 $('check').onclick = () => start('check');
+$('datacube').onclick = () => start('datacube');   // Arithmos: the Data Cube's constraints and the figures' checks (src/engine/cubecheck.js)
 $('convert').onclick = () => start('convert');
 // Comparing asks for one more file, the earlier version, and starts once it is chosen.
 $('compare').onclick = () => $('earlier').click();
@@ -911,7 +912,7 @@ const GUIDE = 'https://pelagios.org/place-attestation-ontology/guide/tools.html'
 const TOOLS = {
   check: { name: 'Elenchos', what: 'the check', heading: 'Check it', guide: ['checking', 'What it checks'] },
   convert: { name: 'Metaphrasis', what: 'conversion', heading: 'Convert it', guide: ['converting', 'What each format keeps'] },
-  figures: { name: 'Arithmos', what: 'statistical figures, converted to N-Triples with the RDF Data Cube option (ticked, under Options)', heading: 'Convert its figures to RDF Data Cube', guide: ['converting', 'Converting, in the guide'] },
+  figures: { name: 'Arithmos', what: 'statistical figures, converted to N-Triples with the RDF Data Cube option (ticked, under Options), and the Data Cube checked', heading: 'Convert its figures to RDF Data Cube, or check its Data Cube', guide: ['converting', 'Converting, in the guide'] },
   versions: { name: 'Mneme', what: 'the version check, and revising a new version against the earlier one: choose the new version here, and you will be asked for the earlier one', heading: 'Compare it with the earlier version, or revise it against the earlier one', guide: ['comparing-two-versions', 'What it reports'] },
   publish: { name: 'Agora', what: 'publishing', heading: 'Prepare it for publishing', guide: ['publishing-your-dataset', 'What publishing takes'] },
   match: { name: 'Krisis', what: 'match review', heading: 'Match it with another dataset', guide: ['match-review', 'How to review matches'] },
@@ -937,10 +938,14 @@ function chooseTool(key) {
   hermesChosen = key === 'read';
   if (was === 'figures' && tool !== 'figures') leaveFigures();
   // Arithmos with a file that is already N-Triples: there is nothing to convert it to that carries the
-  // Data Cube, so the step offers the check instead, and says why.
+  // Data Cube, so the step offers the check instead, and says why; and "Check the Data Cube" (shown for Arithmos
+  // anyway, and marked cube-check so that it is shown here, where the other parts are for Elenchos's check).
   const asCheck = tool === 'figures' && input?.format === 'ntriples';
   const shownFor = asCheck ? 'check' : tool;
-  for (const el of document.querySelectorAll('#action [data-tools]')) el.hidden = !!tool && !el.dataset.tools.split(' ').includes(shownFor);
+  for (const el of document.querySelectorAll('#action [data-tools]')) {
+    const for_ = el.dataset.tools.split(' ');
+    el.hidden = !!tool && !for_.includes(shownFor) && !(asCheck && for_.includes('cube-check'));
+  }
   // Convert stands alone when Check is not shown, and is then the step's main button.
   $('convert').classList.toggle('primary', shownFor === 'convert' || shownFor === 'figures');
   $('action-what').textContent = asCheck ? 'Check it: it is already N-Triples' : tool ? TOOLS[tool].heading : EVERY_ACTION;

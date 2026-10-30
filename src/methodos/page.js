@@ -22,7 +22,7 @@ import { stateOf, fromSnapshot } from './whg.js';
 
 // The input of each automatic operation that the page's run takes from the files chosen in step 1: a
 // run is the step's only if those files are the ones the step takes (by size and SHA-256).
-const MAIN = { check: 'files', convert: 'files', compare: 'later', revise: 'later', 'publish.report': 'dataset', 'publish.mint': 'dataset', 'publish.site': 'dataset',
+const MAIN = { check: 'files', 'check.cube': 'dataset', convert: 'files', compare: 'later', revise: 'later', 'publish.report': 'dataset', 'publish.mint': 'dataset', 'publish.site': 'dataset',
   'publish.w3id': 'dataset', match: 'subjects', lookup: 'subjects', apply: 'subjects', 'relate.containment': 'subjects' };
 // The page's run that does a step whose operation is not a run of its own: recording the decisions with
 // the region each place is in is Krisis's Finish (its 'apply' run), on a review whose candidates are exported.
@@ -42,7 +42,7 @@ function problemOf(r) {
 // Each operation's tool on this page: the key of #tool=<key> (src/app.js, TOOLS), or null where the
 // step is done elsewhere (Hermes's columns, at the drop zone; Chora, on the map, at #chora).
 const PAGE_TOOL = {
-  check: 'check', convert: 'convert', compare: 'versions', revise: 'versions', match: 'match', lookup: 'match', 'lookup.levels': 'match', review: 'match', apply: 'match', 'wikidata.items': 'match',
+  check: 'check', 'check.cube': 'figures', convert: 'convert', compare: 'versions', revise: 'versions', match: 'match', lookup: 'match', 'lookup.levels': 'match', review: 'match', apply: 'match', 'wikidata.items': 'match',
   'relate.containment': 'match', 'publish.report': 'publish', 'publish.mint': 'publish', 'publish.site': 'publish', 'publish.w3id': 'publish',
 };
 // The tools that the interview names when no workflow fits: their names, and where each is chosen.

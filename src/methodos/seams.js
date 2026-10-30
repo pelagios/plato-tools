@@ -6,7 +6,7 @@ import { fmtBytes } from '../engine/words.js';
 
 // The input of each automatic operation that the page's run takes from the files chosen in step 1 (as
 // page.js's MAIN, which judges whether a run is the step's): the file to choose again for that step.
-const MAIN = { check: 'files', convert: 'files', compare: 'later', 'publish.report': 'dataset', 'publish.mint': 'dataset', 'publish.site': 'dataset',
+const MAIN = { check: 'files', 'check.cube': 'dataset', convert: 'files', compare: 'later', 'publish.report': 'dataset', 'publish.mint': 'dataset', 'publish.site': 'dataset',
   'publish.w3id': 'dataset', match: 'subjects', lookup: 'subjects', apply: 'subjects', 'relate.containment': 'subjects' };
 // And of the interactive steps whose work is on a file shown in step 1: the table whose columns are
 // matched, and the dataset drawn on in Chora (chosen again, so that Chora shows it).

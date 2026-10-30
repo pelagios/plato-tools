@@ -426,7 +426,7 @@ written now; the rest wait on a branch.
 | **Publish a dataset** | Elenchos → Agora report → Agora mint → Agora site → Agora w3id | Nothing: Agora's card already lists it "in order" |
 | **Release a new version** | Elenchos → Mneme against the previous release → Agora mint with `--previous` → site | Nothing |
 | **Match two datasets** | Hermes columns → Elenchos → Metaphrasis (your table), or Elenchos (your PLATO dataset) → Krisis match (the other dataset chosen there) → Elenchos on the other → review → apply → Elenchos → Mneme (when added to your dataset) → write out → Publish (if publishing) | Built (14 October 2026): section 6.2 |
-| **Census figures as a Data Cube** | Hermes columns → Arithmos (convert, cube) → `datacube` check → Publish | Nothing |
+| **Census figures as a Data Cube** | Hermes columns → Arithmos (convert, cube) → `datacube` check → Publish | A reader that turns a census table into figures (Hermes's columns have no coordinate, measure or total, so it cannot be a recipe yet); the check is now the operation `check.cube`, but Agora still prints a figure without its coordinates |
 | **Places from an edition (TEI)** | Elenchos → Hermes TEI → Krisis lookup → review → apply → Chora (if drawing) → Elenchos → Mneme → write out → Publish (if publishing) | Built (phase 5, 12 October 2026): section 6.1 |
 | **Places from Recogito** | Elenchos → Hermes annotations (+ georeferenced regions) → Krisis lookup → review → apply → Chora (if drawing) → Elenchos → Mneme → write out → Publish (if publishing) | Built (phase 5, 12 October 2026): section 6.1 |
 | **Places from a text** | Hermes text (a hosted model, or later an in-browser one) → review → Krisis → Chora → Publish | `llm-extract` deferred |

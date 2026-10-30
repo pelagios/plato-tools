@@ -307,14 +307,48 @@ gives the design and the two commands.
   downloads add the Data Cube (`download/<name>-cube.nt.gz`, the N-Triples made with `--cube`) only for a dataset
   that holds figures. Not done: pages for tables and code lists (the
   addresses of a table and of its concepts are not ones the site serves).
+- **Elenchos on a table's figures** (`src/engine/figurecheck.js`, given each record's attestations as the
+  run reads them, and reporting when every figure is known) finds what PLATO's schema allows and the cube
+  cannot bear. Each is an error, which stops a workflow (Stephen's decision of 30 October 2026, Q9):
+  `figure-table-undeclared` (a `dataSet` the header's `dataSets` does not describe), `figure-coordinate-undeclared`
+  (a key of `dimensions` that the table's structure does not list, unless the structure is only an address, or
+  the key is `refArea` or `refPeriod`, which the cube export declares), `figure-universe-missing`,
+  `figure-universe-other-table` and `figure-universe-cycle` (a universe that is no figure of the document, is a
+  figure of another table, or comes round to the figure itself), and `figure-value-not-number` (a value that is
+  a string, a boolean or an object; a printed dash has no value and is not asked for one). A universe is never
+  inferred: only the source's own is checked.
 - **`datacube`** (`src/lib/datacube.js`) checks integrity constraints IC-1, IC-2, IC-11, IC-12 and
   IC-14, IC-12 by grouping rather than by pairs, and says beside each verdict how many
   things it evaluated; a constraint with nothing to evaluate is not tested, never passed. IC-14
   exempts only a declared absence, a figure with an `obsStatus` and no value, since `obsStatus` is
   a general attribute. On PLATO's example and six planted defects it gives the verdicts of the
-  specification's own SPARQL queries, run after its normalisation. The file is read as a stream,
+  specification's own SPARQL queries, run after its normalisation. With a code file (`--codes FILE`; the
+  N-Triples of the code lists, `qb:codeList` on a coordinate and its codes `skos:inScheme` the list) it adds
+  IC-19, every value of such a coordinate being in its list; without one there is no IC-19 line. Then the
+  figures' own checks, named P-1 to P-4 so that they are not taken for the W3C's numbering: **P-1** every
+  `plato:universe` is a figure of the same table and not the figure itself; **P-2** a universe's parts sum to
+  it; **P-3** every coordinate and measure a figure has is declared in its table's structure (SDMX's own
+  attributes, `obsStatus`, are not asked for: PLATO's example does not declare it); **P-4** every measure is
+  a number. A failure of any but P-2 stops a workflow (the result's `blocks`); **P-2 only warns**, since a sum
+  that fails is sometimes the source's own arithmetic (PLATO's Issue #14 found it in Vision of Ireland's). Its parts are
+  the figures that name a universe and differ from it in one coordinate only; a lone part ("of which": PLATO's
+  example lists one occupation beside its 1000), a part with no number (a dash) and parts that differ in two
+  coordinates are not summed, and are counted as `skipped` beside the verdict, so the number it evaluated
+  travels with it. P-1 to P-4 over nothing (a table with no totals) are shown as not tested, and, unlike the
+  five, do not make the command exit 1. Measured on PLATO's statistics example with one planted fault each,
+  four of the seven passed the five constraints alone (a universe that points nowhere, a value written as the
+  string "280", parts that do not sum, a coordinate the table does not declare); `test/figures-checks.test.js`
+  holds the seven, each caught as above. The file is read as a stream,
   but the cube's graph is held in memory to be checked, so the size it can check is bounded by
   memory (see Limits).
+- **"Check the Data Cube"** is the action `datacube` of `run()` (`src/engine/cubecheck.js`), so the page, Methodos and
+  the tests call the one thing: a cube export (N-Triples) is read as it is; anything else the converter reads (a
+  PLATO dataset) is converted to its cube export in memory first, its own errors and warnings in the report
+  (the figure kinds above are left out of it, as P-1 to P-4 say the same in their own words). Each constraint
+  is a note with its count, a failure an error (P-2 a warning), a constraint with nothing to evaluate a
+  warning; `report.counts.checks` lists them for a host to read. The Methodos operation `check.cube` takes the cube or
+  the dataset, and a code file if one is handed on (none is made yet), and gives nothing; on the page the card
+  Arithmos has the button *Check the Data Cube*.
 
 ### Web annotations
 
@@ -4163,7 +4197,8 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   have minted addresses to N-Triples with `--typing`, against 221 MB without.
 - **`datacube` holds the cube's graph in memory** (`graphOfFile` in `src/lib/datacube.js`): the
   file streams in, but every statement is kept until the checks have run, so a cube export larger
-  than memory cannot be checked.
+  than memory cannot be checked. The page's *Check the Data Cube* holds it too, in the tab, and from a
+  dataset also holds the cube it makes; the size it can check there is unmeasured.
 - **A match review keeps the places of both datasets in memory**: their names and points, not their
   attestations, but a gazetteer of millions of places needs a machine with room for them.
 - **Matching finds names alike in their letters, not translations or short respellings**: Köln and

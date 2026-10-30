@@ -3174,7 +3174,7 @@ def main():
             krisis_wikidata_case(page, tmp, url)
             ctx.close()
             front = pw.chromium.launch(headless=True)
-            try: front_page_checks(front, url); card_chosen_checks(front, url, pw); theme_checks(front, url); methodos_page_checks(front, url); layout_checks(front, url)
+            try: front_page_checks(front, url); cube_check_checks(front, url); card_chosen_checks(front, url, pw); theme_checks(front, url); methodos_page_checks(front, url); layout_checks(front, url)
             finally: front.close()
             methodos_checks(pw, url, tmp)
             chora_layout_checks(pw, url)
@@ -6889,6 +6889,53 @@ new MutationObserver((ms, o) => { const i = document.getElementById('intro'); if
 # Every report of a violation of the page's Content Security Policy, from before its first script.
 CSP_WATCH = "window.__cspViolations = []; document.addEventListener('securitypolicyviolation', (e) => window.__cspViolations.push(e.violatedDirective + ' ' + (e.blockedURI || 'inline')));"
 
+def cube_check_checks(browser, url):
+    """Arithmos's "Check the Data Cube" (plan #34, item 11, branch B0), on PLATO's statistics example: a dataset with figures,
+    converted to its Data Cube in memory and checked. Each check has its presence beside the absence it reads: the clean example
+    passes every constraint over something, and the example with a planted fault fails the one constraint that finds it."""
+    example = json.loads((PLATO / 'schemas/examples/place-centric-statistics.json').read_text())
+    table = 'https://whgazetteer.org/example/table/occupations-1851'
+    def figure(d, tail): return next(f for e in d['spatialEntities'] for a in e['attestations'] for f in a['properties'] if f['@id'] == f'{table}/{tail}')
+    def checked(plant=None):
+        """The page, with Arithmos chosen, given the example (with `plant` done to it) and asked to check its Data Cube, in a page of its own."""
+        d = json.loads(json.dumps(example))
+        if plant: plant(d)
+        ctx = browser.new_context(viewport={'width': 1280, 'height': 900})
+        try:
+            page = ctx.new_page(); page.set_default_timeout(T(8) * 1000)
+            page.goto(NOTOOLS if PROVE else url + '#tool=figures')
+            if wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready').get('phase') != 'ready': raise RuntimeError('the main page did not start')
+            page.set_input_files('#picker', files=[{'name': 'figures.json', 'mimeType': 'application/json', 'buffer': json.dumps(d).encode()}])
+            if wait_state(page, lambda s: s.get('phase') == 'detected', T(60), 'detection').get('phase') != 'detected': raise RuntimeError('the dataset was not detected')
+            shown = page.evaluate(VISIBLE, ['datacube'])['datacube']
+            page.click('#datacube')
+            s = wait_state(page, lambda s: s.get('phase') in ('done', 'error'), T(120), 'run')
+            report = s.get('report') or {}
+            return {'phase': s.get('phase'), 'button': shown, 'errors': report.get('errors'), 'checks': {c['ic']: c for c in (report.get('counts') or {}).get('checks') or []},
+                    'summary': page.inner_text('#summary'), 'problems': page.text_content('#report .report-group.error') if page.query_selector('#report .report-group.error') else '',
+                    'warnings': page.inner_text('#report .report-group.warning') if page.query_selector('#report .report-group.warning') else '', 'noted': page.inner_text('#report .report-group.note') if page.query_selector('#report .report-group.note') else ''}
+        finally: ctx.close()
+    ALL = ['IC-1', 'IC-2', 'IC-11', 'IC-12', 'IC-14', 'P-1', 'P-2', 'P-3', 'P-4']
+    def clean():
+        r = checked()
+        every = [r['checks'].get(ic) for ic in ALL]
+        return (r['phase'] == 'done' and r['button'] and r['errors'] == 0 and all(c and c['status'] == 'pass' and c['evaluated'] > 0 for c in every)
+                and 'No constraint failed.' in r['summary'] and 'IC-12 (no two observations of a data set have all the same coordinates) passes, 5 evaluated.' in r['noted']
+                and r['problems'] == '' and r['warnings'] == ''), r
+    attempt('Arithmos: "Check the Data Cube" on a dataset with figures passes the five integrity constraints and the four checks of its figures, each over something, and says each with its count', clean)
+    def dangling():
+        r = checked(lambda d: figure(d, 'agri/total').__setitem__('universe', 'https://example.org/nowhere'))
+        p1 = r['checks'].get('P-1') or {}
+        return (r['phase'] == 'done' and r['errors'] and p1.get('status') == 'fail' and p1.get('blocks') is True and 'P-1 fails' in r['problems'] and 'nowhere' in r['problems']
+                and 'constraint failed' in r['summary'] and (r['checks'].get('IC-12') or {}).get('status') == 'pass'), r
+    attempt('Arithmos: "Check the Data Cube" on a dataset whose figure names a universe that is no figure fails P-1, which stops the workflow, and names the figure (the other constraints still pass)', dangling)
+    def sums():
+        r = checked(lambda d: figure(d, 'agri/m').__setitem__('value', 999))
+        p2 = r['checks'].get('P-2') or {}
+        return (r['phase'] == 'done' and r['errors'] == 0 and p2.get('status') == 'fail' and p2.get('blocks') is False and 'P-2' in r['warnings'] and r['problems'] == ''
+                and 'No constraint failed.' in r['summary'] and 'one of which warns' in r['summary']), r
+    attempt('Arithmos: "Check the Data Cube" on a dataset whose parts do not sum to their total only warns (P-2), and no constraint is said to have failed', sums)
+
 def front_page_checks(browser, url):
     def fresh(width=1280, init=(), hash=''):
         ctx = browser.new_context(viewport={'width': width, 'height': 900})
@@ -7019,11 +7066,12 @@ def front_page_checks(browser, url):
             page.evaluate('''(text) => { const dt = new DataTransfer(); dt.items.add(new File([text], 'figures.nt', { type: 'application/n-triples' }));
               document.getElementById('drop').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })); }''', nt)
             s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection')
-            vis = page.evaluate(VISIBLE, ACTIONS); heading = page.inner_text('#action-h')
-            return (s.get('format') == 'ntriples' and vis['check'] and not vis['convert'] and 'already N-Triples' in heading
+            vis = page.evaluate(VISIBLE, ACTIONS + ['datacube']); heading = page.inner_text('#action-h')
+            # The Data Cube check is offered with it (a file that is already a Data Cube export is what it checks), the other tools' parts not.
+            return (s.get('format') == 'ntriples' and vis['check'] and not vis['convert'] and 'already N-Triples' in heading and vis['datacube']
                     and not any(vis[a] for a in ACTIONS if a != 'check')), {'state': s.get('format'), 'visible': vis, 'heading': heading}
         finally: ctx.close()
-    attempt('front page: Arithmos with a file already in N-Triples offers the check, and says it is already N-Triples', figures_on_ntriples)
+    attempt('front page: Arithmos with a file already in N-Triples offers the check and the Data Cube check, and says it is already N-Triples', figures_on_ntriples)
 
     def touch():
         # On a touch screen a first tap on a card's name shows its tooltip and chooses nothing (and Chora's
