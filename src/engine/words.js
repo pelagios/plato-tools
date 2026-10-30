@@ -483,6 +483,14 @@ export function hermesTextNote({ model, provider, prompt, date, kindGuess, adjus
 export const TEXT_WORDS = {
   /** The rights statement of a copy of a work file for sharing, when none was given with the text. */
   noRights: "No statement of the text's rights was given when this file was made: the quotations in it are the contributor's to answer for.",
+  /** The dataset made of the names confirmed in a text (src/engine/hermes/text/dataset.js). */
+  dataset: {
+    noReviewer: 'Name the reviewer before making the dataset: each attestation names the person who confirmed the name.',
+    noBase: 'Give the base address the places found in the text have their addresses under: a web address such as https://example.org/my-places/. Each place found in the text has no address of its own, and the lookup records what the gazetteer matches it with against this one.',
+    nothingConfirmed: ({ suggested, rejected, undecided }) => `No name in the text has been confirmed: ${suggested} suggested, ${rejected} rejected, ${undecided} not yet decided. Nothing was written: confirm at least one name in the review.`,
+    title: (source) => `Places in ${source}`,
+    description: (source, reviewer) => `Made by PLATO tools from the place names ${reviewer} confirmed in ${source}, found by a language model or added by the reviewer: one place for each distinct spelling, and one attestation for each confirmed occurrence, citing the characters of the text. A place has no identification yet, unless the reviewer gave an address.`,
+  },
   /** What a copy for sharing holds in place of the text. */
   quotedContext: "The text itself is not in this file. The passages quoted around each name are short, and are under the text's own rights, stated with them.",
 };

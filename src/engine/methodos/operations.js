@@ -106,6 +106,12 @@ export const OPERATIONS = Object.fromEntries([
   op({ key: 'text.review', title: 'Confirm the places found in a text', tool: 'Hermes', kind: 'interactive', cancel: 'keeps-partial',
     takes: { work: { types: ['work.hermes-text'] } }, gives: { work: 'work.hermes-text' },
     available: 'Finding places in a text is deferred (the llm-extract branch).' }),
+  // The names the reviewer confirmed in a text made into a dataset of places, one for each spelling (Places from a text,
+  // plan #34 item 12; src/engine/hermes/text/dataset.js). The engine is built; no page finds and reviews the names yet.
+  // The base address its places' addresses are made under is the workflow's, as for a table.
+  op({ key: 'text.dataset', title: 'Make a dataset of the places confirmed in a text', tool: 'Hermes',
+    takes: { work: { types: ['work.hermes-text'] } }, gives: { dataset: 'dataset' },
+    available: 'Making a dataset of the places found in a text is built in the engine, but nothing on the page finds and reviews the places in a text yet (the places-from-a-text workflow, the llm-extract branch).' }),
 ].map((o) => [o.key, Object.freeze(o)]));
 
 /** Whether an operation can be run now: its declaration says `available: true`. */

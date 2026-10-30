@@ -9,6 +9,7 @@ export { PRICES, PRICE_STALE_DAYS, CHARS_PER_TOKEN, SCRIPT_RATIOS, tokensOf, cal
 export { WORK_VERSION, TYPE_KINDS, REVIEWER_PROVIDER, CONTEXT_CHARACTERS, newWork, readWork, serialiseWork, checkText, isDone, addResult, suggestions, setReviewer, addMention, decide, reviewProgress, textOf, keepText, withoutText } from './work.js';
 export { hermesTextNote, TEXT_WORDS } from '../../words.js';
 export { attestationsFrom, attestationsDocument, sourceOf, locatorOf, unlinkedCsv } from './attest.js';
+export { datasetFrom, placeIdOf } from './dataset.js';
 export { normalised, forModel } from './normalise.js';
 export { decodeText } from './decode.js';
 export { runExtraction, extractChunk, MIN_HALF } from './run.js';

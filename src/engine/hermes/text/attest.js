@@ -14,6 +14,9 @@
 //   contributor  the reviewer; created: when the decision was made
 //   notes        the model, provider, prompt and date of the suggestion (words.js, hermesTextNote)
 // No @id: whatever saves it mints one.
+// This is the file of attestations about places that already have addresses. The names with no place linked
+// become places of a dataset of their own in dataset.js (`text.dataset`), which uses the pieces here
+// (confirmedMentions, mentionAttestation).
 import { PLATO } from '../../../lib/context.js';
 import { checkReviewer, isIri } from '../../krisis/work.js';
 import { hermesTextNote } from '../../words.js';
@@ -33,6 +36,56 @@ export function sourceOf(work) {
 /** The locator of a span. */
 export const locatorOf = (start, end) => `characters ${start} to ${end}`;
 
+/** The contributor a reviewer is, as an attestation names one. */
+export const contributorOf = (reviewer) => ({ name: reviewer.name.trim(), ...(reviewer.orcid ? { orcid: reviewer.orcid } : {}) });
+
+/**
+ * The names a reviewer confirmed, in the order of the text: [{ s (the suggestion), d (the decision),
+ * start, end, toponym (the words of the text at that span, as given), locator }], with the number
+ * rejected and the number not yet decided. Throws if the text is not the work file's, or a span
+ * is not what was suggested there.
+ */
+export function confirmedMentions(work, text) {
+  checkText(work, text);
+  const confirmed = [];
+  let rejected = 0, undecided = 0;
+  for (const s of suggestions(work)) {
+    const d = work.review.decisions[s.id];
+    if (!d) { undecided++; continue; }
+    if (d.status !== 'confirmed') { rejected++; continue; }
+    const start = d.start ?? s.start, end = d.end ?? s.end;
+    const toponym = sliceCodePoints(text, start, end);
+    if (toponym === null) throw new Error(`attestationsFrom: characters ${start} to ${end} are not in the text.`);
+    if (d.start === undefined && toponym !== s.text) throw new Error(`attestationsFrom: characters ${start} to ${end} of the text are not the name suggested there.`);
+    confirmed.push({ s, d, start, end, toponym, locator: locatorOf(start, end) });
+  }
+  return { confirmed, rejected, undecided };
+}
+
+/**
+ * The attestation of one confirmed name (a `confirmedMentions` item) about `about`: the words of the text
+ * there, the text cited at the span, the contributor, and a note saying how it came about; `linked`
+ * says whether the reviewer linked the place (the note says so). A type only when the reviewer
+ * confirmed one. No @id: whatever saves it mints one.
+ */
+export function mentionAttestation(work, m, { about, contributor, source, linked }) {
+  const { s, d, toponym, locator } = m;
+  const a = {
+    about,
+    names: [{ toponym, ...(work.language ? { language: work.language } : {}) }],
+    formStatus: ATTESTED,
+    citations: [{ source, locator }],
+    contributor,
+    created: d.decided_at,
+    notes: hermesTextNote({
+      model: s.model_returned || s.model, provider: s.provider, prompt: s.prompt_version, date: s.generated_at.slice(0, 10),
+      kindGuess: d.type || s.added ? null : s.kind, adjustedFrom: d.start !== undefined ? [s.start, s.end] : null, addedBy: !!s.added, linked,
+    }),
+  };
+  if (d.type) a.types = [{ label: d.type }];
+  return a;
+}
+
 /**
  * The attestations of a review, from its work file and the text it was made from:
  * { attestations, unlinked: [{ id, text, start, end, locator, kind }], counts: { confirmed, linked, unlinked, rejected } },
@@ -42,34 +95,13 @@ export function attestationsFrom(work, text, { reviewer = work.review.reviewer }
   checkText(work, text);
   if (!reviewer) throw new Error('attestationsFrom: the review has no reviewer.');
   checkReviewer(reviewer, 'attestationsFrom: the reviewer');
-  const contributor = { name: reviewer.name.trim(), ...(reviewer.orcid ? { orcid: reviewer.orcid } : {}) };
+  const contributor = contributorOf(reviewer);
   const source = sourceOf(work);
   const attestations = [], unlinked = [];
-  let rejected = 0;
-  for (const s of suggestions(work)) {
-    const d = work.review.decisions[s.id];
-    if (!d) continue;
-    if (d.status !== 'confirmed') { rejected++; continue; }
-    const start = d.start ?? s.start, end = d.end ?? s.end;
-    const toponym = sliceCodePoints(text, start, end);
-    if (toponym === null) throw new Error(`attestationsFrom: characters ${start} to ${end} are not in the text.`);
-    if (d.start === undefined && toponym !== s.text) throw new Error(`attestationsFrom: characters ${start} to ${end} of the text are not the name suggested there.`);
-    const locator = locatorOf(start, end);
-    if (!d.place) { unlinked.push({ id: s.id, text: toponym, start, end, locator, kind: d.type ?? s.kind }); continue; }
-    const a = {
-      about: d.place,
-      names: [{ toponym, ...(work.language ? { language: work.language } : {}) }],
-      formStatus: ATTESTED,
-      citations: [{ source, locator }],
-      contributor,
-      created: d.decided_at,
-      notes: hermesTextNote({
-        model: s.model_returned || s.model, provider: s.provider, prompt: s.prompt_version, date: s.generated_at.slice(0, 10),
-        kindGuess: d.type || s.added ? null : s.kind, adjustedFrom: d.start !== undefined ? [s.start, s.end] : null, addedBy: !!s.added,
-      }),
-    };
-    if (d.type) a.types = [{ label: d.type }];
-    attestations.push(a);
+  const { confirmed, rejected } = confirmedMentions(work, text);
+  for (const m of confirmed) {
+    if (!m.d.place) { unlinked.push({ id: m.s.id, text: m.toponym, start: m.start, end: m.end, locator: m.locator, kind: m.d.type ?? m.s.kind }); continue; }
+    attestations.push(mentionAttestation(work, m, { about: m.d.place, contributor, source, linked: true }));
   }
   return { attestations, unlinked, counts: { confirmed: attestations.length + unlinked.length, linked: attestations.length, unlinked: unlinked.length, rejected } };
 }
