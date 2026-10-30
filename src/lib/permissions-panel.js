@@ -50,6 +50,16 @@ function reloadPart(api) {
   return `<p class="perm-reload"><button type="button" class="primary" data-reload>${esc(PANEL.reload)}</button> ${esc(losses.length ? PANEL.reloadAsks : PANEL.reloadKept)}</p>`;
 }
 
+/** The language-model keys held, as the panel shows them: which service, where it is sent, a Forget button; never a key. */
+export function llmKeysSection(api) {
+  const held = api.llmKeys.held();
+  return `<section aria-labelledby="perm-llm-h">
+      <h3 id="perm-llm-h" tabindex="-1">${esc(PANEL.llmKeysHeading)}</h3>
+      ${held.length ? `<ul class="perm-remembered">${held.map((h) => `<li>${esc(PANEL.llmKeyHeld(h.name, h.origins))} <button type="button" data-llm-forget="${esc(h.key)}">${esc(PANEL.llmKeyForget)}</button></li>`).join('')}</ul>` : `<p class="muted">${esc(PANEL.llmKeysNone)}</p>`}
+      <p class="muted">${esc(PANEL.llmKeysNote)}</p>
+    </section>`;
+}
+
 function render(api) {
   const all = api.list(), cats = [...new Set(all.map((x) => x.cat))];
   const canary = api.canaryState();
@@ -76,6 +86,7 @@ function render(api) {
       ${t ? `<p><button type="button" data-token-forget>${esc(PANEL.tokenForget)}</button></p>` : ''}
       <p class="muted">${esc(PANEL.tokenRevoke)}</p>
     </section>
+    ${llmKeysSection(api)}
     <section aria-labelledby="perm-remembered-h">
       <h3 id="perm-remembered-h">${esc(PANEL.rememberedHeading)}</h3>
       ${remembered.length ? `<ul class="perm-remembered">${remembered.map((r) => `<li>${esc(r.label)}${summary(r.value) ? `: <span class="muted">${esc(summary(r.value))}</span>` : ''} <button type="button" data-forget="${esc(r.key)}">${esc(PANEL.forget)}</button></li>`).join('')}</ul>` : `<p class="muted">${esc(PANEL.rememberedNone)}</p>`}
@@ -118,6 +129,7 @@ function create(api) {
     else if (b.hasAttribute('data-forget-all')) { api.forgetAll(); const s = dialog.querySelector('#perm-forgot'); if (s) s.textContent = PANEL.forgotAll; }
     // As the lookup panel's Forget: the token and the choice to remember it, then the focus on that choice (the button is gone).
     else if (b.hasAttribute('data-token-forget')) { api.token.remember(false); api.token.forget(); dialog.querySelector('#perm-token-remember')?.focus(); }
+    else if (b.dataset.llmForget) { const key = b.dataset.llmForget; api.llmKeys.forget(key.slice(key.indexOf(':') + 1)); dialog.querySelector('#perm-llm-h')?.focus(); }
     else if (b.dataset.forget) api.forgetRemembered(b.dataset.forget);
     else if (b.hasAttribute('data-kept-forget')) keptFileStore().forget().then(() => { showKept(); dialog.querySelector('#perm-keep-work')?.focus(); });
   });
@@ -149,6 +161,7 @@ export function refreshPanel(api) {
   if (where.name) back = [...dialog.querySelectorAll('input')].find((x) => x.name === where.name && x.value === where.value);
   else if (where.id) back = dialog.querySelector(`#${CSS.escape(where.id)}`);
   else if (where.data.forget) back = dialog.querySelector('#perm-remembered-h');
+  else if (where.data.llmForget) back = dialog.querySelector('#perm-llm-h');
   back ??= dialog.querySelector('#permissions-h');
   back?.focus();
 }

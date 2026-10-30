@@ -9,7 +9,8 @@
 // - 'plato-tools.permissions.tab' (sessionStorage): the keys allowed for this tab only;
 // - 'plato-tools.keep-working-data': 'no' when the user does not want working data kept;
 // - 'plato-tools.whg-token' (sessionStorage, and localStorage only when the user chose to remember
-//   it), with 'plato-tools.whg-token.remember'.
+//   it), with 'plato-tools.whg-token.remember';
+// - a language-model service's key is kept in none of them: llmKeys holds it in this tab's memory only.
 // Tabs are kept in step through the storage event.
 //
 // The page's Content Security Policy is written from the same grants at load (csp-head.js), so a
@@ -18,6 +19,7 @@ import * as core from './permissions-core.js';
 import { canary as runCanary, inPolicy } from './csp.js';
 import { nameOf, REFUSED, NEEDS, REMEMBERED, CANARY_LOG } from './permission-words.js';
 import { openPanel, refreshPanel } from './permissions-panel.js';
+import { createKeyKeeper } from './llm-keys.js';
 
 export { CATEGORIES, REGISTRY, STATES, ORIGIN, isOrigin, isInsecure, checkAnswer, originOf, keyOf, parse, originsFor, normalise, check, allowedOrigins, policyFor, migrateBasemapConsent, fromFlags } from './permissions-core.js';
 export { inPolicy, policy, blobWorkerUrl } from './csp.js';
@@ -105,7 +107,7 @@ export function set(cat, subj, to, { added } = {}) {
   if (to === 'undecided') delete g[k];
   else g[k] = { state: to, at: new Date().toISOString(), ...((added || before?.added || needed.get(k)?.added) ? { added: true } : {}) };
   writeGrants(g);
-  if (to !== 'allowed') writeTab(tab().filter((x) => x !== k));
+  if (to !== 'allowed') { writeTab(tab().filter((x) => x !== k)); if (p.cat === 'llm') llmKeys.forget(p.subj); }
   notify();
 }
 /** Allow for this tab only (it ends when the tab is closed). A permission set to Never stays refused. */
@@ -119,11 +121,13 @@ export function forget(cat, subj) {
   const p = need(cat, subj), k = core.keyOf(p.cat, p.subj), g = grants();
   delete g[k]; writeGrants(g);
   writeTab(tab().filter((x) => x !== k));
+  if (p.cat === 'llm') llmKeys.forget(p.subj);
   notify();
 }
-/** Forget every permission. */
+/** Forget every permission, and with them the keys of language-model services held for this tab. */
 export function forgetAll() {
   drop(local(), KEY); drop(local(), LEGACY); drop(session(), TAB);
+  llmKeys.forgetAll();
   notify();
 }
 
@@ -491,6 +495,13 @@ export const token = {
   },
 };
 
+// ---- Language-model keys -------------------------------------------------------------------------
+// One keeper for the services' keys (llm-keys.js): this tab's memory, never storage, each key bound to
+// the site it was typed for. Withdrawing a service's permission (Never, or forgetting it), or forgetting
+// all, forgets its key too: a key held for a service that may not be asked is of no use, and not worth
+// holding. onChange (here) is told, as it is of the token, but never given a key.
+export const llmKeys = createKeyKeeper({ onChange: () => notify() });
+
 // What the panel is given: the module's own functions, so that it has no import of its own here.
-const api = { list, state, set, allowOnce, forget, forgetAll, token, keepWorkingData, setKeepWorkingData, remembered, forgetRemembered, persistChoice, choosePersist,
+const api = { list, state, set, allowOnce, forget, forgetAll, token, llmKeys, keepWorkingData, setKeepWorkingData, remembered, forgetRemembered, persistChoice, choosePersist,
   reload, reloadLosses, canaryState: () => canaryResult, waitsForReload };
