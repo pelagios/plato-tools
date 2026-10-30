@@ -60,6 +60,7 @@ const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
  */
 export function figuresSpec(saved) {
   if (!isObject(saved) || !isObject(saved.columns) || (saved.table !== undefined && !isObject(saved.table))) return null;
+  if (saved.table === undefined && saved.clusters !== undefined) return null;   // a saved matching with groups of spellings (cluster.js), not a description
   const entry = (v) => typeof v === 'string' || (isObject(v) && typeof v.field === 'string');
   return entry(saved.columns) && (saved.table === undefined || entry(saved.table)) ? null : saved;
 }
