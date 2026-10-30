@@ -43,7 +43,8 @@ ul{padding-left:1.2rem}li{margin:.15rem 0}dl{display:grid;grid-template-columns:
 article.att{border:1px solid var(--line);border-radius:6px;padding:.7rem .9rem;margin:.8rem 0}article.att:target{outline:3px solid var(--accent)}
 article.withdrawn{background:var(--gone-bg)}.label{display:inline-block;font-size:.8rem;font-weight:600;padding:0 .4rem;border-radius:3px;margin-right:.3rem;background:var(--gone-fg);color:var(--gone-bg)}
 .label.denied{background:var(--muted);color:var(--bg)}footer{margin-top:3rem;padding-bottom:2rem;border-top:1px solid var(--line);font-size:.9rem;color:var(--muted)}
-nav.pages a{margin-right:.6rem}`;
+nav.pages a{margin-right:.6rem}
+ul.figs{list-style:none;padding:0;margin:.2rem 0 .6rem}li.fig{border-left:3px solid var(--line);padding:.1rem .6rem;margin:.3rem 0}li.fig:target{outline:3px solid var(--accent)}li.fig.bare{border-left-color:var(--gone-fg)}`;
 
 /**
  * A whole page. `root` is the relative way back to the site's root ('', '../', '../../'); `draft`
@@ -108,10 +109,61 @@ function property(p) {
   return `${a(p.property, p.label || localName(p.property))}: ${esc(v ?? '(no value)')}${p.unit ? ' ' + term(p.unit) : ''}${p.sourceLabel ? ` <span class="muted">“${esc(p.sourceLabel)}”</span>` : ''}`;
 }
 
+// A figure is a property value that is a cell of a statistical table (PLATO issue #14): a number at
+// an address, its coordinates, in its table. Printed as "label: value" it would say that the place
+// has the number, which a county does not: its male agricultural labourers do. So a figure is never
+// printed by property(): it is shown with its coordinates, under its table, and a figure that lacks
+// them says so. The place and the date are the attestation's, which the page says once, and not
+// repeated here, as in the data.
+const isFigure = (p) => p && typeof p === 'object' && (p.dataSet !== undefined || p.dimensions !== undefined || p.universe !== undefined);
+const AREA_PERIOD = ['http://purl.org/linked-data/sdmx/2009/dimension#refArea', 'http://purl.org/linked-data/sdmx/2009/dimension#refPeriod'];
+/** The tables of a document's dataSets by address: { title, dimensions } (the dimensions its structure lists, apart from the area and the date, the attestation's). */
+export function tablesOf(head) {
+  const tables = new Map();
+  for (const t of list(head?.dataSets)) {
+    if (!t || typeof t !== 'object' || typeof t['@id'] !== 'string') continue;
+    // A structure given by its address alone lists nothing: what a figure of it lacks cannot be told.
+    const comps = t.structure && typeof t.structure === 'object' ? list(t.structure.components) : null;
+    tables.set(t['@id'], { title: t.title, dimensions: comps ? comps.map((c) => c?.dimension).filter((d) => typeof d === 'string' && !AREA_PERIOD.includes(d)) : null });
+  }
+  return tables;
+}
+const concept = (v) => (v && typeof v === 'object' ? (typeof v['@id'] === 'string' ? a(v['@id'], localName(v['@id'])) : esc(JSON.stringify(v))) : esc(v));
+/** One figure of a table: `table` is its tablesOf() entry or undefined; `anchor` the element id its address leads to, or null. */
+function figure(p, table, ctx) {
+  const anchor = ctx.anchor(p);
+  const id = anchor ? ` id="${esc(anchor)}"` : '';
+  const dims = p.dimensions && typeof p.dimensions === 'object' && !Array.isArray(p.dimensions) ? Object.entries(p.dimensions) : [];
+  const measure = a(p.property, p.label || localName(p.property));
+  const hasValue = p.value !== undefined && p.value !== null;
+  const value = hasValue ? (typeof p.value === 'object' ? JSON.stringify(p.value) : p.value) : null;
+  const said = p.sourceLabel ? ` <span class="muted">“${esc(p.sourceLabel)}”</span>` : '';
+  // No coordinates at all: what it counts is not known. The value is said, as what the source prints, and not as a fact of the place.
+  if (!dims.length) {
+    return `<li class="fig bare"${id}><span class="label denied">No coordinates</span>A figure${hasValue ? ` of ${esc(value)}` : ''} (${measure}${p.unit ? ' ' + term(p.unit) : ''}) with no coordinates in its table, so what it counts is not known. It is not a statement that this place has ${hasValue ? esc(value) : 'it'}, and is not to be read as one.${said}</li>`;
+  }
+  const coords = dims.map(([d, v]) => `${a(d, localName(d))}: ${concept(v)}`);
+  const lacking = table?.dimensions ? table.dimensions.filter((d) => !(d in p.dimensions)) : [];
+  const attrs = p.attributes && typeof p.attributes === 'object' ? Object.entries(p.attributes).map(([k, v]) => `${a(k, localName(k))}: ${concept(v)}`) : [];
+  const head = hasValue ? `<strong>${esc(value)}</strong>${p.unit ? ' ' + term(p.unit) : ''} ${measure}` : `${measure}: <span class="muted">no value${attrs.length ? '' : ' given'}</span>`;
+  const part = typeof p.universe === 'string' ? `; a part of ${ctx.href(p.universe) ? a(ctx.href(p.universe), localName(p.universe.split('#')[0]) + (p.universe.includes('#') ? '#' + p.universe.split('#').pop() : ''), { internal: true }) : a(p.universe)}` : '';
+  return `<li class="fig"${id}>${head} <span class="muted">at</span> ${coords.join('; ')}${lacking.length ? `; <span class="label denied">not given</span> ${lacking.map((d) => esc(localName(d))).join(', ')}` : ''}${part}${attrs.length ? ` <span class="muted">(${attrs.join('; ')})</span>` : ''}${said}</li>`;
+}
+/** The figures of one attestation, a list under each table they belong to. */
+function figures(figs, ctx) {
+  const by = new Map();
+  for (const p of figs) { const k = typeof p.dataSet === 'string' ? p.dataSet : ''; (by.get(k) || by.set(k, []).get(k)).push(p); }
+  return [...by].map(([ds, ps]) => {
+    const table = ds ? ctx.tables?.get(ds) : undefined;
+    const title = ds ? a(ds, table?.title || localName(ds)) : 'no table';
+    return `<p class="muted">Figures in ${ds ? 'the table ' : ''}${ds ? '“' + title + '”' : title}: each is a count at its coordinates, and the place and date are this attestation's.${ds ? '' : ' With no table, what a figure counts cannot be told.'}</p><ul class="figs">${ps.map((p) => figure(p, table, ctx)).join('')}</ul>`;
+  }).join('');
+}
+
 /**
  * The HTML of one attestation. `ctx` gives: href(iri) -> a link inside the site or null; withdrawn
  * (target -> 'retracted' | 'superseded'); by (target -> [{ by, kind }]); anchor(att) -> the
- * element id, or null.
+ * element id, or null; tables (tablesOf the dataset's header), for the figures' tables.
  */
 export function attestation(att, ctx) {
   const id = typeof att['@id'] === 'string' ? att['@id'] : null;
@@ -123,7 +175,9 @@ export function attestation(att, ctx) {
   row('Name', list(att.names).map(name));
   row('Location', list(att.geometries).map(geometry));
   row('Type', list(att.types).map(type));
-  row('Property', list(att.properties).map(property));
+  row('Property', list(att.properties).filter((x) => !isFigure(x)).map(property));
+  const figs = list(att.properties).filter(isFigure);
+  if (figs.length) rows.push(`<dt>Figures</dt><dd>${figures(figs, ctx)}</dd>`);
   row('Relation', list(att.relations).map((r) => r && join([term(r.relationType) || esc(r.relationLabel), r.relatesTo ? link(r.relatesTo, r.relatedLabel || r.relatesTo) : esc(r.relatedLabel), r.sequence !== undefined ? `(stop ${esc(r.sequence)})` : ''], ' ')));
   row('Identity', list(att.identities).map((i) => i && join([esc(localName(i.identityType) || 'match'), link(i.object)], ' ')));
   row('Comments on', list(att.meta).map((m) => m && join([term(m.metaType), link(m.targetAttestation)], ' ')));
