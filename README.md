@@ -44,7 +44,7 @@ also in this repository, in [`public/try/`](public/try/).
 <tr><td nowrap><img src="public/icons/chart-column.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Arithmos</b>: statistical figures</td><td>Converts the figures a PLATO dataset holds to RDF Data Cube, and checks the result: Data Cube's integrity constraints, and the figures themselves (their universes, coordinates and values, and whether parts add up to their total). Reading figures out of a census table is not built yet</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/statistics.html">Statistical tables</a></td></tr>
 <tr><td nowrap><img src="public/icons/history.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Mneme</b>: version check</td><td>Shows that a new version of a published dataset deleted and changed nothing</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/tools.html#comparing-two-versions">Comparing two versions</a></td></tr>
 <tr><td nowrap><img src="public/icons/scale.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Krisis</b>: match review</td><td>Suggests the places two datasets share, for you to accept or reject, and records each judgement as a PLATO attestation. It matches two files of your own, or looks places up in the World Historical Gazetteer and other reconciliation services, if you allow it in Permissions</td><td><a href="DEVELOPERS.md#match-review">Match review</a></td></tr>
-<tr><td nowrap><img src="public/icons/file-input.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Hermes</b>: readers</td><td>Brings other formats into PLATO: Recogito's annotations (with the regions marked on a georeferenced map placed as points, when the map's georeference is given), TEI editions, and any CSV or GeoJSON, its columns matched to PLATO</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/annotations.html">Annotations from Recogito</a></td></tr>
+<tr><td nowrap><img src="public/icons/file-input.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Hermes</b>: readers</td><td>Brings other formats into PLATO: Recogito's annotations (with the regions marked on a georeferenced map placed as points, when the map's georeference is given), TEI editions, and any CSV or GeoJSON, its columns matched to PLATO; on the command line, a table of figures (a census, a return) described by its columns and read as Data Cube observations ([below](#tables-of-figures-a-census-a-return))</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/annotations.html">Annotations from Recogito</a></td></tr>
 <tr><td nowrap><img src="public/icons/landmark.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Agora</b>: publish</td><td>Reports what a dataset still needs to be FAIR and writes its deposit files, gives every attestation a permanent address, and makes a website and w3id redirects for it</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/tools.html#publishing-your-dataset">Publishing your dataset</a></td></tr>
 <tr><td nowrap><img src="public/icons/map-pinned.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Chora</b>: place on the map</td><td>Shows a dataset's places on a map, and adds a point, line or area drawn there, or traced from a georeferenced historical map (IIIF, Allmaps), by hand or with assistance from its ink, citing the map</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/tools.html#chora">Placing on the map</a></td></tr>
 </table>
@@ -164,6 +164,56 @@ node bin/plato-tools.mjs preview --limit 5 my-places.csv                 # the f
   afterwards. It needs room for about one and a half times the uncompressed input (twice the text,
   for spreadsheet tables). If the temporary directory is held in
   memory (a `tmpfs`), point `--work-dir` at a real disk.
+
+### Tables of figures (a census, a return)
+
+A CSV file (or a sheet of a workbook) of figures, with one header row, is read as PLATO statistical
+figures, each a `PropertyValue` that is also a Data Cube observation, when `--columns` describes it:
+the same JSON as for a table of places, with four more roles for a column (`period`, `dimension`,
+`value`, `figure`), and the table's own description beside the columns. The tools never guess that
+a table is one; only a description given makes it so (there is no page for it yet).
+
+```json
+{ "columns": { "County": "name", "Year": "period",
+               "Occupation": { "field": "dimension", "dimension": "occupation" },
+               "Persons": { "field": "value", "measure": "persons" } },
+  "table": { "title": "…", "description": "scope in words", "source": "title or web address",
+             "dimensions": { "occupation": { "total": "All" } } } }
+```
+
+- **Long**: a row for each cell of the printed table; `dimension` columns give a figure's coordinates and
+  a `value` column the figure. **Wide**: a row for each place and period, the categories across; each
+  `figure` column carries its own `coordinates` (`{"occupation": "Farmers"}`) and its `measure`.
+  Several measures in one table are several data sets. A blank cell of a dimension is that dimension's
+  code `unknown`.
+- **The place** is the `id` column, else the `address` column, else the name together with every
+  `within` column (two parishes called Newport in two counties are two places); with only a name, the
+  report says that names are the key. One attestation is written for each source row, the row its
+  `locator`, about its place. The regions are kept in the attestation's notes.
+- **The period** is the `period` column, or `start` and `end` columns, or the table's `period`, as the
+  table gives it: a year stays a year, a day a day, a span (`1851-1861`) a span. Only a year or a day is on
+  the Data Cube's time axis (`refPeriod`); the report counts the figures that are not.
+- **The cells**: a plain number (thousands separators `,` ` ` `'` are read; a decimal comma is not
+  guessed, nor are words or money) is the figure; a printed dash (`-` `–` `—`, and any marks the table's
+  `dashes` adds) is a figure with no value and the status "nil or not applicable", never a 0; a blank is
+  no figure; anything else is reported and left out. The report adds up every cell: *5 cells of
+  figures: 4 figures, 1 printed dash, 0 blank, 0 left out.*
+- **Totals** are linked (`plato:universe`) only where you say so: `totalOf` on a `figure` column ("this
+  is the printed total of these columns"), or `"total"` on a dimension's code in the table's description
+  ("All" is the total of the others). A name or a sum never makes one; a total the table lacks is
+  reported. Parts that do not add up are carried as marked.
+- **Addresses** are made under `--base`: `<base>table/<slug>` (`id` in the description fixes the slug),
+  `<base>dim/<slug>`, `<base>measure/<slug>`, `<base>code/<dimension>/<slug>`, and each figure
+  `<place>#f-<16 hex digits of a hash of table, measure, period and coordinates>`, so a figure keeps its
+  address when the rows are reordered or the table is read again. A dimension of a vocabulary of your
+  own is `"dimensions": {"sex": {"iri": "…#sex", "codes": {"M": "…#sex-M"}}}`.
+- **`--cube`** with `--to ntriples` writes the Data Cube, which `datacube` checks. PLATO JSON has no
+  place for the code lists and the declarations of the dimensions and measures, so with `plato-json`,
+  `plato-jsonl` or `ntriples` they are written to a second N-Triples file, `NAME.codes.nt`, beside the output.
+- Not read: compound cells ("Female / Charity"), a header of more than one row, money (£ s d) and
+  words in cells ("About 500"). The table is read twice (first for the codes' addresses and the totals
+  that exist), and the reader keeps the address of every figure to find a repeat; how large a table
+  that holds has not been measured.
 
 ### Previewing the first records
 

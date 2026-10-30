@@ -350,6 +350,52 @@ gives the design and the two commands.
   the dataset, and a code file if one is handed on (none is made yet), and gives nothing; on the page the card
   Arithmos has the button *Check the Data Cube*.
 
+#### Reading a table of figures (plan #34, item 11; branch `figures-reader`)
+
+`src/engine/hermes/figures.js` reads a census or return table as PLATO figures, so that Arithmos's cube
+export has something to export from a CSV. The user-facing description is in the README ("Tables of
+figures"); the decisions of 30 October 2026 (interview: long and wide, one header row; the mapping
+extended, not a second panel; one attestation to a source row; place key; period as given; code lists in
+a second file; totals only where marked; plain numbers only) are the design.
+
+- **The mapping** is Hermes's (`columns.js`) with four more fields (`FIGURE_FIELDS`: `period`, `dimension`,
+  `value`, `figure`), their entries (`dimension`, `measure`, `coordinates`, `totalOf`, checked by
+  `figureEntryProblem`, a bad one keeping the column in the notes as everywhere) and `{ columns, table }`
+  for the description (`figuresSpec`; the `table` may be left out; a column headed "columns" or "table"
+  is still a column when its entry is a field). `resolveColumns` unwraps it and gives `figures` (the
+  entries) and `table` (as given). The reader's routing is `readsFigures(options.columns)` in
+  `sourceFor` (`pipeline.js`): a table is one only when its mapping has a figure role, never from a guess.
+- **Events.** A header with `dataSets` (a data set for each measure: `<base>table/<slug>[-<measure>]`,
+  its structure `refArea`, `refPeriod` when a period is mapped, the dimensions, the measure); an
+  `attestation` for each row, about its place; a `record` (`newEntity`) for each place that is not a
+  web address the row gave; last, a `codes` event the pipeline keeps and writes as `NAME.codes.nt`
+  (`codesToNTriples`) for `plato-json`, `plato-jsonl` and `ntriples` conversions. The attestation-centric
+  shape was the design's "not known": `test/figures-attestation-centric.test.js` settled it (the cube
+  export and the checks give the same for one attestation to a figure as for PLATO's one attestation to
+  a county), so no grouping by place is done in the reader.
+- **Two readings.** The first reads every row quietly, to give each code its address (a label's slug; two
+  labels of one slug both take the hash of their label, so no address depends on which row came first) and,
+  where a dimension's total is marked, to know which figures exist (a universe is written only to a figure
+  that is there). It keeps a map of the figures' addresses in that case, and the second reading keeps one
+  to find repeats: memory grows with the figures, not measured. The preview therefore reads the whole file
+  once before its first record.
+- **Figure addresses** are `<place>#f-<16 hex of SHA-256 of [table slug, measure slug, period, coordinates]>`,
+  with the coordinates as the table's labels (not addresses), so a re-read, a reordering of the rows or a
+  change of base address does not change which figure is which. A repeat is left out, reported, and counted.
+- **Universes.** A wide column's `totalOf` links its parts to it (a part in one total only, of one measure,
+  no loops: refused with `figures-mapping`). A dimension's `total` links a figure to the figure with
+  that code in place of its own in the last marked dimension where it is not the total (so
+  male agricultural labourers to all agricultural labourers, not to all male labourers: the order of
+  PLATO's example), and not when its coordinate there is "unknown". A missing total is
+  `figures-total-missing`; nothing is put in its place.
+- **Conservation.** `counts['figure cells']` = `figures` + `declared absences` + `blank cells` + `cells left out`,
+  asserted in `test/figures-reader.test.js` on every fixture that reads cells, and said in the summary line
+  (`conservation()` in `figures-text.js`, used by `summary()` in `words.js`).
+- **Kinds and words** are in `figures-text.js` (`FIGURES_KINDS` for severity, `FIGURES_TEXT` for the words,
+  merged into `LOSS_TEXT`), so that the report module need not load the reader.
+- **Not done here** (later branches of the plan): the page's panel, Methodos's recipe, the Elenchos kinds and
+  `check.cube` for P-1 to P-4 and IC-19, Agora's rendering of figures, and the measured size.
+
 ### Web annotations
 
 `src/formats/annotations.js` reads Recogito's exports and says why at each choice. The mapping key
