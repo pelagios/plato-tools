@@ -1150,13 +1150,13 @@ function projectTarget(name) {
 }
 /**
  * What a project must never hold (src/engine/methodos/project.js searches every part for each): the WHG
- * token, the CARTO key this build was given, and the values in the addresses of the basemaps pasted in
+ * token, the keys of language-model services held for this tab, the CARTO key this build was given, and the values in the addresses of the basemaps pasted in
  * Chora (`chora-basemaps`, where a key such as ?api_key=… is kept), read as plain text, never acted on.
  * The project refuses anything 8 characters or longer, so short values (z, x, y) are not searched for.
  */
 function projectSecrets() {
   // The share links' tokens seen in this tab, made here or opened (a share link is a capability: src/methodos/page.js).
-  const out = [permissions.token.get(), import.meta.env?.VITE_CARTO_API_KEY, ...(methodos?.shareTokens?.() || []), sharedHeld, sharedRetry];
+  const out = [permissions.token.get(), ...permissions.llmKeys.secrets(), import.meta.env?.VITE_CARTO_API_KEY, ...(methodos?.shareTokens?.() || []), sharedHeld, sharedRetry];
   try {
     const pasted = JSON.parse(localStorage.getItem('chora-basemaps') || '[]');
     for (const b of Array.isArray(pasted) ? pasted : []) {

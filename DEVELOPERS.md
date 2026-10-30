@@ -3955,7 +3955,9 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   basemap's site), `iiif` (a historical map's host), `allmaps` (the service), `gazetteer` (`whg`, or
   another service's site), `linked` (a host), `collaborate` (`whg`: WHG's Workbench, which keeps the
   projects saved to it, whole, and lets whoever has a share link read them; a service only, apart from
-  `gazetteer:whg`, though both are on whgazetteer.org). Its state is Allowed, Never, or Not decided (nothing
+  `gazetteer:whg`, though both are on whgazetteer.org), `llm` (a language-model service: `anthropic`, which is
+  `https://api.anthropic.com`, or another service's site, such as Ollama on `http://localhost:11434`; it learns
+  every word of the text sent to it and which key sent it). Its state is Allowed, Never, or Not decided (nothing
   recorded, the default). Not decided, a feature shows one line, "Needs permission: <name> —
   Permissions…", which opens the panel at that entry, where it can also be allowed for this tab only;
   Never, the feature does without, and says nothing. Never beats allowing for the tab. Everything
@@ -3994,7 +3996,43 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   `onChange`, the API Krisis's own keeper had before it moved here, and `remember(on)`, `remembered()`:
   kept for the tab unless the user chooses to remember it; the panel says which, and that only
   regenerating the token in WHG revokes it, and offers Forget only while there is a token, forgetting
-  the choice to remember it too, as the lookup panel's Forget does); there is no other.
+  the choice to remember it too, as the lookup panel's Forget does), and `llmKeys`, the keys of language-model
+  services (below); there is no other.
+- **Language-model services** (`llm`; plan #34 item 12, branch B2). The hosted adapters of Hermes's text
+  engine (`src/engine/hermes/text/providers/`) route as `{ cat: 'llm', subj }`; before this category they
+  were refused as no permission at all. Four things stand between a text and the service, and any one stops a send:
+  - **The permission**, as for any site: `llm:anthropic` (api.anthropic.com only) or `llm:<site>` for another
+    service (https, or http on this computer). The panel's words say what it learns (every word of the text, which key
+    sent it) and that its terms are its own. From the next load, as always.
+  - **The key** (`src/lib/llm-keys.js`, `permissions.llmKeys`): in this tab's memory only. It is in no
+    `localStorage`, `sessionStorage`, IndexedDB, OPFS, cookie, file or address (a test reads the module's source for
+    those words, and searches the stores for a key), so a reload or a closed tab forgets it; there is no "remember"
+    choice, unlike the WHG token, because this key spends money. It is **bound to the site it was typed for**:
+    `keyFor(subj, url)` gives it only for an address on that site, `boundTo(subj)` says where it may go, and
+    `guardKey` (`ask.js`), beneath the permissions module's fetch, refuses a request that carries it (in the
+    address, a header or the body) anywhere else, whatever built the request (`KeyError`, not retried). The panel lists
+    what is held, never the key, with Forget; withdrawing the permission (Never, forgetting it) or "Forget all
+    permissions" forgets its key too. `secrets()` gives the page's `projectSecrets()` every key held, so that a
+    project file holding one is refused, and `redact()` is given it by the adapters.
+  - **The user's agreement to the run** (`src/engine/hermes/text/consent.js`, pure): `assessRun` before anything
+    is sent, `consentWords` (names the service, shows the estimate, the ceiling, and that the provider's terms apply
+    to the text; never what the provider does with it, which is not known), `giveConsent` (a frozen record, only for
+    a run that is not blocked), and `limitProvider`, the provider the engine is given: the same adapter, whose
+    `extract` sends nothing without a consent for this service, site and model, nor once it is withdrawn, nor
+    while `permitted()` (the permission still allowed, the key still held) says no.
+  - **A hard ceiling on cost**, $2 a run unless the user changes it (`parseCeiling`). Before sending, a run whose
+    worst case (the high end of the estimate) is over it is blocked, with words; while it runs, the sum
+    spent is counted from the provider's own reported usage and no part is sent whose worst case would take the
+    total over (`CeilingError`: what was found before is kept; raise the ceiling to go on). A ceiling is a promise about
+    money, so it needs a price: a model the price table lacks, a table more than 90 days old, and any OpenAI-compatible
+    service elsewhere (the table has none) block the run as `no-price`; a server on this computer is not charged and is
+    not held to a ceiling. A run over 200 parts or $5 at worst still needs the second confirmation.
+  `planSend({ service, permissions, model, chunks, ceilingUsd })` (`ask.js`) is what the page calls: it is given the
+  permissions module (as an adapter is given the fetch), holds no key, and returns the readiness (`ready`: ok, or
+  why: never, undecided, reload, no-key), the estimate, the assessment and the words to show; `confirm()` is the
+  user's agreement and returns the provider for `runExtraction`, or throws a `ConsentError` whose `kind` says why. The
+  page that shows these is the next branch's (B3); none exists yet, and `OPERATIONS['text.find']` stays unavailable.
+  The command line's `--allow-host anthropic` (or a site, for the `llm` category) is the flag-as-consent as elsewhere.
 - **The Content Security Policy.** The first script in each page's `<head>` is the pure core, its
   `export`s removed, and `src/lib/csp-head.js`, put there inline by `scripts/vite-csp.mjs` at the
   page's `<!-- plato:csp -->` (a page without the mark fails the build). It writes, from the grants,

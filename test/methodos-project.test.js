@@ -339,6 +339,21 @@ test('nothing secret goes in: no part holds the token, the grants or the reviewe
   assert.equal(find([enc(TOKEN)], ['short']), false, 'shorter than 8 characters is not searched for');
 });
 
+test('a key held for a language-model service is among the secrets a project refuses, found in a review and in a file, and in none of the project written without it (B2)', async () => {
+  const { createKeyKeeper } = await import('../src/lib/llm-keys.js');
+  const keys = createKeyKeeper();
+  const KEY = 'sk-ant-test-NEVER-REAL-0123456789abcdef';
+  keys.set('anthropic', KEY);
+  const p = await atReview();
+  const planted = { ...p.review, text: p.review.text.replace('"test"', JSON.stringify(KEY)) };
+  await assert.rejects(written({ record: p.record, files: p.files, review: planted, refuse: keys.secrets() }), /holds your WHG token or another key/);
+  const { bytes } = await written({ record: p.record, files: p.files, review: p.review, refuse: keys.secrets() });   // the control: the same project, without it, is written
+  assert.ok(!Buffer.from(bytes).includes(KEY));
+  // The page gives the project every key held: its list of secrets names the keeper (a page's code, read as text).
+  const app = (await import('node:fs')).readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
+  assert.match(app.slice(app.indexOf('function projectSecrets()')), /permissions\.llmKeys\.secrets\(\)/);
+});
+
 test('the writer refuses what a project cannot hold: a part over 4 GiB, and a kept file that is not the one recorded; the user\'s own file can be left out, and is listed so', async () => {
   const p = await atReview();
   const changed = p.files.map((f) => (f.ref === p.refs.dataset ? { ...f, blob: file(JSON.stringify({ changed: true }).padEnd(DATASET.size), 'parishes.json') } : f));

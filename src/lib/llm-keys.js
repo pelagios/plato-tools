@@ -41,6 +41,8 @@ export function createKeyKeeper({ onChange } = {}) {
       const p = core.parse('llm', subj), h = p ? held.get(core.keyOf(p.cat, p.subj)) : null, o = core.originOf(url);
       return h && o && h.origins.includes(o) ? h.key : null;
     },
+    /** The sites a service's key was typed for ([] when none is held): what the key may be sent to, whatever else is asked. */
+    boundTo(subj) { const p = core.parse('llm', subj), h = p ? held.get(core.keyOf(p.cat, p.subj)) : null; return h ? h.origins.slice() : []; },
     /** What is held, without the keys: [{ key ('llm:subj'), subj, name, origins, at }]. */
     held() {
       return [...held].map(([k, h]) => { const p = core.parse(k); return { key: k, subj: p.subj, name: nameOf('llm', p.subj), origins: h.origins.slice(), at: h.at }; })

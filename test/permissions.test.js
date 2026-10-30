@@ -299,6 +299,14 @@ test('llm, a language-model service: a category of its own; anthropic is api.ant
   assert.equal(permissions.list().find((x) => x.key === 'llm:anthropic')?.state, 'undecided');
 });
 
+test('llm on the command line: the flag is the consent, by the service\'s name or its site for the llm category, and nothing else (B2)', () => {
+  assert.deepEqual(core.fromFlags({ allowHost: ['anthropic'] }).grants, { 'llm:anthropic': { state: 'allowed' } }, 'a name only the llm category has');
+  assert.deepEqual(core.fromFlags({ allowHost: ['http://localhost:11434'], hostCategory: 'llm' }).grants, { 'llm:http://localhost:11434': { state: 'allowed' } });
+  const none = core.fromFlags({ allowHost: ['https://llm.example.org'] });
+  assert.deepEqual([none.grants, none.refused], [{}, ['https://llm.example.org']], 'a site with no category to grant it for is refused');
+  assert.deepEqual(core.fromFlags({ allowHost: ['http://llm.example.org'], hostCategory: 'llm' }).refused, ['http://llm.example.org'], 'plain http elsewhere');
+});
+
 test('llm: undecided, Never and withdrawn send nothing, and allowed (the control) goes only to the service\'s own site (B2)', async () => {
   const MESSAGES = 'https://api.anthropic.com/v1/messages';
   const ask = (url, subj = 'anthropic') => permissions.fetch(url, { cat: 'llm', subj, method: 'POST', body: 'THE TEXT' });

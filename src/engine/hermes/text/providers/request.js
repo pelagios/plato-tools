@@ -7,8 +7,9 @@
 // - 408 (timed out), 429 (too many requests), 500, 502, 503, 504 and 529 (overloaded), and no answer at all, are tried again, at most `maxTries` tries in
 //   all, after the provider's Retry-After where it can be read (capped at a minute), else a growing pause.
 // - Each try is abandoned after `timeoutMs` and counts as no answer.
-// - A refusal by the permissions module (anything but its 'network' kind) is passed on as it is, at
-//   once: asking again would not change it.
+// - A refusal by the permissions module (anything but its 'network' kind), or by the key guard (ask.js:
+//   a request that would carry a key to a site it was not typed for), is passed on as it is, at once:
+//   asking again would not change it.
 // - A provider's error body is never passed on as it is: the error says what happened in words chosen
 //   by the status, followed by the provider's own message, redacted (redact.js) and cut short.
 
@@ -104,7 +105,7 @@ export async function send({ fetch: f, url, init, route = {}, signal, timeoutMs 
       text = await res.text();
     } catch (e) {
       if (signal?.aborted) throw signal.reason;
-      if (e?.name === 'PermissionError' && e.kind !== 'network') throw e;
+      if ((e?.name === 'PermissionError' && e.kind !== 'network') || e?.name === 'KeyError') throw e;
       if (tries < maxTries) { await sleep(Math.min(30_000, 1000 * 2 ** (tries - 1)), signal); continue; }
       const why = one.timedOut() ? ` within ${Math.round(timeoutMs / 1000)} seconds` : e?.message ? ` (${clip(redact(e.message, keys))})` : '';
       throw new LlmError(`${who} could not be reached${why}.`, { kind: 'network' });

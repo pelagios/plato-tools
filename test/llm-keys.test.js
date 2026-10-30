@@ -60,6 +60,8 @@ test('a key is bound to the site it was typed for: it is never handed out for an
   assert.equal(k.keyFor('anthropic', 'http://localhost:11434/v1/chat/completions'), null, 'Anthropic\'s key to this computer\'s server');
   assert.equal(k.keyFor('http://localhost:11434', MESSAGES), null, 'the local server\'s key to Anthropic');
   assert.equal(k.keyFor('https://llm.example.org', 'https://llm.example.org/v1/models'), null, 'no key held for a service not given one');
+  assert.deepEqual(k.boundTo('anthropic'), ['https://api.anthropic.com'], 'and the keeper says where a key may go');
+  assert.deepEqual(k.boundTo('https://llm.example.org'), []);
   // Not a permission at all: no key is kept for it.
   for (const bad of ['openai', 'http://llm.example.org', 'https://llm.example.org/v1', '', 'linked:x']) assert.throws(() => k.set(bad, KEY), TypeError, bad);
 });

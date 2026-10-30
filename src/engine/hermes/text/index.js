@@ -10,6 +10,7 @@ export { WORK_VERSION, TYPE_KINDS, newWork, readWork, serialiseWork, checkText, 
 export { attestationsFrom, attestationsDocument, sourceOf, locatorOf, unlinkedCsv } from './attest.js';
 export { runExtraction, extractChunk, MIN_HALF } from './run.js';
 export { DEFAULT_CEILING_USD, MAX_CEILING_USD, ConsentError, CeilingError, isThisComputer, parseCeiling, assessRun, consentWords, giveConsent, limitProvider } from './consent.js';
+export { KeyError, guardKey, readiness, planSend } from './ask.js';
 export { LlmError, send } from './providers/request.js';
 export { anthropic, ANTHROPIC_ORIGIN, EFFORTS, DEFAULT_EFFORT } from './providers/anthropic.js';
 export { openaiCompatible } from './providers/openai-compatible.js';

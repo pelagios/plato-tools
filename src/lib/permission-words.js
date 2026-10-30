@@ -160,4 +160,5 @@ export const REFUSED = {
   redirect: (site) => `${site} answered by sending the request elsewhere, which is not followed, so its answer was not used.`,
   moved: (site, landed) => `${site} sent the request on to ${landed}, another site, so its answer was not used.`,
   network: (site) => `${site} could not be reached; it may not allow other sites to read it.`,
+  noKey: (name) => `No key is held for ${name}: type one in. It is kept for this tab only, and sent only to ${name}.`,
 };
