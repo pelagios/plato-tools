@@ -57,6 +57,7 @@ export function summary(report, action) {
   if (action === 'apply') return applySummary(report);
   if (action === 'revise') return reviseSummary(report);
   if (action === 'candidates') return candidatesSummary(report);
+  if (action === 'datacube') return datacubeSummary(report);
   // The regions a table's places lie in, minted as places (Hermes, generic.js), are among the places, and said apart.
   const regions = (k) => (k === 'places' && c.regions ? ` (${c.regions.toLocaleString('en-GB')} of them ${c.regions === 1 ? 'a region' : 'regions'})` : '');
   // The regions of an export read with georeferences (pipeline.js annotationSource): how many of them were placed.
@@ -93,6 +94,16 @@ function compareSummary(report) {
   };
 }
 
+/** The summary of the Data Cube check (Arithmos): whether any constraint failed, and what was checked, with its count. */
+function datacubeSummary(report) {
+  const c = report.counts, nErr = report.errors, checks = c.checks || [];
+  const failed = checks.filter((x) => x.status === 'fail' && x.blocks).length, warned = checks.filter((x) => x.status === 'fail' && !x.blocks).length;
+  return {
+    problems: nErr ? `${failed.toLocaleString('en-GB')} ${failed === 1 ? 'constraint' : 'constraints'} failed (${nErr.toLocaleString('en-GB')} ${nErr === 1 ? 'problem' : 'problems'}).` : 'No constraint failed.',
+    counted: checks.length ? `Checked ${count(c.observations || 0, 'observations')} against ${count(checks.length, 'constraints')}${warned ? `, ${warned === 1 ? 'one of which warns' : `${warned} of which warn`}` : ''}.` : '',
+  };
+}
+
 /**
  * The summary of a part of publishing (Agora): whether anything stops publication, and what the
  * part counted. Each part counts in its own words (report.counts.said, a list of short phrases).
@@ -113,6 +124,11 @@ export function groups(action) {
     { severity: 'warning', title: 'Warnings', intro: 'Worth fixing: the dataset can be published, but is harder to find, cite or reuse.' },
   ];
   if (action === 'match' || action === 'apply') return krisisGroups(action);
+  if (action === 'datacube') return [
+    { severity: 'error', title: 'Problems', intro: 'These make the Data Cube wrong, or the figures in it: fix them before it is published.' },
+    { severity: 'warning', title: 'Warnings', intro: 'Worth a look: none of these stops the Data Cube being used, and a sum that fails is sometimes the source\'s own arithmetic.' },
+    { severity: 'note', title: 'What was checked', intro: 'Each constraint, with the number of things it evaluated: one with nothing to evaluate is not tested, and never counted as passed.' },
+  ];
   if (action === 'revise') return [
     { severity: 'error', title: 'Problems', intro: 'Nothing was written because of these.' },
     { severity: 'warning', title: 'Warnings', intro: 'What the revision did, each named: worth a look before the revised dataset is published.' },

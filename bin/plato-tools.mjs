@@ -115,9 +115,15 @@ Usage:
                                             publish a review's suggestions as a PLATO candidate
                                             set, for its attestations to point at (promotedFrom);
                                             each candidate's address is stored in WORKFILE
-  plato-tools datacube [--json] FILE...     check a cube export (convert --to ntriples --cube)
+  plato-tools datacube [--json] [--codes FILE] FILE...
+                                            check a cube export (convert --to ntriples --cube)
                                             against the RDF Data Cube integrity constraints IC-1,
-                                            IC-2, IC-11, IC-12 and IC-14
+                                            IC-2, IC-11, IC-12 and IC-14 (and IC-19, with the code
+                                            file), and the figures' own checks: P-1 universes are
+                                            figures of the table, P-2 parts sum to their universe
+                                            (warns), P-3 coordinates are declared, P-4 values are
+                                            numbers. Exit 1 if any fails, or any integrity
+                                            constraint had nothing to evaluate; a warning does not
   plato-tools project info [--json] FILE    list what a PLATO tools project (.platoproj, saved
                                             by Methodos on the page) holds, and check the size
                                             and SHA-256 of every part; exit 1 if it is refused
@@ -369,6 +375,9 @@ ${QUALIFIER_LISTS.map((l) => `                    ${l.id}: ${l.label}${l.status 
                     work file with your name (--reviewer) and the date.
   --statements LIST wikidata batch: which statements to write, of labels, aliases, description, p31,
                     p625, p17, p131 (default: all).
+  --codes FILE      datacube: the code file, N-Triples of the code lists (qb:codeList on a coordinate, its
+                    codes skos:inScheme the list); with it, every value of such a coordinate is checked
+                    to be in its list (IC-19).
   --user NAME       wikidata ids: your Wikidata user name, sent to Wikidata (and nowhere else) to
                     read the items you created since the batch was written.
   --qids FILE       wikidata ids: a file of the new items' Q-ids, as pasted, in the batch's order.
@@ -479,6 +488,7 @@ async function main(argv) {
         repo: { type: 'string' }, 'site-url': { type: 'string' }, turtle: { type: 'boolean', default: false },
         only: { type: 'string' }, 'dataset-path': { type: 'string' }, 'tools-ref': { type: 'string' }, 'site-dir': { type: 'string' },
         // wikidata (Issue #36): the consent to ask Wikidata, the rights statement, the statements, the user name, the Q-ids, a stand-in API for the tests.
+        codes: { type: 'string' },
         'allow-host': { type: 'string', multiple: true, default: [] }, consent: { type: 'boolean', default: false }, statements: { type: 'string' }, user: { type: 'string' }, qids: { type: 'string' }, api: { type: 'string' },
         help: { type: 'boolean', short: 'h', default: false }, version: { type: 'boolean', short: 'V', default: false },
       },
@@ -515,6 +525,7 @@ async function main(argv) {
   if (o.column !== undefined || o.method !== undefined) return usage('--column and --method are for cluster.');
   if (o.clusters !== undefined && !reads) return usage('--clusters is for check, convert and preview.');
   if (action === 'datacube') return datacube(args, o);
+  if (o.codes !== undefined) return usage('--codes is for datacube.');
   if (action === 'publish') return publishCommand(args, o, resources);
   if (o.sheet !== undefined && !reads && action !== 'revise') return usage('--sheet is for check, convert, preview and revise.');
   if (o.split.length && !reads) return usage('--split is for check, convert and preview.');
@@ -1246,26 +1257,34 @@ async function sharedProjectInfo(link, o, { readProject, describe, blobSource })
 }
 
 /**
- * Check cube exports against the Data Cube integrity constraints. Each file is read as a stream,
- * but its graph is held in memory to be checked, so a cube larger than memory cannot be. Exit 0 when every constraint passed, 1 when any failed or had nothing to
- * evaluate (a constraint over nothing is not tested, never passed), 2 when a file cannot be read.
+ * Check cube exports against the Data Cube integrity constraints (IC-19 with --codes) and the figures' checks, P-1 to P-4
+ * (src/lib/datacube.js, the code the page's "Check the Data Cube" runs too). Each file is read as a stream, but its graph
+ * is held in memory to be checked, so a cube larger than memory cannot be. Exit 0 when every constraint passed, or P-2,
+ * which only warns, failed; 1 when any other failed, or an integrity constraint had nothing to evaluate (a constraint over
+ * nothing is not tested, never passed; P-1 to P-4 over nothing are shown, but a table with no totals is usual); 2 when a
+ * file cannot be read.
  */
 async function datacube(files, o) {
   if (!files.length) return usage('name at least one N-Triples cube export to check.');
-  const { integrityOfFile } = await import('../src/lib/datacube.js');
+  const { cubeChecksOfFile } = await import('../src/lib/datacube.js');
   const { openFiles } = await import('../src/node/host.js');
+  let codes;
+  if (o.codes !== undefined) {
+    try { [codes] = await openFiles([o.codes]); } catch (e) { return usage(`--codes ${o.codes} cannot be read: ${e.message}`); }
+  }
   let code = 0;
   for (const path of files) {
     let results;
-    try { const [f] = await openFiles([path]); results = await integrityOfFile(f); }
+    try { const [f] = await openFiles([path]); results = await cubeChecksOfFile(f, { codes }); }
     catch (e) { process.stdout.write(o.json ? JSON.stringify({ input: path, status: 'failed', message: e.message }) + '\n' : `${path}: could not be checked: ${e.message}\n`); code = 2; continue; }
-    const bad = results.filter((r) => r.status !== 'pass');
-    if (bad.length && code < 1) code = 1;
-    if (o.json) { process.stdout.write(JSON.stringify({ input: path, results: results.map(({ ic, status, evaluated, violations }) => ({ ic, status, evaluated, violations: violations.slice(0, 20), violationCount: violations.length })) }) + '\n'); continue; }
+    const stops = results.filter((r) => (r.status === 'fail' && r.blocks) || (r.status === 'not-tested' && !r.ic.startsWith('P-')));
+    if (stops.length && code < 1) code = 1;
+    if (o.json) { process.stdout.write(JSON.stringify({ input: path, results: results.map(({ ic, status, evaluated, violations, blocks, skipped }) => ({ ic, status, blocks, evaluated, ...(skipped ? { skipped } : {}), violations: violations.slice(0, 20), violationCount: violations.length })) }) + '\n'); continue; }
     process.stdout.write(`${path}:\n`);
     for (const r of results) {
-      const word = r.status === 'pass' ? 'passes' : r.status === 'fail' ? `FAILS (${r.violations.length.toLocaleString('en-GB')})` : 'NOT TESTED: nothing to evaluate';
-      process.stdout.write(`  ${r.ic.padEnd(6)} ${word}, ${r.evaluated.toLocaleString('en-GB')} evaluated\n`);
+      const n = r.violations.length.toLocaleString('en-GB');
+      const word = r.status === 'pass' ? 'passes' : r.status === 'fail' ? (r.blocks ? `FAILS (${n})` : `WARNS (${n})`) : 'NOT TESTED: nothing to evaluate';
+      process.stdout.write(`  ${r.ic.padEnd(6)} ${word}, ${r.evaluated.toLocaleString('en-GB')} evaluated${r.skipped ? `, ${r.skipped.toLocaleString('en-GB')} not summed` : ''}\n`);
       for (const v of r.violations.slice(0, 5)) process.stdout.write(`         ${v}\n`);
     }
   }

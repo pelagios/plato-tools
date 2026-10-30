@@ -23,6 +23,8 @@ import { lineChunks, lines, jsonDocument, annotationItems, TABLE_SHEETS, DataErr
 import { csvRecords, textChunks, papaRecords, papaRow } from '../formats/csv.js';
 import { Report, LOSS_TEXT, droppedText, FORMAT_WORDS, WORKBOOK_TEXT, dateTimeWords, CANDIDATE_CHECK_TEXT, candidatesNotGivenText } from './report.js';
 import { RUN_TEXT } from './words.js';
+import { FigureCheck } from './figurecheck.js';
+import { checkCube } from './cubecheck.js';
 import { gzipped } from '../lib/gzip.js';
 import { slimSet, checkSet, checkAcross, checkEnds, candidateIndex, answers, checkAnswer } from './candidates.js';
 
@@ -587,7 +589,7 @@ export async function run(job, env) {
     o.close = async (...b) => { open.delete(o); return close.apply(o, b); };
     return o;
   };
-  try { return await runChecked(job, { ...env, output }, rep); }
+  try { return job.action === 'datacube' ? await checkCube(job, { ...env, output }, rep) : await runChecked(job, { ...env, output }, rep); }
   catch (e) {
     for (const o of open) { try { await o.close(); } catch { /* closed as far as it can be */ } }
     if (e instanceof Aborted) { rep.error('stopped', RUN_TEXT.stopped); return { report: rep.toJSON(), outputs: [], incomplete: true, aborted: true }; }
@@ -698,9 +700,13 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   // Checking (and writing) records as they stream past.
   // Memberships of routes, itineraries and networks, to find one that contains itself (PLATO 0.6.0).
   const membership = new Map();
+  // A table's figures (src/engine/figurecheck.js): given the header's tables, then each record's attestations, and
+  // reporting at the end. What goes through the store is given when it is read back, once, not as it is read.
+  const figures = new FigureCheck(rep, res.context);
   const checkRecord = (ev) => {
     if (ev.type === 'record' && ev.value) collectMembership(ev.value.attestations, ev.value['@id'], membership);
     else if (ev.type === 'attestation' && ev.value) collectMembership([ev.value], null, membership);
+    if (!needsStore && ev.value) figures.attestations(ev.type === 'record' ? ev.value.attestations : ev.type === 'attestation' ? [ev.value] : []);
     const f = ev.newEntity ? V.newEntity : ev.type === 'record' ? V.entity : ev.type === 'attestation' ? V.attestation : V.identity;
     if (f && !f(ev.value)) {
       // A source cited by its address alone because sources.csv could not be read (tablesSource) is
@@ -754,6 +760,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
         header = ev.value;
         if (input.format.startsWith('plato') && !V.header(header)) rep.error('schema', `The document header does not match the PLATO JSON Schema: ${ajvMessage(V.header.errors)}`);
         dry.header(header);
+        figures.header(header);
         writer && writer.header(header);
         cands?.dataset(header);
         continue;
@@ -801,7 +808,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
         if (ev.type === 'not-a-list') { notAList(ev); continue; }
         // The header goes to the store's converter alone, which reports what it cannot use: given to
         // `dry` as well, each of its problems was reported twice. The candidate checks still read it.
-        if (ev.type === 'header') { header = ev.value; w.header(header); cands?.dataset(header); if (!V.header(header)) rep.error('schema', `The document header does not match the PLATO JSON Schema: ${ajvMessage(V.header.errors)}`); continue; }
+        if (ev.type === 'header') { header = ev.value; w.header(header); figures.header(header); cands?.dataset(header); if (!V.header(header)) rep.error('schema', `The document header does not match the PLATO JSON Schema: ${ajvMessage(V.header.errors)}`); continue; }
         checkRecord(ev);
         keepWithin(ev);
         if (cands && ev.value) cands.record(ev.value);
@@ -884,6 +891,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       }
       const head = docId ? { $schema: 'https://w3id.org/plato/schemas/place-centric.schema.json', ...r2j.header(docId) } : { profile: 'place-centric', gazetteer: { title: input.files[0].name } };
       head.profile = 'place-centric';
+      if (isRdf) figures.header(head);   // read back from the graph: a dataset's own header was given as it was read
       writer && writer.header(head);
       // From RDF, what the candidate set rules read is in the records as they are read back.
       const fromGraph = isRdf && cands;
@@ -909,6 +917,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
         n++; rep.count('places'); rep.count('attestations', rec.attestations?.length || 0);
         if (isRdf && !V.entity(rec)) rep.error('schema', explainSchema(V.entity.errors, false), `${e}: ${ajvMessage(V.entity.errors)}`);
         collectMembership(rec.attestations, rec['@id'], membership);
+        figures.attestations(rec.attestations);
         if (fromGraph) cands.record(rec);
         if (writer) await write({ type: 'record', value: rec, n, ...withinByPlace.get(e) });
         beat('writing', { places: n });
@@ -933,6 +942,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
     for (const value of extra) { stop(); await writer.event({ type: 'record', value }); rep.count('places added'); }
   }
   cands?.finish();
+  figures.finish();
   for (const c of membershipCycles(membership)) rep.error('membership-cycle', 'A route, itinerary or network is, through its members, a member of itself (MemberOf, followed round, comes back to where it started)', c);
   if (writer) await writer.close();
   progress({ phase: 'done', ...rep.counts, elapsedMs: Date.now() - t0 });

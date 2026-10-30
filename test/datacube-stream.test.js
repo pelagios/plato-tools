@@ -62,7 +62,7 @@ test('plato-tools datacube: 0 when every constraint passes, 1 when one fails, 2 
     assert.equal(c.status, 0, c.stdout + c.stderr);
     r = cli('datacube', join(dir, 'place-centric-statistics.nt'));
     assert.equal(r.status, 0, r.stdout);
-    assert.equal((r.stdout.match(/ passes, /g) || []).length, 5, r.stdout);
+    assert.equal((r.stdout.match(/ passes, /g) || []).length, 9, r.stdout);   // the five integrity constraints, and the figures' P-1 to P-4
   }
   r = cli('datacube', join(dir, 'missing.nt'));
   assert.equal(r.status, 2, r.stdout + r.stderr);

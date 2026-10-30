@@ -401,3 +401,24 @@ export function candidatesNotGivenText(answers, listed) {
   if (answers) return `${answers === 1 ? 'One identity relation answers a candidate' : `${n} identity relations answer candidates`} (promotedFrom); give the candidate sets to check that ${answers === 1 ? 'it exists' : 'they exist'}${listed ? ': the dataset lists those in the examples (candidateSets)' : ''}. Nothing is fetched.`;
   return 'The dataset lists candidate sets (candidateSets); give them to check that they say they are for this dataset. Nothing is fetched.';
 }
+
+// ---- a table's figures (src/engine/figurecheck.js) and the Data Cube check (src/engine/cubecheck.js) -----
+// What Elenchos says of each kind the figure rules raise. All are errors: the schema allows each of them,
+// and each makes the cube wrong. The examples name the figure and what it names.
+export const FIGURE_TEXT = {
+  'figure-table-undeclared': "A figure belongs to a table (dataSet) that the document's dataSets does not describe, so its structure is not known and the cube made from it has a data set with no structure (IC-2). Describe the table in dataSets, or correct the figure's dataSet.",
+  'figure-coordinate-undeclared': "A figure has a coordinate (a key of its dimensions) that its table's structure does not declare, so a cube made from it says something its structure does not. Declare the dimension among the structure's components, or take it off the figure.",
+  'figure-universe-missing': 'A figure names as its universe (the whole it is a part or share of) an address that is no figure in the document. A universe is a figure; one is never inferred, and one that points nowhere is a mistake.',
+  'figure-universe-other-table': 'A figure names as its universe a figure of another table. The whole a figure is a part of is in its own table.',
+  'figure-universe-cycle': 'A figure is, through its universe, its own whole: following universe from figure to figure comes back to where it began (a figure that names itself is the shortest case). The example names a figure in the loop.',
+  'figure-value-not-number': 'A figure has a value that is not a number (a string such as "280", a true or false, or an object). A measure is a number; a printed dash is a figure with no value and an obsStatus, not a value. PLATO\'s schema allows any of them, and the cube would carry it as text.',
+};
+
+// What the Data Cube check says of each constraint: one line, whether it passed, failed or was not tested,
+// always with the count it evaluated (src/engine/cubecheck.js).
+export const CUBE_CHECK_TEXT = {
+  fail: (ic, what, n) => `${ic} fails: ${what} (${n.toLocaleString('en-GB')} ${n === 1 ? 'does not' : 'do not'}).`,
+  warn: (ic, what, n) => `${ic} does not hold: ${what} (${n.toLocaleString('en-GB')} ${n === 1 ? 'family does not' : 'families do not'}). This is a warning, not a failure: a sum that fails is sometimes the source's own arithmetic, so you decide.`,
+  notTested: (ic, what) => `${ic} was not tested: there was nothing to evaluate for "${what}", so it is not reported as passed.`,
+  checked: (ic, what, status, evaluated, skipped) => `${ic} (${what}) ${status === 'pass' ? 'passes' : status === 'fail' ? 'fails' : 'was not tested'}, ${evaluated.toLocaleString('en-GB')} evaluated${skipped ? `; ${skipped.toLocaleString('en-GB')} not summed (a lone part, a part with no number, or parts that differ in more than one coordinate)` : ''}.`,
+};

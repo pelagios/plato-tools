@@ -180,6 +180,14 @@ export const ADAPTERS = {
     const r = await engine(host, null, (env) => run({ input, action: 'check', options: { ...(columns ? { columns } : {}), signal } }, env));
     return r.problem ? r : { report: r.report, outputs: {} };
   },
+  // Arithmos: the Data Cube's constraints and the figures' checks (src/engine/cubecheck.js), on the cube export or on a dataset
+  // (converted to its cube in memory), with the code file if one is handed on: the same run as the page's "Check the Data Cube".
+  async 'check.cube'({ inputs, host, signal }) {
+    const input = await inputOf(inputs.dataset, host, 'dataset');
+    const [codes] = inputs.codes ? await filesFor(inputs.codes, host) : [];
+    const r = await engine(host, null, (env) => run({ input, action: 'datacube', options: { ...(codes ? { codes } : {}), signal } }, env));
+    return r.problem ? r : { report: r.report, outputs: {} };
+  },
   async convert({ inputs, options, host, signal }) {
     const input = await inputOf(inputs.files, host, 'file');
     const columns = await columnsOf(inputs.mapping, host);

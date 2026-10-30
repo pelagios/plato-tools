@@ -23,6 +23,10 @@ export const OPERATIONS = Object.fromEntries([
     waitsFor: "the table's columns to be matched to PLATO, in the Columns panel",
     takes: { files: { types: ['files'] } }, gives: { mapping: 'mapping' } }),
   op({ key: 'check', title: 'Check the data', tool: 'Elenchos', takes: { files: { types: ANY }, mapping: { types: ['mapping'], optional: true } } }),
+  // Check the Data Cube (Arithmos; plan #34, item 11; src/engine/cubecheck.js): the cube export's integrity constraints (IC-1, 2, 11,
+  // 12, 14; 19 with a code file) and the checks on its figures (P-1 to P-4). A failure stops the step; the arithmetic of a universe's
+  // parts only warns; a constraint over nothing is not tested. It takes the cube export or a dataset (converted to its cube in memory).
+  op({ key: 'check.cube', title: 'Check the Data Cube', tool: 'Arithmos', takes: { dataset: { types: ANY }, codes: { types: ANY, optional: true } } }),
   op({ key: 'convert', title: 'Convert the data', tool: 'Metaphrasis',
     takes: { files: { types: ANY }, mapping: { types: ['mapping'], optional: true } }, gives: { dataset: 'dataset' } }),
   op({ key: 'compare', title: 'Compare two versions', tool: 'Mneme', takes: { earlier: { types: ANY }, later: { types: ANY } } }),
