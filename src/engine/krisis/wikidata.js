@@ -328,7 +328,7 @@ export function decimalsFor(precisionKm) {
 const round = (x, d) => Number(x.toFixed(d));
 // A text as a QuickStatements string: the outer quotes are its (the V1 parser takes the first and the last, so a quote
 // inside is written as it is); a tab or a newline, which would end the command, is a space, and planItems warns of it.
-const q = (s) => `"${String(s).replace(/[\t\r\n]+/g, ' ').trim()}"`;
+const q = (s) => `"${String(s).normalize('NFC').replace(/[\t\r\n]+/g, ' ').trim()}"`;
 /** An address as a QuickStatements string, never altered (an address has no tab or newline, and is cited exactly). */
 const qUrl = (s) => `"${String(s)}"`;
 /** A description as Help:Description asks: lower case to begin, no full stop to end, one space between words. */
@@ -513,27 +513,35 @@ export function entityPoint(entity) {
 }
 /**
  * Whether an item is the one a batch row made (D4): its label in some language equals one of the item's labels
- * (the row's), its point (P625) within VERIFY_KM of the row's (where the row has one), and the row's reference on it
- * (a P854 reference URL that is the place's address). Returns { ok, label, distanceKm, reference }: each check's
- * finding, so that the page can say which failed. `entity` is wbgetentities' entity (labels, aliases, claims).
+ * (the row's; both as Wikibase stores a term, in Unicode NFC), its point (P625) within VERIFY_KM of the row's (where the
+ * row has one), and the row's reference on it (a P854 reference URL that is the place's address). `statements` is what
+ * the batch wrote (its record's; every one on when not given): a check whose statement was off is not made (null in the
+ * finding), since the item cannot carry what was never written, and a batch that wrote neither a label nor any statement
+ * with a reference has nothing to verify an item by, so none is. Returns { ok, label, distanceKm, near, reference }: each
+ * check's finding, so that the page can say which failed. `entity` is wbgetentities' entity (labels, aliases, claims).
  */
-export function verifyItem(entity, item) {
+export function verifyItem(entity, item, statements = DEFAULT_STATEMENTS) {
+  const st = { ...DEFAULT_STATEMENTS, ...statements };
+  const nfc = (t) => String(t).normalize('NFC').trim();
+  const refWritten = st.p31 || st.p625 || st.p17 || st.p131;   // the statements that carry the reference (S854)
   const { labels } = entityNames(entity);
-  const ours = Object.values(item.labels || {}).map((s) => s.trim());
-  const label = labels.some((l) => ours.includes(l.trim()));
+  const ours = Object.values(item.labels || {}).map(nfc);
+  const label = st.labels ? labels.some((l) => ours.includes(nfc(l))) : null;
   const p = entityPoint(entity);
-  const d = item.point && p ? Math.round(distanceKm(item.point, p) * 1000) / 1000 : null;
-  const near = !item.point ? null : d !== null && d <= VERIFY_KM;
-  const reference = referenceUrls(entity).includes(item.iri);
-  return { ok: label && reference && near !== false, label, distanceKm: d, near, reference };
+  const asked = st.p625 && !!item.point;
+  const d = asked && p ? Math.round(distanceKm(item.point, p) * 1000) / 1000 : null;
+  const near = !asked ? null : d !== null && d <= VERIFY_KM;
+  const reference = refWritten ? referenceUrls(entity).includes(item.iri) : null;
+  return { ok: (label !== null || reference !== null) && label !== false && reference !== false && near !== false, label, distanceKm: d, near, reference };
 }
 /**
  * Each entity matched to the batch row whose address it carries as a reference (the strong key), then verified
  * (verifyItem). `entities` is { Qn: entity }, `items` the batch's items (planItems'). Returns { matched: [{ qid, iri,
  * verified }], unmatched: [qid] (an item of the user's that carries no address of the batch), twice: [{ iri, qids }]
- * (two items for one place: neither is taken) }.
+ * (two items for one place: neither is taken) }. `statements` is what the batch wrote (verifyItem). An item is found by its
+ * reference, so a batch that wrote no statement with one cannot be read this way: its Q-ids are pasted.
  */
-export function matchItems(entities, items) {
+export function matchItems(entities, items, statements = DEFAULT_STATEMENTS) {
   const byIri = new Map(items.map((it) => [it.iri, it]));
   const found = new Map();
   const unmatched = [];
@@ -546,7 +554,7 @@ export function matchItems(entities, items) {
   const matched = [], twice = [];
   for (const [iri, qids] of found) {
     if (qids.length > 1) { twice.push({ iri, qids }); continue; }
-    matched.push({ qid: qids[0], iri, verified: verifyItem(entities[qids[0]], byIri.get(iri)) });
+    matched.push({ qid: qids[0], iri, verified: verifyItem(entities[qids[0]], byIri.get(iri), statements) });
   }
   return { matched, unmatched, twice };
 }

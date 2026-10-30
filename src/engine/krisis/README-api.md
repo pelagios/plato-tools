@@ -287,7 +287,7 @@ words them all.
   (a sink for run(); `.result() -> { gazetteer, records: Map }`), `classOf(place, chosen?)`, `CLASSES`, `countryOf(code)`,
   `codeOfCountry(qid)`, `describe`, `tidyDescription`, `decimalsFor(precisionKm)`, `regionItem(work, iri)`, `searchState(work, iri)`,
   `mintOf(work)` (the mint section, made if absent), `recordBatch(work, { items, name, sha256, at?, statements })`,
-  `readPastedQids(text)`, `pairPasted(qids, items)`, `verifyItem(entity, item) -> { ok, label, distanceKm, near, reference }`,
+  `readPastedQids(text)`, `pairPasted(qids, items)`, `verifyItem(entity, item, statements?) -> { ok, label, distanceKm, near, reference }`,
   `matchItems(entities, items) -> { matched, unmatched, twice }`, `recordMinted(work, iri, qid, { batch, reviewer, how, verified, at?,
   label?, point? }) -> candidate` (throws unless verified), `entityCandidate(entity, { lang, foundBy })` (the gazetteer module's
   Candidate shape), the request addresses `searchUrl`, `nearUrl`, `entitiesUrl`, `contribsUrl`, and the constants

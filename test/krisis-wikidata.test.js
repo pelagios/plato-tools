@@ -325,6 +325,36 @@ test('an item is verified by its label, its point within 1 km and our reference 
   assert.equal(verifyItem(entity('Q1', { reference: null }), item).ok, false);
 });
 
+test('an item is verified against what its batch wrote: a check whose statement was off is not made, and a batch that left everything checkable out verifies nothing (W1)', () => {
+  const item = { iri: P('newstead'), labels: { en: 'Newstead' }, point: [-1.193, 53.081] };
+  const off = (...keys) => ({ ...Object.fromEntries(STATEMENTS.map((k) => [k, true])), ...Object.fromEntries(keys.map((k) => [k, false])) });
+  // p625 off: the item has no point, and none is asked.
+  const noPoint = entity('Q1', { point: null });
+  assert.equal(verifyItem(noPoint, item).ok, false, 'control: with every statement on, the missing point fails');
+  assert.deepEqual(verifyItem(noPoint, item, off('p625')), { ok: true, label: true, distanceKm: null, near: null, reference: true });
+  // labels off: a label that is not ours is not asked about.
+  assert.equal(verifyItem(entity('Q1', { label: 'Something else' }), item).ok, false, 'control');
+  assert.equal(verifyItem(entity('Q1', { label: 'Something else' }), item, off('labels', 'aliases')).ok, true);
+  // only labels, aliases and description on: no statement carries the reference, so none is asked; the label is the check.
+  const textOnly = off('p31', 'p625', 'p17', 'p131');
+  assert.equal(verifyItem(entity('Q1', { reference: null, point: null }), item, textOnly).ok, true);
+  assert.equal(verifyItem(entity('Q1', { reference: null, point: null, label: 'Something else' }), item, textOnly).ok, false, 'presence beside it: a wrong label still fails');
+  // nothing left to check by (no label, no reference): nothing is verified.
+  assert.equal(verifyItem(entity('Q1', { reference: null, point: null }), item, off('labels', 'p31', 'p625', 'p17', 'p131')).ok, false);
+  // a statement left on is still held to its check: a point written and not found fails.
+  assert.equal(verifyItem(noPoint, item, off('labels')).ok, false);
+});
+
+test('a label written decomposed (NFD) is the label Wikidata stores composed (NFC), and verifies; the batch writes NFC (W2)', () => {
+  const nfd = 'Athe\u0301nai', nfc = 'Ath\u00e9nai';
+  assert.notEqual(nfd, nfc);
+  const item = { iri: P('newstead'), labels: { en: nfd }, point: [-1.193, 53.081] };
+  assert.equal(verifyItem(entity('Q1', { label: nfc }), item).ok, true, 'ours decomposed, theirs composed');
+  assert.equal(verifyItem(entity('Q1', { label: nfd }), { ...item, labels: { en: nfc } }).ok, true, 'ours composed, theirs decomposed');
+  assert.equal(verifyItem(entity('Q1', { label: 'Athenai' }), item).label, false, 'presence beside it: a different spelling is still not it');
+  assert.match(quickStatementsV1([{ ...item, description: 'village', class: null, aliases: {} }], { date: '2026-10-15', statements: { description: false } }), new RegExp(`LAST\tLen\t"${nfc}"`), 'written composed');
+});
+
 test('items read from the user\'s own contributions are matched to the batch\'s rows by the reference they carry, and verified; the rest are left', () => {
   const items = [{ iri: P('newstead'), labels: { en: 'Newstead' }, point: [-1.193, 53.081] }, { iri: P('kirkby'), labels: { en: 'Kirkby' }, point: [-1.25, 53.1] }];
   const entities = { Q11: entity('Q11'), Q12: entity('Q12', { label: 'Kirkby', point: [-1.25, 53.1], reference: P('kirkby') }), Q13: entity('Q13', { label: 'Something else', reference: 'https://elsewhere.example/' }), Q14: { id: 'Q14', missing: '' } };

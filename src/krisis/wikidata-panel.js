@@ -262,7 +262,7 @@ export function mountWikidata(host) {
     return pairs.map((p) => {
       const e = entities[p.qid], row = rows.find((r) => r.iri === p.iri);
       if (!e || e.missing !== undefined || !row) return { ...p, missing: true, verified: { ok: false } };
-      return { ...p, verified: p.verified || verifyItem(e, row), label: e.labels?.en?.value ?? null };
+      return { ...p, verified: p.verified || verifyItem(e, row, b.statements), label: e.labels?.en?.value ?? null };
     });
   }
   /** The batch the Q-ids are checked against: the one chosen, else the last. */
@@ -294,7 +294,7 @@ export function mountWikidata(host) {
       const contribs = await readContribs({ fetch, user, since: b.at, signal: ctl.signal });
       const { entities } = await readEntities({ fetch, ids: contribs.items.map((x) => x.qid), signal: ctl.signal });
       const rows = await batchRows(b);
-      const matched = matchItems(entities, rows);
+      const matched = matchItems(entities, rows, b.statements);
       checked = matched.matched.map((x) => ({ qid: x.qid, iri: x.iri, how: 'contribs', verified: x.verified }));
       note.ids = T.readCounts({ items: contribs.items.length, matched: matched.matched.length, twice: matched.twice.length });
     } catch (e) { note.ids = e?.name === 'PermissionError' || e?.name === 'WikidataError' ? e.message : T.stopped({ kind: 'fault' }); console.error('Krisis, Wikidata ids:', e?.stack || e); }

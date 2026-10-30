@@ -1685,7 +1685,7 @@ async function wikidataCommand(args, o, resources) {
       m.user = o.user.trim();
       const contribs = await S.readContribs({ fetch: guarded, user: m.user, since: batch.at, signal: controller.signal });
       const ents = await S.readEntities({ fetch: guarded, ids: contribs.items.map((x) => x.qid), signal: controller.signal });
-      const matched = W.matchItems(ents.entities, rows);
+      const matched = W.matchItems(ents.entities, rows, batch.statements);
       (r.said ||= []).push(T.readCounts({ items: contribs.items.length, matched: matched.matched.length, twice: matched.twice.length }));
       for (const x of matched.matched) if (!pairs.some((p) => p.iri === x.iri)) pairs.push({ qid: x.qid, iri: x.iri, how: 'contribs', verified: x.verified });
     }
@@ -1693,7 +1693,7 @@ async function wikidataCommand(args, o, resources) {
     const toCheck = pairs.filter((p) => !p.verified);
     if (toCheck.length) {
       const ents = await S.readEntities({ fetch: guarded, ids: toCheck.map((p) => p.qid), signal: controller.signal });
-      for (const p of toCheck) { const e = ents.entities[p.qid]; p.verified = e && e.missing === undefined ? W.verifyItem(e, rows.find((it) => it.iri === p.iri)) : { ok: false, label: false, distanceKm: null, near: null, reference: false, missing: true }; }
+      for (const p of toCheck) { const e = ents.entities[p.qid]; p.verified = e && e.missing === undefined ? W.verifyItem(e, rows.find((it) => it.iri === p.iri), batch.statements) : { ok: false, label: false, distanceKm: null, near: null, reference: false, missing: true }; }
     }
   } catch (e) {
     host.cleanup();
