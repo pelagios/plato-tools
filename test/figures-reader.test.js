@@ -405,3 +405,20 @@ test('GeoJSON is not a table of figures', async () => {
   const r = await go([f], 'check', undefined, { columns: { name: 'name', n: { field: 'value', measure: 'n' } } });
   assert.deepEqual(kinds(r, 'error'), ['figures-not-csv']);
 });
+
+// ---- the words ------------------------------------------------------------------------------------
+test('every kind the reader reports has its words and a severity, and the words reach the report', async () => {
+  const { FIGURES_KINDS, FIGURES_TEXT } = await import('../src/engine/hermes/figures-text.js');
+  const { LOSS_TEXT } = await import('../src/engine/report.js');
+  assert.deepEqual(Object.keys(FIGURES_KINDS).sort(), Object.keys(FIGURES_TEXT).sort());
+  for (const [k, severity] of Object.entries(FIGURES_KINDS)) {
+    assert.ok(['error', 'warning', 'loss'].includes(severity), k);
+    assert.equal(LOSS_TEXT[k], FIGURES_TEXT[k], k);
+    assert.ok(FIGURES_TEXT[k].length > 40, k);
+  }
+  // Control: the kinds a run reports are among them, with their words and severity.
+  const r = await go([csv('dashes-and-blanks.csv')], 'check', undefined, { columns: CLASS, base: BASE });
+  const mine = r.report.items.filter((i) => i.kind.startsWith('figures-'));
+  assert.ok(mine.length > 0);
+  for (const i of mine) { assert.ok(FIGURES_KINDS[i.kind], i.kind); assert.equal(i.message, FIGURES_TEXT[i.kind]); assert.equal(i.severity, FIGURES_KINDS[i.kind]); }
+});

@@ -18,7 +18,7 @@ import { columnsOf, mappingOf, withSheet } from './hermes/generic.js';
 // Hermes: grouping similar spellings for lookup.
 import { columnValues } from './hermes/generic.js';
 import { clusterCounter } from './hermes/cluster.js';
-import { FIELDS, cellText } from './hermes/columns.js';
+import { FIELDS, FIGURE_FIELDS, cellText } from './hermes/columns.js';
 import { teiKeyPrefixes, EDITORIAL_IRI } from './hermes/tei.js';
 import { preview, previewLine, PREVIEW_LIMIT } from './hermes/preview.js';
 import { load as choraLoad } from './chora/store.js';
@@ -238,7 +238,8 @@ self.onmessage = async ({ data }) => {
         const { headers, sample } = await columnsOf(input);
         const examples = Object.fromEntries(headers.map((h) => [h, sample.map((r) => cellText(r?.[h])).filter(Boolean).slice(0, 3)]));
         const { mapping, patterns, levels, splits, suggested, reasons, problems, gazetteer } = await mappingOf(input, data.saved);
-        const fields = Object.fromEntries(Object.entries(FIELDS).map(([k, f]) => [k, { single: f.single }]));
+        // The roles of a table of figures are not offered on the page yet (its panel is a later branch): its dropdown lists these.
+        const fields = Object.fromEntries(Object.entries(FIELDS).filter(([k]) => !FIGURE_FIELDS.has(k)).map(([k, f]) => [k, { single: f.single }]));
         // `levels` (a "within" column's level) and `splits` (a column split into levels) beside the mapping, as `patterns` are.
         postMessage({ type: 'columns', id: data.id, headers, examples, mapping, patterns, levels, splits, suggested, reasons, problems, gazetteer, fields, saved: data.saved !== undefined });
       } catch (e) {
