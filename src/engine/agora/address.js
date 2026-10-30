@@ -23,7 +23,7 @@ export const SITE = {
   description: 'index.jsonld',      // the dataset's description (the gazetteer header), for machines
   descriptionTtl: 'index.ttl',      // the same in Turtle, when the site has Turtle
   notFound: '404.html',
-  downloads: { jsonl: '.jsonl.gz', ntriples: '.nt.gz', tables: '-tables.zip' },
+  downloads: { jsonl: '.jsonl.gz', ntriples: '.nt.gz', cube: '-cube.nt.gz', tables: '-tables.zip' },
 };
 
 // What a path segment may be for a site on GitHub Pages: characters that need no encoding in a URL

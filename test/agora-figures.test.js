@@ -103,8 +103,8 @@ test('a figure with its coordinates is shown with them, its table and its univer
   const m = element(html, 'f-agri-m');
   assert.match(m, /<strong>280<\/strong>/);
   assert.match(m, /persons/);
-  assert.match(m, /occupation[^<]*<\/[a-z]+>[^<]*agricultural labourer|occupation:?\s[^;<]*agricultural labourer/i);
-  assert.match(m, /sex[^;]*sex-M/i);
+  assert.match(m, />occupation<\/a>: <a [^>]*>agricultural-labourer</);
+  assert.match(m, />sex<\/a>: <a [^>]*>sex-M</);
   // Its universe is a link to the figure it is a part of, on this page.
   assert.match(m, /href="[^"]*#f-agri"/);
   // The table is named once, with its title, for the figures under it.
@@ -199,30 +199,32 @@ test('the cube download is a Data Cube that passes its integrity checks, and its
   const c = Object.fromEntries(checks(graph(nt)).map((x) => [x.ic, x]));
   for (const ic of ['IC-1', 'IC-2', 'IC-14']) assert.equal(c[ic].status, 'pass', ic);
   assert.equal(c['IC-11'].status, 'fail', 'the two figures without all their coordinates are found');
-  assert.equal(c['IC-11'].violations.length, 2);
+  assert.equal(c['IC-11'].violations.length, 3);   // a coordinate missing from a figure each: two from one, one from the other
 });
 
 test('the estimate holds for a site of figures: 1 to 1.3 times what is written, cube download included', async () => {
-  // A county of some 500 figures (Vision of Britain's shape), several counties, so that the figures are most of the site.
+  // Twelve counties of 500 figures (Vision of Britain's shape), so that the figures are most of the site.
   const doc = figuresDataset();
   const one = doc.spatialEntities[0];
   const codes = Array.from({ length: 125 }, (_, i) => `occ-${i}`);
   const make = (n) => {
     const iri = `${BASE}place/county-${n}`;
-    const properties = codes.flatMap((c) => ['sex-M', 'sex-F', 'sex-T', 'sex-X'].map((x) => ({
-      '@id': `${iri}#f-${c}-${x}`, property: PERSONS, label: 'persons', dataSet: TABLE, value: 100 + n * 7 + c.length,
+    const properties = codes.flatMap((c, i) => ['sex-M', 'sex-F', 'sex-T', 'sex-X'].map((x, j) => ({
+      '@id': `${iri}#f-${c}-${x}`, property: PERSONS, label: 'persons', dataSet: TABLE, value: (n * 7919 + i * 104729 + j * 1299709) % 99991,
       dimensions: { [OCC]: code(c), [SEX]: code(x) },
     })));
     return { ...one, '@id': iri, label: `County ${n}`, attestations: [{ ...one.attestations[0], '@id': iri + '#a-00000001', properties }] };
   };
   doc.spatialEntities = Array.from({ length: 12 }, (_, n) => make(n));
-  const s = await site(doc);
   const walk = (root, at = '') => readdirSync(join(root, at), { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walk(root, join(at, d.name)) : [join(at, d.name)]));
-  const written = walk(s.siteDir).reduce((n, f) => n + statSync(join(s.siteDir, f)).size, 0);
-  const est = s.r.report.counts.estimate;
-  assert.ok(s.downloads().some((f) => /-cube\.nt\.gz$/.test(f)), 'the cube download was made');
-  assert.ok(written > 500_000, `a site of figures was written: ${written}`);
-  console.log(`figures: estimated ${est}, wrote ${written} (${(est / written).toFixed(2)})`);
-  assert.ok(est >= written, `short: estimated ${est}, wrote ${written}`);
-  assert.ok(est <= 1.3 * written, `too high: estimated ${est}, wrote ${written}`);
+  for (const turtle of [false, true]) {
+    const s = await site(doc, { turtle });
+    const written = walk(s.siteDir).reduce((n, f) => n + statSync(join(s.siteDir, f)).size, 0);
+    const est = s.r.report.counts.estimate;
+    assert.ok(s.downloads().some((f) => /-cube\.nt\.gz$/.test(f)), 'the cube download was made');
+    assert.ok(written > 500_000, `a site of figures was written: ${written}`);
+    console.log(`figures${turtle ? '+turtle' : ''}: estimated ${est}, wrote ${written} (${(est / written).toFixed(2)})`);
+    assert.ok(est >= written, `short: estimated ${est}, wrote ${written}`);
+    assert.ok(est <= 1.3 * written, `too high: estimated ${est}, wrote ${written}`);
+  }
 });

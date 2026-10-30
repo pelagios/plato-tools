@@ -26,7 +26,7 @@ import { placeDocument, sourceDocument, descriptionDocument, Turtle } from './si
 import { schemaOrgDataset } from './fair.js';
 import { TEXT as SHARED } from './index.js';
 import { siteTarget, TEXT as W3ID_TEXT } from './w3id.js';
-import { placePage, sourcePage, landingPage, placesPage, notFoundPage, citation, PAGE, CSS, CSS_FILE } from './site/html.js';
+import { placePage, sourcePage, landingPage, placesPage, notFoundPage, citation, tablesOf, PAGE, CSS, CSS_FILE } from './site/html.js';
 import { workflow, readme } from './site/repo.js';
 import { DOWNLOADS, writeDownload } from './site/downloads.js';
 import { fmtBytes } from '../words.js';
@@ -47,6 +47,12 @@ export const PAGES_LIMIT = 1e9;
 //   turtle   1.35 (DEEP) to 1.65 times the record (JSON examples), and perFile;
 //   listed   a place's line in a list of places, on the landing page or a page of its own;
 //   root     the landing page, the description, the 404 page and the style sheet, 7 to 11 KB;
+//   figures  a figure of a statistical table (PLATO #14) is shown with its coordinates, which its record
+//            gives as addresses and the page as links to them: 1.0 times the figure's own JSON on a
+//            table of 6,000 figures, so about that, and a few tens of bytes of markup for each, are
+//            added beside the rest of the page ('shown' leaves them out); its Data Cube download
+//            (N-Triples with what Data Cube expects, gzipped) is 0.13 of their JSON, 0.09 for the
+//            plain N-Triples, which the downloads' factor below covers with a wide margin;
 //   downloads the whole dataset gzipped, 0.18 to 0.21 of its JSON at scale (JSON Lines 0.05, N-Triples
 //            0.14 on DEEP), the tables zipped 0.02 to 0.06, and `each` of its own (a header, the
 //            description, a zip's directory), which is most of a small dataset's.
@@ -55,7 +61,7 @@ export const PAGES_LIMIT = 1e9;
 // it to that band, on the examples and on a DEEP-shaped dataset): an estimate that errs should err
 // towards refusing too early, not towards a deployment GitHub refuses after ten minutes, but one
 // 1.5 times too high (as before) refuses sites that fit.
-export const FACTORS = { jsonld: 1.02, html: 1.45, turtle: 1.6, perFile: 400, page: 2200, listed: 90, root: 10000, downloads: { gz: 0.21, tables: 0.06, each: 3000 } };
+export const FACTORS = { jsonld: 1.02, html: 1.45, turtle: 1.6, perFile: 400, page: 2200, listed: 90, root: 10000, downloads: { gz: 0.21, tables: 0.06, each: 3000 }, figures: { html: 1.15, perFigure: 40, cube: 0.16 } };
 // The spreadsheet tables are made in memory, whole (tablesWriter in pipeline.js): past this much
 // PLATO JSON they are left out of the downloads rather than risk running out of memory.
 export const TABLES_MAX_JSON = 100e6;
@@ -154,6 +160,7 @@ export function create(ctx) {
   const idrs = new Map();             // place address -> identity matches the dataset lists apart from it
   const withdrawals = new Map();
   let places = 0, leftOut = 0, notUnder = 0, unidentified = 0, elsewhere = 0, jsonAll = 0, keptIdrs = 0, idrsDropped = false;
+  let tables = new Map(), figureCount = 0, figureJson = 0;   // the dataset's statistical tables, and its figures: how many, and their length as JSON
   let estimate = 0;
   let sc = null;
 
@@ -220,7 +227,7 @@ export function create(ctx) {
   };
 
   return {
-    header() { sc = ctx.scheme; if (sc) found = servability(sc); },
+    header() { sc = ctx.scheme; if (sc) found = servability(sc); tables = tablesOf(ctx.head); },
     // The check pass: measure, and learn which places and sources the site will serve.
     event(ev) {
       if (!sc) return;
@@ -238,6 +245,10 @@ export function create(ctx) {
       collectWithdrawn(atts, withdrawals);
       const size = JSON.stringify(rec).length;
       jsonAll += size;
+      // A figure is a property with a table (PLATO #14); a dataset that holds one gets a Data Cube download.
+      let figs = 0, figJson = 0;
+      for (const x of atts) for (const p of [].concat(x.properties || [])) if (p && typeof p === 'object' && p.dataSet !== undefined) { figs++; figJson += JSON.stringify(p).length; }
+      figureCount += figs; figureJson += figJson;
       // Keyed by what follows <base>place/, servable or not, without any fragment.
       const pre = sc.base + PARTS.place + '/';
       const addr = typeof rec['@id'] === 'string' ? rec['@id'].split('#')[0] : null;
@@ -265,7 +276,10 @@ export function create(ctx) {
       const ok = judge(PARTS.place, rec['@id'], rec.label) !== null;
       if (only && !only.has(key)) { leftOut++; noteSources(rec, key, false); return; }
       if (only) onlySeen.add(key);
-      if (ok) { served.add(key); estimate += placeCost(size, size - embeddedSources(atts), options.turtle); }
+      if (ok) {
+        served.add(key);
+        estimate += placeCost(size, size - embeddedSources(atts) - figJson, options.turtle) + figJson * FACTORS.figures.html + figs * FACTORS.figures.perFigure;
+      }
       noteSources(rec, key, ok);
     },
     async finish() {
@@ -308,6 +322,7 @@ export function create(ctx) {
       // them, and past that on pages of their own.
       for (const s of sources.values()) if (s) estimate += s.places.length * FACTORS.listed;
       estimate += jsonAll * (FACTORS.downloads.gz + (withTables ? FACTORS.downloads.tables : 0)) + (withTables ? 3 : 2) * FACTORS.downloads.each;
+      if (figureCount) estimate += figureJson * FACTORS.figures.cube + FACTORS.downloads.each;
       estimate += served.size * FACTORS.listed + (served.size > PAGE ? Math.ceil(served.size / PAGE) * FACTORS.page : 0) + FACTORS.root + (options.turtle ? FACTORS.perFile : 0);
       const limit = options.limitBytes || PAGES_LIMIT;
       const said = `estimated ${fmtBytes(Math.round(estimate))}, against GitHub Pages' ${fmtBytes(limit)}`;
@@ -368,6 +383,8 @@ export function create(ctx) {
       // The downloads first: the pages give their sizes.
       const downloads = [];
       for (const d of DOWNLOADS) {
+        // The Data Cube download is for a dataset that holds figures, and for no other.
+        if (d.cube && !figureCount) continue;
         if (d.target === 'tables' && !withTables) { rep.warning('tables-download-skipped', TEXT['tables-download-skipped'], fmtBytes(jsonAll)); continue; }
         // Named by the address scheme (download/<scheme.stem><suffix>), where the w3id rules send download/<file>.
         const r = await writeDownload(tree, d, { input, env: ctx.env, options, stem: sc.stem });
@@ -388,7 +405,7 @@ export function create(ctx) {
         if (sk && sources.get(sk)) return `${from}source/${sk}/`;
         return null;
       };
-      const pageCtx = { gazetteer: g, draft, turtle: !!turtle, withdrawn, by: withdrawals, href: href('../../') };
+      const pageCtx = { gazetteer: g, draft, turtle: !!turtle, withdrawn, by: withdrawals, tables, href: href('../../') };
       const inline = served.size <= PAGE ? [] : null;
       const pages = Math.ceil(served.size / PAGE);
       let listed = [], pageNo = 0, written = 0;

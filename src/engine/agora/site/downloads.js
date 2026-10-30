@@ -1,4 +1,4 @@
-// The site's downloads: the whole dataset in three formats, made by the converters the tools use
+// The site's downloads: the whole dataset in three formats (and a fourth, the N-Triples as Data Cube, where it holds figures), made by the converters the tools use
 // for any conversion (run() in pipeline.js), each writing into the site's tree instead of an output
 // file of its own. The text formats are gzipped as they are written, so nothing is held whole.
 import { gzipped } from '../../../lib/gzip.js';
@@ -9,6 +9,8 @@ const enc = new TextEncoder();
 export const DOWNLOADS = [
   { target: 'plato-jsonl', suffix: SITE.downloads.jsonl, format: 'PLATO JSON Lines, gzipped', mime: 'application/gzip', gzip: true },
   { target: 'ntriples', suffix: SITE.downloads.ntriples, format: 'RDF N-Triples, gzipped', mime: 'application/gzip', gzip: true },
+  // The N-Triples again with what Data Cube expects of the figures of a statistical table (formats/cube.js), made only for a dataset that holds some.
+  { target: 'ntriples', cube: true, suffix: SITE.downloads.cube, format: 'RDF Data Cube (N-Triples, gzipped)', mime: 'application/gzip', gzip: true },
   { target: 'tables', suffix: SITE.downloads.tables, format: 'PLATO spreadsheet tables (CSV files in a zip)', mime: 'application/zip', gzip: false },
 ];
 
@@ -34,7 +36,7 @@ export async function writeDownload(tree, d, { input, env, options, stem }) {
     };
   };
   // The typing N-Triples has by default on the page and the command line (node types, typed dates).
-  const r = await run({ input, action: 'convert', target: d.target, options: { base: options.base, name: options.name, typing: true, signal: options.signal } }, { ...env, progress: env.progress ? (p) => env.progress({ ...p, phase: `download ${file}: ${p.phase}` }) : undefined, output });
+  const r = await run({ input, action: 'convert', target: d.target, options: { base: options.base, name: options.name, typing: true, cube: d.cube, signal: options.signal } }, { ...env, progress: env.progress ? (p) => env.progress({ ...p, phase: `download ${file}: ${p.phase}` }) : undefined, output });
   // A conversion that stops part-way opens its output and never closes it; the tree allows one
   // file open at a time, so close it here, and say the download is incomplete.
   if (r.incomplete && opened) { try { await opened.close(); } catch { /* already closed */ } }
