@@ -13,7 +13,9 @@
 //   sees the names you look up (Wikidata, the coordinates too: it is asked for items near a place's point);
 // - linked: a site a dataset links to (a site), which sees which of its pages you open;
 // - collaborate: a service that keeps the projects you save in it (the REGISTRY's whg: WHG's Workbench),
-//   which holds everything in them, and whose share links let others read them.
+//   which holds everything in them, and whose share links let others read them;
+// - llm: a language-model service (the REGISTRY's anthropic, or the site of another, such as Ollama on this
+//   computer), which learns every word of the text sent to it, and which key sent it.
 // Its state is 'allowed', 'never', or, when nothing is recorded, 'undecided'.
 
 /** The categories, each with whether a subject may be a site (an origin) rather than a REGISTRY id. */
@@ -24,6 +26,7 @@ export const CATEGORIES = {
   gazetteer: { sites: true },
   linked: { sites: true },
   collaborate: { sites: false },
+  llm: { sites: true },
 };
 
 /**
@@ -46,6 +49,8 @@ export const REGISTRY = {
   linked: {},
   // WHG's Workbench, under https://whgazetteer.org/reconciliation/ (src/engine/workbench.js).
   collaborate: { whg: { origins: ['https://whgazetteer.org'] } },
+  // Anthropic's Messages API (src/engine/hermes/text/providers/anthropic.js): the text, in parts, and the key's name in a header.
+  llm: { anthropic: { origins: ['https://api.anthropic.com'] } },
 };
 
 export const STATES = ['allowed', 'never'];

@@ -274,6 +274,59 @@ test('collaborate:whg, the projects kept in WHG\'s Workbench: a category of its 
   assert.deepEqual(core.allowedOrigins({ 'collaborate:whg': { state: 'allowed' } }, []), ['https://whgazetteer.org']);
 });
 
+test('llm, a language-model service: a category of its own; anthropic is api.anthropic.com only, any other service a site (https, or localhost); unknown stays unknown (B2)', async () => {
+  assert.deepEqual(core.parse('llm', 'anthropic'), { cat: 'llm', subj: 'anthropic' });
+  assert.deepEqual(core.parse('llm:anthropic'), { cat: 'llm', subj: 'anthropic' });
+  assert.deepEqual(core.originsFor('llm', 'anthropic'), ['https://api.anthropic.com']);
+  assert.deepEqual(core.parse('llm', 'http://localhost:11434'), { cat: 'llm', subj: 'http://localhost:11434' }, 'Ollama on this computer');
+  assert.deepEqual(core.originsFor('llm', 'https://llm.example.org'), ['https://llm.example.org']);
+  // Refused: plain http elsewhere, a path, a service that is not known by name, and the same name in a category that has none.
+  for (const bad of ['http://llm.example.org', 'https://llm.example.org/v1', 'openai', 'https://x.example.org; script-src *']) assert.equal(core.parse('llm', bad), null, bad);
+  assert.equal(core.parse('linked', 'anthropic'), null);
+  assert.equal(core.parse('nonsense', 'anthropic'), null, 'control: an unknown category is still no permission');
+  // Forged grants: kept if they are permissions, dropped if not.
+  assert.deepEqual(Object.keys(core.normalise({ 'llm:anthropic': { state: 'allowed' }, 'llm:openai': { state: 'allowed' }, 'llm:http://evil.example.org': { state: 'allowed' } })), ['llm:anthropic']);
+  // The policy lets the page reach the service once it is allowed, and not before.
+  assert.deepEqual(core.allowedOrigins({}, []), []);
+  assert.deepEqual(core.allowedOrigins({ 'llm:anthropic': { state: 'allowed' } }, []), ['https://api.anthropic.com']);
+  assert.ok(core.policyFor(['https://api.anthropic.com']).includes("connect-src 'self' blob: https://api.anthropic.com"));
+  // It is a service of the panel's list, named and worded: what it learns is the whole text and the key.
+  const words = await import('../src/lib/permission-words.js');
+  assert.equal(words.nameOf('llm', 'anthropic'), 'Anthropic');
+  assert.match(words.CATEGORY_WORDS.llm.learns, /every word of the text/);
+  assert.match(words.CATEGORY_WORDS.llm.learns, /which key/);
+  assert.match(words.CATEGORY_WORDS.llm.learns, /its own terms/);
+  assert.equal(permissions.list().find((x) => x.key === 'llm:anthropic')?.state, 'undecided');
+});
+
+test('llm: undecided, Never and withdrawn send nothing, and allowed (the control) goes only to the service\'s own site (B2)', async () => {
+  const MESSAGES = 'https://api.anthropic.com/v1/messages';
+  const ask = (url, subj = 'anthropic') => permissions.fetch(url, { cat: 'llm', subj, method: 'POST', body: 'THE TEXT' });
+  inPolicy('https://api.anthropic.com');
+  await assert.rejects(ask(MESSAGES), { kind: 'undecided' });
+  permissions.set('llm', 'anthropic', 'never');
+  await assert.rejects(ask(MESSAGES), { kind: 'never' });
+  assert.equal(calls.length, 0, 'nothing was sent, undecided or Never');
+  permissions.set('llm', 'anthropic', 'allowed');
+  await ask(MESSAGES);
+  assert.equal(calls.length, 1, 'control: allowed, it goes');
+  assert.equal(calls[0].init.credentials, 'omit');
+  // Another site is not the service's, whatever is allowed.
+  await assert.rejects(ask('https://evil.example.org/v1/messages'), { kind: 'address' });
+  // Withdrawn at once (forgotten), the same request is refused again.
+  permissions.forget('llm', 'anthropic');
+  await assert.rejects(ask(MESSAGES), { kind: 'undecided' });
+  assert.equal(calls.length, 1, 'nothing more was sent');
+  // A service of the user's own on this computer is a permission by its site; plain http elsewhere is refused as insecure.
+  inPolicy('http://localhost:11434');
+  await assert.rejects(ask('http://localhost:11434/v1/models', 'http://localhost:11434'), { kind: 'undecided' });
+  permissions.set('llm', 'http://localhost:11434', 'allowed');
+  await ask('http://localhost:11434/v1/models', 'http://localhost:11434');
+  assert.equal(calls.length, 2);
+  await assert.rejects(ask('http://llm.example.org/v1/models', 'http://llm.example.org'), { kind: 'insecure' });
+  assert.equal(calls.length, 2);
+});
+
 // ---- The policy written into each page's <head> --------------------------------------------------
 function runHead({ local = new Store(), session = new Store() } = {}) {
   const head = { prepended: [], prepend(m) { this.prepended.push(m); } };

@@ -12,6 +12,7 @@ export const CATEGORY_WORDS = {
   gazetteer: { heading: 'Gazetteers', learns: 'A gazetteer sees the names you look up in it, and their language where one is sent with them. Wikidata also sees the coordinates of each place searched before an item is made for it (it is asked for items near that point), and, when your new items are read back, the Wikidata user name you type.' },
   linked: { heading: 'Linked sites', learns: 'A site your data links to sees which of its pages you open.' },
   collaborate: { heading: 'Projects kept in WHG', learns: 'The World Historical Gazetteer keeps each project you save to it whole, as a project file holds it: your workflow, your answers, the files in it, the review with its decisions and the reviewer’s name. Anyone you give a share link to can read it too. It is asked only when you save, open, delete or share a project there, or open a share link.' },
+  llm: { heading: 'Language-model services', learns: 'A language-model service learns every word of the text you send it, and which key sent it. What it does with them, keeping them or learning from them, is under its own terms, which these tools do not know. It may charge for each use of your key: the tools show an estimate before anything is sent, and stop at the ceiling you set, but the service’s own bill is the one that counts.' },
 };
 
 /** The services the tools know by name. */
@@ -27,6 +28,7 @@ export const SERVICE_NAMES = {
   'gazetteer:whg': 'World Historical Gazetteer',
   'gazetteer:wikidata': 'Wikidata',
   'collaborate:whg': 'World Historical Gazetteer Workbench',
+  'llm:anthropic': 'Anthropic',
 };
 
 /** How a service on more than two sites is named in short. */
