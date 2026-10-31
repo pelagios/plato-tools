@@ -2898,8 +2898,31 @@ part is `export-ui.js`, `export-raster.js` (pictures), `export-fonts.js` (the fo
   `name_xx` columns, so a choice of language means re-fetching and re-pinning those sources, a name table per
   language in `public/basemap/` (the place file alone grows several times over) and a per-feature fallback where
   a language has no name; the places Chora draws are labelled in the language chosen in the panel already, and
-  only Natural Earth's own modern names are English); the inset's own coastline at 10m. OpenStreetMap's tile usage policy discourages bulk downloads: a map on it fetches at most 400
+  only Natural Earth's own modern names are English); the inset's own coastline at 10m. Measured, not
+  fixed (it is not unusable): see "Scale and hand checks" below. OpenStreetMap's tile usage policy discourages bulk downloads: a map on it fetches at most 400
   tiles, once, when it is made.
+
+- **Scale and hand checks (#39).** `e2e/open_map_scale.py` (through `heavy.sh`) makes the map from 200 constructed
+  places of the Aegean (120 exact points, 40 approximate with circles, 25 areas, 15 lines, each named in Greek and
+  Latin) with every option on: the modern features, sea names and regions, the shaded relief (the browser checks'
+  fixture file), the finer coast, a georeferenced historical map, north arrow, inset, key and title. At the zoom
+  that holds most of them in one view, 169 of the 200 are in view and on the map (the rest are outside it; a map
+  holds only the places in view). Headless Chromium with software GL, 31 October 2026, this machine: the preview
+  (re)composed in 0.6 s at 1,600 px wide and 1.2 s at the panel's widest, 8,000 px; the SVG 0.4 MB at 1,600 px and
+  2.7 MB at 8,000 (0.1 s to download), the PNG 0.9 MB (1.5 s) and 5.6 MB (2.6 s) at 150 dpi; the page's JS heap 92 MB;
+  the browser's whole process tree peaked at 2.6 GB (1,600 px) and 3.5 GB (8,000 px) (not broken down by
+  process; the page's own heap is a small part of it). No page error. So the cap is not a problem on this machine; the
+  memory is the figure to watch on a small one at 8,000 px. **What cannot be checked here** (Commons' own
+  renderer and template): run `node scripts/commons-hand-check.mjs ~/Downloads/commons-hand-check`, which writes
+  `Attica-test-map.svg` (the golden map: Ἀθῆναι, Ἐλευσίς, Saronicus Sinus in Noto Sans then DejaVu Sans) and
+  `Attica-test-map.description.txt` (the `{{Map}}` page as the tools fill it). Upload both to Commons as a test
+  file (a user-page test or the sandbox, deleted after) and look at: (1) the PNG thumbnail Commons draws of the SVG
+  (librsvg 2.60; the local test runs 2.52): the Greek with its breathings and accents (not boxes or fallback
+  glyphs), the halos, the dotted circles, the key; (2) the page: that `{{Map}}` accepts every field (title,
+  description, legend, author, date, `map date`, projection, scale, latitude, longitude, source, `warp status`,
+  `warp url`, permission, `other versions`) with none shown as an unknown parameter, that `latitude` and
+  `longitude` as decimal degrees of the map's centre (38.1000, 23.6500) are the format it wants (it may want
+  `{{Coordinate}}` or degrees-minutes-seconds), and that `projection` and `scale` are free text there or from a list.
 
 **Tests**: `test/chora-export.test.js` (projection, clipping, labels, the style read, the golden SVG parsed by
 saxes, 14 licence cases, the Commons page word for word, PNG chunks), `test/chora-export-pieces.test.js` (the
