@@ -3964,6 +3964,15 @@ the user's WHG token; nothing is sent until the user asks, and only under the `c
   share link withdrawn: said for what was being done, and the link here let go where a save or a share had one), 409 (WHG's version and snapshot), 413, 429 (`withPause()`
   waits as long as `Retry-After` says, once, the page counting down, then stops in words), and anything else
   "Not saved to WHG. Your work is kept in this browser." with the reason.
+- **Gzip uploads: measured (Issue #38), not built.** WHG accepts `Content-Encoding: gzip` on POST and PUT, but
+  the 2 MiB cap also applies to the decompressed body, so it raises no capacity, only lessens what is sent.
+  Measured on this repository's own projects (the request body, base64 envelope, against its gzip): a 2.1 KB
+  project 3,070 B to 2,266 B; a 5.9 KB one 8,194 B to 6,058 B; a 13.6 KB one 18,419 B to 13,492 B (about 26%
+  saved each time; gzip of the body is about the size of the zip itself, since base64 only adds the 4/3). A
+  zip of deflated text at 250 KB saved 37%; at the worst (incompressible, 1.5 MB) 25%. Real projects are a
+  few KB, so the saving is a few KB; only one near the cap would save as much as 0.5 MiB. That does not repay
+  a second request path that cannot be tried against WHG from here (a 415 or `bad_encoding` would have to be
+  handled, and a browser needs `CompressionStream`). Revisit if projects of several hundred KB become usual.
 - **The envelope** (`envelope()`, `unwrap()`; docs/project-file.md, "Stored in WHG"): the `.platoproj`
   itself, base64, with its size and SHA-256, because WHG stores snapshots as `jsonb` (keys reordered, white
   space dropped, `\u0000` refused). Whatever comes back is unwrapped, checked, and read by `readProject()`
