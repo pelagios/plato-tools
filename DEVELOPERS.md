@@ -2863,7 +2863,7 @@ part is `export-ui.js`, `export-raster.js` (pictures), `export-fonts.js` (the fo
   `test/fixtures/chora/export/golden.svg`), its groups Inkscape's layers, text as `<text>` in `FONT_STACK`
   ("Noto Sans, DejaVu Sans, Liberation Sans, sans-serif": Commons ignores web fonts, and has both Noto and
   DejaVu with polytonic Greek), a halo by `paint-order="stroke"`, its title and description, a Dublin Core
-  description, and **the map's settings in its `<metadata>`** (`<plato:map>`, JSON: the view, width,
+  description, and **the map's settings in the root element's `data-plato-map` attribute** (JSON, not an element of a namespace of ours: Commons refused the file with "illegal namespace" when one was tried on 31 October 2026, and `settingsIn` still reads the `<plato:map>` element of files made before then; JSON: the view, width,
   projection, background, layers, relief, historical map and statement, places left out, each label's choices
   and offset, the rule, the furniture, the licence, the title), which "Remake from a map made here" reads
   (`settingsIn`) to make the same map again, its width and resolution brought within the panel's bounds (400 to

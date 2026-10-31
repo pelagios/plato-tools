@@ -11941,7 +11941,7 @@ def open_map_export_checks(pw, url, tmp):
                 and settings.get('version') == 1 and settings.get('width') == 1600 and settings.get('view')
                 and 'Map: Ada Mapmaker, CC BY 4.0, made with PLATO tools' in svg and 'Modern coastline: Natural Earth, 50m (public domain)' in svg
                 and "The places' sources: Pleiades (CC BY 3.0)" in svg and '<cc:license rdf:resource="https://creativecommons.org/licenses/by/4.0/"' in svg
-                and '<plato:map' in svg and '@' not in svg.split('<metadata')[0] + svg.split('</metadata>')[1]
+                and 'data-plato-map="' in svg and '<plato:' not in svg and 'xmlns:plato' not in svg and '@' not in svg.split('<metadata')[0] + svg.split('</metadata>')[1]
                 and red(athens) and sea[2] > 200 and sea[0] < 60 and land[1] > 200 and land[0] < 60
                 and not foreign(since) and any(u.endswith('/basemap/land.geojson') for u in web(since))), {
             'names': [svg_name, png_name], 'viewBox': m.group(0) if m else None, 'size': s.get('size'), 'png': im.size, 'dpi': im.info.get('dpi'),

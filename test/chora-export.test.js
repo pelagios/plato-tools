@@ -182,13 +182,25 @@ test('the SVG: well formed, its layers Inkscape\'s, its labels text in the font 
   const r = goldenMap();
   const parsed = parseSvg(r.svg);
   assert.equal(r.width, 800); assert.equal(r.height, 560);
-  assert.match(r.svg, /<svg xmlns="http:\/\/www.w3.org\/2000\/svg"[^>]* width="800" height="560" viewBox="0 0 800 560" xml:lang="en">/);
+  assert.match(r.svg, /<svg xmlns="http:\/\/www.w3.org\/2000\/svg"[^>]* width="800" height="560" viewBox="0 0 800 560" xml:lang="en"[^>]*>/);
   for (const id of ['background', 'places', 'labels', 'furniture', 'scale-bar', 'attribution', 'inset', 'north-arrow', 'key', 'precision-marks', 'uncertainty']) assert.ok(parsed.ids.includes(id), `${id} among ${parsed.ids.join(', ')}`);
   assert.deepEqual(parsed.texts.filter((t) => ['Ἀθῆναι', 'Eleusis', 'ATTICA', 'Saronicus Sinus', 'the Mysteries'].includes(t)).sort(), ['ATTICA', 'Eleusis', 'Saronicus Sinus', 'the Mysteries', 'Ἀθῆναι']);
   assert.match(r.svg, /font-family="Noto Sans, DejaVu Sans, Liberation Sans, sans-serif"/);
   assert.ok(!/@font-face|woff2/.test(r.svg), 'no web font in the file for Commons');
   assert.match(r.svg, /<text [^>]*font-style="italic"/, 'water in italic');
   assert.equal(r.rasterInSvg, false, 'Natural Earth alone: true vectors, no picture');
+  // Wikimedia Commons refuses an SVG with a namespace it does not know ("illegal namespace", found on 31 October 2026 by uploading
+  // a map made here): only these may be declared or used, and the settings are an attribute, not an element of ours.
+  const COMMONS_OK = new Set(['http://www.w3.org/2000/svg', 'http://www.w3.org/1999/xlink', 'http://www.inkscape.org/namespaces/inkscape',
+    'http://www.w3.org/1999/02/22-rdf-syntax-ns#', 'http://purl.org/dc/elements/1.1/', 'http://creativecommons.org/ns#']);
+  const declared = [...r.svg.matchAll(/\sxmlns(?::[\w-]+)?="([^"]*)"/g)].map((m) => m[1]);
+  assert.ok(declared.length >= 6, `the namespaces were found (${declared.length})`);
+  assert.deepEqual(declared.filter((u) => !COMMONS_OK.has(u)), [], 'no namespace Commons would refuse');
+  assert.ok(!/<plato:|xmlns:plato/.test(r.svg), 'the settings are not an element of a namespace of ours');
+  assert.match(r.svg, /<svg [^>]*\sdata-plato-map="\{[^"]*"/, 'the settings are in the root element\'s data-plato-map attribute');
+  // A file made before then, with its settings in a <plato:map> element, is still read.
+  assert.deepEqual(settingsIn('<svg><metadata><plato:map xmlns:plato="https://w3id.org/plato-tools/map#" version="1">{"version":1,"old":true}</plato:map></metadata></svg>'), { version: 1, old: true });
+  assert.equal(settingsIn('<svg><metadata/></svg>'), null);
   assert.deepEqual(settingsIn(r.svg), { version: 1, view: { center: [23.4, 38.2], zoom: 6 }, labels: { p1: { offset: [1, 2] } } });
   assert.equal(r.overlapping, 0);
   assert.match(r.scale.words, /^at latitude 38° N$/);

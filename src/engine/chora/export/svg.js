@@ -7,7 +7,13 @@
 export const SVG_NS = 'http://www.w3.org/2000/svg';
 export const XLINK_NS = 'http://www.w3.org/1999/xlink';
 export const INKSCAPE_NS = 'http://www.inkscape.org/namespaces/inkscape';
-/** The namespace of the map's settings kept in its <metadata>, from which it can be made again. */
+/**
+ * The attribute of the root element that keeps the map's settings, from which it can be made again. It is a data-*
+ * attribute and not an element of a namespace of ours: Wikimedia Commons refuses an SVG with a namespace it does not
+ * know ("illegal namespace", found by uploading a map made here, 31 October 2026), and allows data-* attributes.
+ * Files made before then hold the settings in a <plato:map> element of PLATO_MAP_NS instead, which is still read.
+ */
+export const SETTINGS_ATTRIBUTE = 'data-plato-map';
 export const PLATO_MAP_NS = 'https://w3id.org/plato-tools/map#';
 /**
  * The fonts a label is set in, in order. Wikimedia Commons draws an SVG with librsvg (2.60 since August
@@ -60,9 +66,8 @@ export const layer = (id, label, ...children) => el('g', { id, 'inkscape:groupmo
 /**
  * A whole SVG document, as text: { width, height, lang (the language of its labels, xml:lang), title, desc,
  * metadata: { settings (the map's settings, JSON: kept so that it can be made again), dc: { title, creator,
- * rights, source, date } }, defs: [elements], body: [elements] }. The settings are kept as text in a
- * <plato:map> element of PLATO_MAP_NS, beside a Dublin Core description that Inkscape shows as the
- * document's metadata.
+ * rights, source, date } }, defs: [elements], body: [elements] }. The settings are kept as text in the root's
+ * SETTINGS_ATTRIBUTE, and a Dublin Core description that Inkscape shows as the document's metadata is in <metadata>.
  */
 export function svgDocument({ width, height, lang = null, title = '', desc = '', metadata = {}, defs = [], body = [] }) {
   const dc = metadata.dc || {};
@@ -75,14 +80,14 @@ export function svgDocument({ width, height, lang = null, title = '', desc = '',
       dc.source ? el('dc:source', {}, dc.source) : null,
       dc.rights ? el('cc:license', { 'rdf:resource': dc.rights }) : null,
       lang ? el('dc:language', {}, lang) : null));
-  const settings = metadata.settings ? el('plato:map', { 'xmlns:plato': PLATO_MAP_NS, version: '1' }, JSON.stringify(metadata.settings)) : null;
   const root = el('svg', {
     xmlns: SVG_NS, 'xmlns:xlink': XLINK_NS, 'xmlns:inkscape': INKSCAPE_NS, version: '1.1',
     width: Math.round(width), height: Math.round(height), viewBox: `0 0 ${Math.round(width)} ${Math.round(height)}`, 'xml:lang': lang || null,
+    [SETTINGS_ATTRIBUTE]: metadata.settings ? JSON.stringify(metadata.settings) : null,
   },
   title ? el('title', {}, title) : null,
   desc ? el('desc', {}, desc) : null,
-  el('metadata', { id: 'metadata' }, rdf, settings),
+  el('metadata', { id: 'metadata' }, rdf),
   defs.length ? el('defs', {}, ...defs) : null,
   ...body);
   return `<?xml version="1.0" encoding="UTF-8"?>\n${serialize(root)}\n`;
@@ -93,7 +98,8 @@ export function svgDocument({ width, height, lang = null, title = '', desc = '',
  * JSON, or null when the file holds none (it was not made here, or was edited so that it lost them).
  */
 export function settingsIn(svgText) {
-  const m = /<plato:map\b[^>]*>([\s\S]*?)<\/plato:map>/.exec(String(svgText));
+  const text = String(svgText);
+  const m = new RegExp(`<svg\\b[^>]*?\\s${SETTINGS_ATTRIBUTE}="([^"]*)"`).exec(text) || /<plato:map\b[^>]*>([\s\S]*?)<\/plato:map>/.exec(text);
   if (!m) return null;
   const t = m[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#10;/g, '\n').replace(/&amp;/g, '&');
   try { return JSON.parse(t); } catch { return null; }
