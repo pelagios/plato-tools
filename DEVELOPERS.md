@@ -3954,7 +3954,12 @@ the user's WHG token; nothing is sent until the user asks, and only under the `c
 - **The client** (`src/engine/workbench.js`, pure: the fetch and the token are given, so the command line
   and the tests use it as the page does): `workbench({ fetch, token, base, userAgent })` with `list()`
   (`GET projects/?doc_type=plato`), `create()`, `get()`, `push()` (`PUT` with `base_version`), `remove()`,
-  `share()`, `unshare()` and `shared(token)` (no `Authorization` at all). The token goes in the
+  `share()`, `unshare()`, `shared(token)` (no `Authorization` at all), and, from Issue #38, `versions(id)`
+  (`GET projects/<uuid>/versions/`: `[{ version, created, by }]` newest first, no snapshots; `by` is WHG's
+  `saved_by.name`, else `username`, never anything else of the user; a bare array is read as well as
+  `{ versions: [...] }`) and `version(id, n)` (with the snapshot; a pruned version, which WHG answers 404, is a
+  `WorkbenchError` of kind `pruned`). A title holding U+0000 is refused before any request (`bad-title`, in
+  words), by the client and, earlier, by `fit()`; WHG's own 400 `nul_character` is a `refused` in words. The token goes in the
   `Authorization: Bearer` header and nowhere else (never `?token=`, a title, an error or a log); with none,
   nothing is sent (`kind: 'token'`). Only a UUID is put into an address. Requests omit credentials and never
   follow a redirect. Every refusal is a `WorkbenchError` whose `kind` the page acts on and whose message
@@ -3990,6 +3995,16 @@ the user's WHG token; nothing is sent until the user asks, and only under the `c
   (`stateOf()` in `src/methodos/whg.js`), so that the panel can say "Not saved to WHG since …: the workflow
   has changed since". A copy made from a share link keeps only `{ origin: { workflowId, version, title } }`:
   WHG's answer to a share link names no project, and the link itself is a secret.
+- **History and restore** (Issue #38; `whg.history()`, `whg.restore()`, `whg.savedBy()`; the "History"
+  button of the part "In the World Historical Gazetteer", shown once the workflow is linked): lists the saves
+  (who, when; WHG keeps the newest 25), each but the newest with "Restore this version". Restoring asks first
+  in the page, then reads that version (checked whole by `unwrap()` before anything is pushed) and PUTs its
+  snapshot with the newest version as `base_version`: a new version on top, never an overwrite, the versions
+  between kept; a save made in between is the usual 409. The restored project is then opened here through
+  `openOrAsk()` in the workflow's place (asked first), linked at the new version. A conflict on "Save to WHG"
+  asks `savedBy()` who saved the newer version and says "saved by <name> on <date>"; if WHG does not say, the
+  message goes on without (`WORDS.newer`). Not built (follow-up): the decision merge on a conflict (D2(c)) with
+  the common base fetched through `version()`. Not built either: gzip uploads, which were measured (below).
 - **The page** (`src/methodos/whg.js` for what is done, `src/methodos/page.js` for what is said; the tracker's
   folded "Save, open or share the project", its part "In the World Historical Gazetteer"): "Save to WHG", on
   click only and at a step boundary (D3), to the personal team (D4); a workflow with no link first looks in
@@ -4026,7 +4041,9 @@ the user's WHG token; nothing is sent until the user asks, and only under the `c
 - **Tests.** `test/workbench-fake.js` is a fake of WHG that copies WHG's own code (`workbench/access.py`,
   `views.py`, `doctypes.py`: CORS for an allow-list only and never with credentials, the order Bearer, origin,
   budget, beta, then the body cap, the opaque 409, sharing, the HTML 404 off its paths, `jsonb`'s key order
-  and its refusal of `\u0000`), usable in-process (`fake.fetch`) and as a server (`node test/workbench-fake.js
+  and its refusal of `\u0000`, now a 400 `nul_character`; since Issue #38 also the versions endpoints, a pruned
+  version as a 404, and `Content-Encoding: gzip` with 400 `bad_encoding`, 415 `unsupported_encoding` and 413 on
+  either size, which the page does not use), usable in-process (`fake.fetch`) and as a server (`node test/workbench-fake.js
   serve --port <n> --origin <origin>`, with a control API under `/__fake/`). `test/workbench.test.js` (the
   envelope through a key-reordering round trip, base64, the token only in the header and nothing sent without
   it, every refusal with its control, the pause, sharing with no `Authorization`, D1's order),

@@ -5690,6 +5690,53 @@ def whg_checks(pw, url, tmp):
             {'before': before, 'choice': v['choice'][:160], 'sent': sent, 'link': linked, 'unshare': shared_now['unshare'], 'state': shared_now['state'][:160]}
     attempt('WHG: a workflow with no link here that WHG already holds (opened from its file in a third browser) is offered "Save to it" or as new; "Save to it" updates that project, no second one, and, it being shared, says so and offers "Stop sharing"', matched)
 
+    def history_and_restore():
+        need('a', 'second')
+        panel(a)
+        shown = a.evaluate("() => { const b = document.getElementById('whg-history'); return !b.hidden && !!b.getClientRects().length; }")
+        a.click('#whg-history')
+        until(a, "() => document.querySelectorAll('#whg-history-list li').length >= 3", 20)
+        rows = a.evaluate("() => [...document.querySelectorAll('#whg-history-list li')].map((li) => ({ v: li.dataset.version, text: li.textContent, restore: !!li.querySelector('.whg-restore') }))")
+        shot(a, 'whg-history-1440-light.png')
+        newest = int(rows[0]['v'])
+        # Restore the oldest: asked first (keeping things as they are is the other choice), then pushed as a new version on the newest, then opened in place.
+        before = next(x for x in projects() if x['id'] == r['second'])
+        log(clear=True)
+        a.click('#whg-history-list li[data-version="1"] .whg-restore')
+        until(a, "() => !document.getElementById('whg-choice').hidden", 10)
+        ask = view(a)
+        a.click('#whg-choice button[data-choice="0"]')   # Restore it
+        until(a, "() => !document.getElementById('methodos-replace').hidden", 30)
+        replace = view(a)['replace']
+        a.click('#methodos-replace-yes')
+        until(a, "() => /restored in WHG as version %d/.test(document.getElementById('methodos-message').textContent)" % (newest + 1), 30)
+        after = next(x for x in projects() if x['id'] == r['second'])
+        puts = [e for e in log() if e['method'] == 'PUT']
+        links = a.evaluate(WHG_LINKS_JS)
+        r['restored'] = after['version']
+        return (shown and [x['v'] for x in rows[:3]] == [str(newest), str(newest - 1), str(newest - 2)] and rows[0]['restore'] is False and all(x['restore'] for x in rows[1:])
+                and '(the newest)' in rows[0]['text'] and ' by e2e' in rows[-1]['text']
+                and 'no version is overwritten or lost' in ask['choice'] and ask['choices'] == ['Restore it', 'Keep things as they are']
+                and 'version 1, restored in WHG' in replace and after['version'] == before['version'] + 1
+                and len(puts) == 1 and puts[0]['status'] == 200 and json.loads(puts[0]['body'])['base_version'] == before['version']
+                and links.get(r['wid'], {}).get('version') == after['version']), \
+            {'rows': rows, 'ask': ask['choice'][:160], 'replace': replace[:160], 'before': before['version'], 'after': after['version'], 'puts': [(e['status'], e['body'][:60]) for e in puts], 'link': links.get(r['wid'])}
+    attempt('WHG: "History" lists the saves of the project (newest first, who saved each, when; no restore on the newest); "Restore this version" asks first, pushes it as a NEW version on WHG\'s newest (PUT, base_version the newest, nothing overwritten) and opens it here in the workflow\'s place, linked at the new version', history_and_restore)
+
+    def conflict_names_who():
+        need('restored')
+        p = next(x for x in projects() if x['id'] == r['second'])
+        fake('push', {'id': r['second'], 'snapshot': p['snapshot'], 'by': 'e2e'})
+        a.click('#whg-save')
+        until(a, "() => !document.getElementById('whg-choice').hidden", 20)
+        v = view(a)
+        a.click('#whg-choice button[data-choice="0"]')   # Open the copy on WHG: relinks at WHG's version
+        until(a, "() => !document.getElementById('methodos-replace').hidden", 15)
+        a.click('#methodos-replace-yes')
+        until(a, "() => /from WHG \\(version %d\\)/.test(document.getElementById('methodos-message').textContent)" % (r['restored'] + 1), 30)
+        return (f"newer save of this workflow (version {r['restored'] + 1}), saved by e2e on " in v['choice'] and 'perhaps your own' not in v['choice']), {'choice': v['choice'][:240]}
+    attempt('WHG: a conflict names who saved the newer version and when (not just "a newer save")', conflict_names_who)
+
     def share_and_stop():
         need('a', 'second')
         panel(a)

@@ -211,3 +211,80 @@ test('sharing: shared and stopped through the link, the token handed to the page
   await assert.rejects(anyone.shared(token), (e) => e.kind === 'gone');
   assert.ok(idb);
 });
+
+// ---- Version history and restore (Issue #38) ---------------------------------------------------------
+test('history: the saves of the linked project newest first with who saved each; a project gone lets the link go', async () => {
+  const { fake, store, whg } = setup();
+  const { record, project } = await workflow();
+  await store.save(record);
+  const { link } = await whg.save({ project });
+  fake.pushAs(link.projectId, { plato: 1, from: 'another browser' }, fake.addUser({ name: 'bob' }));
+  const list = await whg.history(link.projectId, undefined, record.id);
+  assert.deepEqual(list.map((v) => [v.version, v.by]), [[2, 'bob'], [1, 'user1']]);
+  assert.ok((await store.linkFor(record.id)).projectId, 'the link is kept while the project is there');
+  fake.projects.delete(link.projectId);
+  await assert.rejects(whg.history(link.projectId, undefined, record.id), (e) => e.kind === 'gone');
+  assert.equal(await store.linkFor(record.id), null, 'the link went with the project');
+});
+
+test('a conflict can say who saved the newer version; where WHG cannot say, it says nothing and does not fail', async () => {
+  const { fake, whg } = setup();
+  const { project } = await workflow();
+  const { link } = await whg.save({ project });
+  fake.pushAs(link.projectId, { plato: 1 }, fake.addUser({ name: 'bob' }));
+  const who = await whg.savedBy(link.projectId, 2);
+  assert.equal(who.by, 'bob'); assert.match(who.created, /^2\d{3}-/);
+  assert.equal(await whg.savedBy(link.projectId, 99), null, 'a version not listed');
+  fake.projects.delete(link.projectId);
+  assert.equal(await whg.savedBy(link.projectId, 2), null, 'a failure is not thrown');
+});
+
+test('restore: an older version is pushed as a NEW version on top of the newest (nothing overwritten, the versions between stay), and comes back checked as a project that reads', async () => {
+  const { fake, whg } = setup();
+  const { record, project } = await workflow();
+  const first = await whg.save({ project });
+  const pid = first.link.projectId;
+  const v1 = structuredClone(fake.projects.get(pid).snapshot);
+  const second = await whg.save({ project: { ...project, record: { ...record, name: 'Parishes, second' } }, to: first.link });
+  assert.equal(second.link.version, 2);
+  const v2 = structuredClone(fake.projects.get(pid).snapshot);
+  assert.notDeepEqual(v1, v2, 'the two versions differ (the control)');
+  const got = await whg.restore(pid, 1, undefined, { title: 'Parishes' });
+  assert.equal(got.version, 3); assert.equal(got.restored, 1);
+  const p = fake.projects.get(pid);
+  assert.equal(p.version, 3);
+  assert.deepEqual(p.snapshot, v1, 'WHG now holds version 1\'s snapshot');
+  assert.deepEqual(p.history.map((h) => h.version), [3, 2, 1]);
+  assert.deepEqual(p.history.find((h) => h.version === 2).snapshot, v2, 'version 2 was not overwritten');
+  const put = fake.log.filter((e) => e.method === 'PUT').pop();
+  assert.equal(JSON.parse(put.body).base_version, 2, 'the base is the newest version, not the restored one');
+  const read = await readProject(blobSource(got.blob), { name: got.name });
+  assert.equal(read.record.name, 'Parishes');
+});
+
+test('restore: a pruned version, or a snapshot that is not ours, is refused before anything is pushed; one that is ours restores', async () => {
+  const { fake, whg } = setup();
+  const { project } = await workflow();
+  const { link } = await whg.save({ project });
+  for (let i = 0; i < 26; i++) fake.pushAs(link.projectId, { plato: 1, i });
+  const newest = fake.projects.get(link.projectId).version;
+  const puts = () => fake.log.filter((e) => e.method === 'PUT').length;
+  await assert.rejects(whg.restore(link.projectId, 1), (e) => e.kind === 'pruned');
+  assert.equal(puts(), 0);
+  await assert.rejects(whg.restore(link.projectId, newest - 1), (e) => e.kind === 'not-ours');
+  assert.equal(puts(), 0);
+  assert.equal(fake.projects.get(link.projectId).version, newest);
+  const other = (await workflow('map-your-data-whg2', 'Other')).project;
+  const mine = await whg.save({ project: other });
+  const one = await whg.restore(mine.link.projectId, 1);
+  assert.equal(one.version, 2);
+});
+
+test('a title with a NUL is refused by fit() before a project is measured or sent; the same without it is saved', async () => {
+  const { fake, whg } = setup();
+  const { project } = await workflow('map-your-data-whg3', 'Par\u0000ishes');
+  await assert.rejects(whg.save({ project }), (e) => e.kind === 'bad-title');
+  assert.equal(fake.log.length, 0);
+  const ok = (await workflow('map-your-data-whg3', 'Parishes')).project;
+  assert.equal((await whg.save({ project: ok })).created, true);
+});

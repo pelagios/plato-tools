@@ -94,7 +94,49 @@ test('a NUL byte in the project travels in its base64; the same bytes as text in
   const bytes = await projectBytes(w);
   const made = await wb.create({ snapshot: envelope(bytes, w.record), title: titleOf(w.record) });
   assert.deepEqual(unwrap((await wb.get(made.id)).snapshot), bytes);
-  await rejects(wb.create({ snapshot: { text: 'P\u0000A' }, title: 'x' }), 'server', /WHG answered with an error \(500\)/);
+  await rejects(wb.create({ snapshot: { text: 'P\u0000A' }, title: 'x' }), 'refused', /U\+0000/);
+  // The key too (WHG refuses a NUL in any string or key), and the control: the same without it goes.
+  await rejects(wb.create({ snapshot: { ['k\u0000']: 1 }, title: 'x' }), 'refused', /U\+0000/);
+  assert.ok((await wb.create({ snapshot: { text: 'PA' }, title: 'x' })).id);
+});
+
+test('a NUL in a title is refused before anything is sent, in plain words; the same title without it goes (create and push)', async () => {
+  const fake = setup(), wb = client(fake);
+  const made = await wb.create({ snapshot: { plato: 1 }, title: 'Parishes' });
+  const sent = fake.log.length;
+  for (const send of [() => wb.create({ snapshot: { plato: 1 }, title: 'Par\u0000ishes' }), () => wb.push(made.id, { snapshot: { plato: 1 }, base_version: 1, title: 'Par\u0000ishes' })]) {
+    await rejects(send(), 'bad-title', /cannot be kept in WHG.*rename the workflow.*Nothing was sent/s);
+  }
+  assert.equal(fake.log.length, sent, 'no request was made');
+  assert.equal((await wb.push(made.id, { snapshot: { plato: 1 }, base_version: 1, title: 'Parishes 2' })).version, 2);
+  assert.equal(fake.projects.get(made.id).title, 'Parishes 2');
+});
+
+test('the fake copies WHG\'s gzip: a gzip body goes (the cap on both sizes), broken gzip is 400 bad_encoding, another encoding 415, the preflight allows the header', async () => {
+  const { gzipSync } = await import('node:zlib');
+  const fake = workbenchFake({ clock: () => NOW.getTime(), bodyMax: 600 });
+  fake.addUser({ token: TOKEN, name: 'alice' });
+  const post = (body, enc) => fake.fetch(WORKBENCH + 'projects/', { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json', ...(enc ? { 'Content-Encoding': enc } : {}) }, body });
+  const ok = JSON.stringify({ snapshot: { a: 'x'.repeat(300) }, doc_type: 'plato', title: 't' });
+  assert.equal((await post(gzipSync(ok), 'gzip')).status, 201, 'gzip goes');
+  assert.equal(fake.projects.size, 1);
+  // Decompressed over the cap although few bytes are sent: 413 (the control above: the same shape under the cap).
+  const big = JSON.stringify({ snapshot: { a: 'x'.repeat(5000) }, doc_type: 'plato', title: 't' });
+  const gz = gzipSync(big);
+  assert.ok(gz.length < 600, 'few bytes are sent');
+  const r = await post(gz, 'gzip');
+  assert.equal(r.status, 413); assert.equal((await r.json()).code, 'body_too_large');
+  // Over the cap as sent.
+  assert.equal((await post(Buffer.from('x'.repeat(700)), 'gzip')).status, 413);
+  // Broken gzip.
+  const bad = await post(Buffer.from('not gzip at all'), 'gzip');
+  assert.equal(bad.status, 400); assert.equal((await bad.json()).code, 'bad_encoding');
+  const other = await post(ok, 'br');
+  assert.equal(other.status, 415); assert.equal((await other.json()).code, 'unsupported_encoding');
+  assert.equal((await post(ok, 'identity')).status, 201, 'identity is no encoding');
+  assert.equal(fake.projects.size, 2);
+  const pre = await fake.fetch(WORKBENCH + 'projects/', { method: 'OPTIONS', headers: { Origin: 'https://pelagios.org' } });
+  assert.match(pre.headers.get('access-control-allow-headers'), /Content-Encoding/);
 });
 
 test('the token goes in the Authorization header and nowhere else: never in an address, a body or an error; with no token nothing is sent', async () => {
@@ -378,4 +420,52 @@ test('the fake is WHG\'s, in what the page relies on: CORS for the allow-list on
   assert.equal(r405.status, 405); assert.equal(r405.headers.Allow, 'GET, POST, OPTIONS');
   assert.equal(fake.handle({ method: 'GET', url: '/reconciliation/nothing/', headers: {} }).headers['Content-Type'], 'text/html');
   assert.equal(fake.handle({ method: 'GET', url: '/reconciliation/projects', headers: {} }).status, 301);
+});
+
+// ---- Version history (Issue #38) ----------------------------------------------------------------------
+const SNAP = (n) => ({ plato: 1, n });
+test('versions: the list newest first with who saved and when, no snapshots; one version with its snapshot; a pruned one is "pruned"', async () => {
+  let t = NOW.getTime();
+  const fake = workbenchFake({ clock: () => t });
+  fake.addUser({ token: TOKEN, name: 'alice' });
+  const bob = fake.addUser({ token: OTHER, name: 'bob' });
+  const wb = client(fake);
+  const made = await wb.create({ snapshot: SNAP(1), title: 'P' });
+  t += 60000;
+  await wb.push(made.id, { snapshot: SNAP(2), base_version: 1 });
+  t += 60000;
+  fake.pushAs(made.id, SNAP(3), bob);
+  const list = await wb.versions(made.id);
+  assert.deepEqual(list.map((v) => [v.version, v.by]), [[3, 'bob'], [2, 'alice'], [1, 'alice']]);
+  assert.equal(list[0].created, '2026-10-14T10:02:00.000+00:00');
+  assert.ok(list.every((v) => !('snapshot' in v)), 'no snapshots in the list');
+  const raw = await (await fake.fetch(`${WORKBENCH}projects/${made.id}/versions/`, { headers: { Authorization: `Bearer ${TOKEN}` } })).json();
+  assert.deepEqual(Object.keys(raw.versions[0]).sort(), ['created', 'saved_by', 'version'], 'WHG\'s own shape');
+  assert.deepEqual(Object.keys(raw.versions[0].saved_by).sort(), ['name', 'user_id', 'username']);
+  const two = await wb.version(made.id, 2);
+  assert.deepEqual(two.snapshot, SNAP(2)); assert.equal(two.by, 'alice'); assert.equal(two.version, 2);
+  // Pruned: the fake keeps 25; after 30 saves version 1 is gone and 6 is the oldest (the control: 6 is read).
+  for (let i = 4; i <= 30; i++) fake.pushAs(made.id, SNAP(i));
+  assert.equal((await wb.versions(made.id)).length, 25);
+  await rejects(wb.version(made.id, 1), 'pruned', /newest 25/);
+  assert.deepEqual((await wb.version(made.id, 6)).snapshot, SNAP(6));
+  await rejects(wb.version(made.id, 0), 'pruned');
+  // A bare array is read as well as { versions: [...] } (the shape is not certain: see DEVELOPERS.md).
+  const bare = workbench({ fetch: async (url, init) => { const r = await fake.fetch(url, init); return /versions\/$/.test(url) ? new Response(JSON.stringify((await r.json()).versions), { status: 200 }) : r; }, token: () => TOKEN });
+  assert.equal((await bare.versions(made.id)).length, 25);
+  // A member only: another user's project is 403 (viewer reads, a stranger does not).
+  const stranger = fake.addUser({ token: 'whg-token-stranger000', name: 'eve' });
+  await rejects(client(fake, 'whg-token-stranger000').versions(made.id), 'forbidden');
+  assert.ok(stranger);
+  await rejects(wb.versions('not-an-id'), 'not-ours');
+});
+
+test('the conflict message names who saved the newer version and when, and says nothing it does not know', () => {
+  const full = WORDS.newer(3, 'bob', 'on 14 October, 10:02');
+  assert.match(full, /newer save of this workflow \(version 3\), saved by bob on 14 October, 10:02, so this one was not saved over it/);
+  assert.ok(!full.includes('perhaps your own'), 'named: no guess at whose');
+  const none = WORDS.newer(3, '', '');
+  assert.match(none, /\(version 3\), perhaps your own from another browser, so this one was not saved over it/);
+  assert.ok(!/saved (by|on)/.test(none), none);
+  assert.match(WORDS.newer(3, '', 'on 14 October'), /\(version 3\), saved on 14 October, perhaps your own/);
 });

@@ -17,7 +17,7 @@ import { outputStore } from './outputs.js';
 import { stepAt, currentInput, startFiles, keptBy, keptWords, distinct, projectWords, notKept } from './seams.js';
 import { regionsSettled, notReviewed, relateProblem, unexported, reviewDiffers, writesItself } from '../engine/methodos/containment.js';
 import { stepMark, whereWords, lower } from './layout.js';
-import { whyWords, shareLink, ENROL, WorkbenchError, capWords } from '../engine/workbench.js';
+import { whyWords, shareLink, ENROL, WorkbenchError, WORDS, capWords } from '../engine/workbench.js';
 import { stateOf, fromSnapshot } from './whg.js';
 
 // The input of each automatic operation that the page's run takes from the files chosen in step 1: a
@@ -1317,6 +1317,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   // words (workbench.js WORDS), and nothing kept in this browser is lost by one.
   const whgEl = q(tracker, '#whg-project'), whgNeeds = q(tracker, '#whg-needs'), whgState = q(tracker, '#whg-state'), whgLeaves = q(tracker, '#whg-leaves');
   const whgSaveB = q(tracker, '#whg-save'), whgOpenB = q(tracker, '#whg-open'), whgShareB = q(tracker, '#whg-share'), whgUnshareB = q(tracker, '#whg-unshare');
+  const whgHistoryB = q(tracker, '#whg-history'), whgHistoryBox = q(tracker, '#whg-history-box'), whgHistoryUl = q(tracker, '#whg-history-list'), whgHistoryWords = q(tracker, '#whg-history-words');
   const whgChoice = q(tracker, '#whg-choice'), whgLinkEl = q(tracker, '#whg-link'), whgSaid = q(tracker, '#whg-said'), whgTokenBox = q(tracker, '#whgp-token-box');
   const listBox = document.getElementById('whg-projects'), listUl = document.getElementById('whg-projects-list'), listSaidEl = document.getElementById('whg-projects-said');
   const sharedEl = q(tracker, '#methodos-shared');
@@ -1350,7 +1351,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     const link = e?.kind === 'beta' ? el('a', { href: ENROL, target: '_blank', rel: 'noopener noreferrer', textContent: 'WHG’s development page (opens in a new tab)' }) : null;
     sayIt(whyWords(e, action), true, link);
   }
-  function whgReset() { whgChoice.hidden = true; whgLinkEl.hidden = true; whgSay(null); planned = null; }
+  function whgReset() { whgHistoryBox.hidden = true; whgChoice.hidden = true; whgLinkEl.hidden = true; whgSay(null); planned = null; }
   /** The WHG part of the folded "Save, open or share the project", drawn with it (projectShow). */
   function whgShow() {
     whgEl.hidden = !whg;
@@ -1368,6 +1369,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     }
     const l = whgLink?.projectId ? whgLink : null;
     whgUnshareB.hidden = !l?.shared;
+    whgHistoryB.hidden = !l;
+    if (!l) whgHistoryBox.hidden = true;
     whgShareB.textContent = l?.shared ? 'Show the read-only link' : 'Share a read-only link';
     if (!projectEl.open) return;   // what follows is measured only while it is shown
     const review = page.review?.() || null;   // serialised once here, for the digest and the plan
@@ -1428,8 +1431,11 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       res = await whg.save({ project: parts, to, review: parts.review?.text ?? null, shared: !!(to && (to.shared || (whgLink?.projectId === to.projectId && whgLink.shared))), wait: pause(whgSay) });
     } catch (e) {
       if (e instanceof WorkbenchError && e.kind === 'conflict') {
+        whgSay('WHG has a newer save: asking who made it…');
+        // Who saved it, and when, if WHG says (a failure here only leaves the names out).
+        const who = to ? await whg.savedBy(to.projectId, e.version, pause(whgSay)) : null;
         whgSay(null);
-        whgAsk(`WHG has a newer save of this workflow (version ${e.version}), perhaps your own from another browser, so this one was not saved over it: nothing was changed, here or there.`, [
+        whgAsk(WORDS.newer(e.version, who?.by ? who.by : '', who?.created ? whenWords(who.created) : ''), [
           ['Open the copy on WHG', async () => {
             let got;
             try { got = { ...fromSnapshot(e.snapshot, to.title || whgLink?.title || record.name), projectId: to.projectId, version: e.version, shared: !!(to.shared || (whgLink?.projectId === to.projectId && whgLink.shared)) }; } catch (x) { whgFailed(x, 'open'); return; }
@@ -1506,6 +1512,49 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   document.getElementById('whg-open-banner')?.addEventListener('click', openFromWhg);
   document.getElementById('whg-projects-close').addEventListener('click', () => { listBox.hidden = true; listSay(null); (tracker.hidden ? backTo() : whgOpenB.focus()); });
 
+  // "History": the saves of the project in WHG, who saved each and when; "Restore this version" saves one as
+  // a new version on top of the newest (never over it), and opens it here in the workflow's place, asked first.
+  whgHistoryB.addEventListener('click', () => chain(async () => {
+    const st = wf || changed?.record;
+    const l = st && whgLinkFor === st.id && whgLink?.projectId ? whgLink : null;
+    if (!l || !whg) return;
+    if (!whgHistoryBox.hidden) { whgHistoryBox.hidden = true; return; }
+    whgSay('Asking WHG for the history of this project…');
+    let list;
+    try { list = await whg.history(l.projectId, pause(whgSay), st.id); } catch (e) { whgLink = await whg.linkFor(st.id); whgFailed(e, 'history'); render(false); return; }
+    whgSay(null);
+    whgHistoryWords.textContent = list.length ? `${list.length} ${list.length === 1 ? 'save' : 'saves'} of this project in WHG, the newest first (WHG keeps the newest 25).` : 'WHG lists no saves of this project.';
+    whgHistoryUl.replaceChildren(...list.map((v, i) => {
+      const li = el('li');
+      li.dataset.version = String(v.version);
+      li.append(el('span', { className: 'whg-title', textContent: `Version ${v.version}${i === 0 ? ' (the newest)' : ''}` }),
+        el('span', { className: 'whg-about', textContent: `Saved ${v.created ? whenWords(v.created) : 'at a time WHG does not say'}${v.by ? ` by ${v.by}` : ''}.` }));
+      if (i > 0) {
+        const b = el('button', { type: 'button', className: 'whg-restore', textContent: 'Restore this version' });
+        b.addEventListener('click', () => whgAsk(`Restore version ${v.version}${v.by ? `, saved by ${v.by}` : ''}? WHG gets it as a new version on top of the newest (version ${list[0].version}); no version is overwritten or lost. It is then opened here in place of this workflow, whose files this browser keeps are let go: save it as a project first to keep it.`,
+          [['Restore it', () => whgRestore(st, l, v)], ['Keep things as they are', () => {}]]));
+        li.append(' ', b);
+      }
+      return li;
+    }));
+    whgHistoryBox.hidden = false; projectEl.open = true;
+  }));
+  async function whgRestore(st, l, v) {
+    whgSay(`Restoring version ${v.version} as a new version in WHG…`);
+    let got;
+    try { got = await whg.restore(l.projectId, v.version, pause(whgSay), { title: l.title, shared: !!l.shared }); } catch (e) {
+      if (e instanceof WorkbenchError && e.kind === 'conflict') {
+        const who = await whg.savedBy(l.projectId, e.version, pause(whgSay));
+        whgSay(`${WORDS.newer(e.version, who?.by || '', who?.created ? whenWords(who.created) : '')} Open the history again to see it.`, true);
+        whgHistoryBox.hidden = true; return;
+      }
+      if (e?.kind === 'gone') whgLink = await whg.linkFor(st.id);
+      whgFailed(e, 'restore'); render(false); return;
+    }
+    whgHistoryBox.hidden = true;
+    whgSay(`Version ${v.version} is restored in WHG as version ${got.version}.`);
+    openOrAsk(got.blob, got.name, { whg: got, what: `version ${v.version}, restored in WHG as version ${got.version}` });
+  }
   // "Share a read-only link": the project as last saved to WHG, readable by anyone with the link.
   whgShareB.addEventListener('click', () => chain(async () => {
     const st = wf || changed?.record;

@@ -13,13 +13,20 @@
 //   - the views: projects/ (GET ?doc_type=, POST), projects/<uuid>/ (GET, PUT, DELETE),
 //     projects/<uuid>/share/ (POST, DELETE), shared/<token>/ (GET, anonymous), every refusal JSON, and 405
 //     with Allow for a method a view does not take; a path that is no view, Django's HTML 404;
-//   - the snapshot kept as PostgreSQL's jsonb keeps it: a \u0000 anywhere refused (a 500, as the database
-//     error would be), and the keys of every object given back in jsonb's order (shorter keys first, then
-//     by their bytes), not the order they were sent in; the newest 25 versions kept.
+//   - the snapshot kept as PostgreSQL's jsonb keeps it: a \u0000 in any string or key refused, 400
+//     nul_character (as WHG answers since 14 Oct 2026; it was a 500), and the keys of every object given back in jsonb's order (shorter keys first, then
+//     by their bytes), not the order they were sent in; the newest 25 versions kept;
+//   - since 14 Oct 2026: projects/<uuid>/versions/ (any member; newest first, no snapshots: { versions:
+//     [{ version, created, saved_by: { user_id, username, name } | null }] }) and versions/<n>/ (with the
+//     snapshot; one pruned is a 404 not_found); Content-Encoding: gzip on POST and PUT (the cap applies to the
+//     bytes sent and to the decompressed body: 413; broken gzip 400 bad_encoding; any other encoding 415
+//     unsupported_encoding; the preflight allows the header). The shape of the versions' answer is read
+//     from WHG's documentation (apis.md), not from a live answer: see test/workbench-live.test.js.
 // Run as a server for the browser checks: node test/workbench-fake.js serve --port <n> --origin <origin>…,
 // with a control API under /__fake/ (POST JSON) for what a check sets up, and what it reads back.
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 
 export const PREFIX = '/reconciliation/';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -29,6 +36,10 @@ const OPAQUE = ['plato'];
 const DOC_TYPES = ['reconciliation', 'place_collection', 'itinerary', 'gazetteer_group', 'place_record', 'dataset_edit', 'plato'];
 
 /** What jsonb gives back for `v`: every object's keys shorter first, then by their UTF-8 bytes; a \u0000 refused. */
+/** Whether any string or key of `v` holds a U+0000. */
+export function hasNul(v) {
+  try { jsonb(v); return false; } catch { return true; }
+}
 export function jsonb(v) {
   if (typeof v === 'string') { if (v.includes('\u0000')) throw new Error('unsupported Unicode escape sequence'); return v; }
   if (Array.isArray(v)) return v.map(jsonb);
@@ -70,7 +81,7 @@ export function workbenchFake({ origins = ['https://pelagios.org'], self = 'http
     updated: new Date(p.updated).toISOString().replace('Z', '+00:00'), shared: !!p.public_token, is_personal_team: teams.get(p.team).personal, published_collection: null });
   const store = (p, snapshot, u) => {
     p.snapshot = jsonb(snapshot);
-    p.history.unshift({ version: p.version, snapshot: p.snapshot, by: u?.id ?? null });
+    p.history.unshift({ version: p.version, snapshot: p.snapshot, by: u ? { user_id: u.id, username: u.name, name: u.name } : null, created: new Date(clock()).toISOString().replace('Z', '+00:00') });
     p.history.length = Math.min(p.history.length, 25);
     p.updated = clock();
   };
@@ -78,6 +89,7 @@ export function workbenchFake({ origins = ['https://pelagios.org'], self = 'http
   // ---- the views (views.py) -----------------------------------------------------------------------
   const json = (status, body, headers = {}) => ({ status, headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
   const err = (status, error, code, extra = {}) => json(status, { error, ...(code ? { code } : {}), ...extra });
+  const nul = () => err(400, 'the request holds a U+0000 character, which cannot be stored', 'nul_character');
   const parse = (body) => { try { const v = JSON.parse(body || '{}'); return v; } catch { return {}; } };
 
   function projectsView(req, u, query) {
@@ -100,7 +112,8 @@ export function workbenchFake({ origins = ['https://pelagios.org'], self = 'http
     if (data.team === undefined || data.team === null || data.team === '' || data.team === 'personal') team = personal(u);
     else { team = teams.get(data.team); if (!team || !EDIT.includes(team.members.get(u.id))) return err(403, 'you are not an editor of that team'); }
     const p = { id: randomUUID(), title, team: team.id, doc_type: docType, version: 1, status: 'draft', public_token: null, history: [], updated: clock(), created_by: u.id };
-    try { store(p, snapshot, u); } catch (e) { return { status: 500, headers: { 'Content-Type': 'text/html' }, body: '<h1>Server Error (500)</h1>' }; }
+    if (hasNul(data) || hasNul(title)) return nul();
+    store(p, snapshot, u);
     projects.set(p.id, p);
     return json(201, { id: p.id, version: 1, team: team.id, doc_type: docType, role: team.personal ? 'owner' : roleFor(p, u) });
   }
@@ -128,11 +141,22 @@ export function workbenchFake({ origins = ['https://pelagios.org'], self = 'http
       return json(409, { status: 'stale', version: p.version, snapshot: p.snapshot });   // the merge of other types is not modelled
     }
     const title = typeof data.title === 'string' ? data.title : null;
-    const was = { snapshot: p.snapshot, version: p.version, history: [...p.history] };
+    if (hasNul(data) || hasNul(title)) return nul();
     p.version += 1;
-    try { store(p, data.snapshot, u); } catch { Object.assign(p, was); return { status: 500, headers: { 'Content-Type': 'text/html' }, body: '<h1>Server Error (500)</h1>' }; }
+    store(p, data.snapshot, u);
     if (title) p.title = title.slice(0, 300);
     return json(200, { status: 'ok', version: p.version, snapshot: null });
+  }
+
+  function versionsView(req, u, pid, n) {
+    const p = projects.get(pid);
+    if (!p) return err(404, 'not found', 'not_found');
+    if (!roleFor(p, u)) return err(403, 'not a member of this project’s team');
+    const entry = (h) => ({ version: h.version, created: h.created, saved_by: h.by });
+    if (n === null) return json(200, { versions: p.history.map(entry) });
+    const h = p.history.find((x) => x.version === n);
+    if (!h) return err(404, 'version not found (it may have been pruned)', 'not_found');
+    return json(200, { ...entry(h), snapshot: h.snapshot });
   }
 
   function shareView(req, u, pid) {
@@ -163,6 +187,8 @@ export function workbenchFake({ origins = ['https://pelagios.org'], self = 'http
   const ROUTES = [
     [/^projects\/$/, ['GET', 'POST'], true, (req, u, m, q) => projectsView(req, u, q)],
     [/^projects\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/$/, ['GET', 'PUT', 'DELETE'], true, (req, u, m) => detailView(req, u, m[1])],
+    [/^projects\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/versions\/$/, ['GET'], true, (req, u, m) => versionsView(req, u, m[1], null)],
+    [/^projects\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/versions\/([0-9]+)\/$/, ['GET'], true, (req, u, m) => versionsView(req, u, m[1], Number(m[2]))],
     [/^projects\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/share\/$/, ['POST', 'DELETE'], true, (req, u, m) => shareView(req, u, m[1])],
     [/^shared\/([^/]+)\/$/, ['GET'], false, (req, u, m) => sharedView(req, decodeURIComponent(m[1]))],
   ];
@@ -175,7 +201,7 @@ export function workbenchFake({ origins = ['https://pelagios.org'], self = 'http
   /** Answer one request: { method, url (absolute, or a path), headers, body (a string) } -> { status, headers, body }. */
   function handle(req) {
     const url = new URL(req.url, self);
-    const entry = { method: req.method, url: url.href, path: url.pathname + url.search, headers: Object.fromEntries(Object.entries(req.headers || {}).map(([k, v]) => [k.toLowerCase(), String(v)])), body: req.body ?? '' };
+    const entry = { method: req.method, url: url.href, path: url.pathname + url.search, headers: Object.fromEntries(Object.entries(req.headers || {}).map(([k, v]) => [k.toLowerCase(), String(v)])), body: typeof req.body === 'string' || req.body == null ? req.body ?? '' : Buffer.from(req.body).toString('latin1'), sent: typeof req.body === 'string' ? Buffer.byteLength(req.body) : req.body?.length ?? 0 };
     log.push(entry);
     const res = route(req, url);
     entry.status = res.status;
@@ -198,7 +224,7 @@ export function workbenchFake({ origins = ['https://pelagios.org'], self = 'http
       const res = { status: 204, headers: { 'Content-Type': 'application/json', Allow: methods.join(', ') }, body: '' };
       if (!corsOrigin) return res;
       const out = withCors(res, corsOrigin);
-      Object.assign(out.headers, { 'Access-Control-Allow-Methods': methods.join(', '), 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Max-Age': '86400' });
+      Object.assign(out.headers, { 'Access-Control-Allow-Methods': methods.join(', '), 'Access-Control-Allow-Headers': 'Authorization, Content-Type, Content-Encoding', 'Access-Control-Max-Age': '86400' });
       return out;
     }
     if (cfg.fail > 0) { cfg.fail -= 1; return withCors({ status: 503, headers: { 'Content-Type': 'text/html' }, body: '<h1>Service Unavailable</h1>' }, corsOrigin); }
@@ -228,9 +254,18 @@ export function workbenchFake({ origins = ['https://pelagios.org'], self = 'http
       }
       if (!u.beta) return err(403, 'the Workbench is in beta and this account is not enrolled', 'beta_required');
     }
-    if (cfg.bodyMax && ['POST', 'PUT', 'PATCH'].includes(req.method)) {
-      const size = Buffer.byteLength(req.body || '', 'utf8');
-      if (size > cfg.bodyMax) return err(413, `request body too large: ${size} bytes; the limit is ${cfg.bodyMax} bytes`, 'body_too_large', { limit: cfg.bodyMax, size });
+    if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+      const too = (size) => err(413, `request body too large: ${size} bytes; the limit is ${cfg.bodyMax} bytes`, 'body_too_large', { limit: cfg.bodyMax, size });
+      const sent = typeof req.body === 'string' ? Buffer.byteLength(req.body, 'utf8') : (req.body?.length ?? 0);
+      if (cfg.bodyMax && sent > cfg.bodyMax) return too(sent);
+      const coding = (header(req, 'content-encoding') || '').trim().toLowerCase();
+      if (coding && coding !== 'identity') {
+        if (coding !== 'gzip') return err(415, `unsupported Content-Encoding: ${coding.slice(0, 40)}`, 'unsupported_encoding');
+        try { req = { ...req, body: gunzipSync(Buffer.from(req.body ?? ''), cfg.bodyMax ? { maxOutputLength: cfg.bodyMax } : {}).toString('utf8') }; } catch (e) {
+          if (e?.code === 'ERR_BUFFER_TOO_LARGE') return too(cfg.bodyMax + 1);
+          return err(400, 'the body is not valid gzip', 'bad_encoding');
+        }
+      } else if (typeof req.body !== 'string') req = { ...req, body: Buffer.from(req.body ?? '').toString('utf8') };
     }
     return view(req, u, m, url.searchParams);
   }
@@ -264,7 +299,7 @@ export function workbenchFake({ origins = ['https://pelagios.org'], self = 'http
 // ---- As a server, for the browser checks (e2e/app_test.py) -------------------------------------------
 // POST /__fake/<what> (JSON) sets it up and reads it back: user {token, beta?, active?}; config {origins?,
 // rate?, bodyMax?, retryAfter?, fail?}; remove {id}; log (the requests so far, and clears them if {clear: true}); projects (every project,
-// with its snapshot); push {id, snapshot} (another browser's save); share {id} / unshare {id} as the owner
+// with its snapshot); push {id, snapshot, by?} (another browser's save, by the user of that name); share {id} / unshare {id} as the owner
 // would; create {token, title, snapshot, doc_type} (a project made elsewhere); newMinute.
 export function serve(fake, port, host = '127.0.0.1') {
   const control = {
@@ -272,7 +307,7 @@ export function serve(fake, port, host = '127.0.0.1') {
     config: (b) => { for (const k of ['origins', 'rate', 'bodyMax', 'retryAfter', 'fail', 'holdMinute']) if (b[k] !== undefined) fake.cfg[k] = b[k]; return { ...fake.cfg }; },
     log: (b) => { const out = fake.log.map((x) => ({ ...x, body: x.body.length > 4096 ? `${x.body.slice(0, 4096)}…` : x.body, size: x.body.length })); if (b.clear) fake.log.length = 0; return out; },
     projects: () => [...fake.projects.values()].map((p) => ({ id: p.id, title: p.title, version: p.version, doc_type: p.doc_type, shared: !!p.public_token, token: p.public_token, snapshot: p.snapshot, team: p.team })),
-    push: (b) => ({ version: fake.pushAs(b.id, b.snapshot) }),
+    push: (b) => ({ version: fake.pushAs(b.id, b.snapshot, b.by ? [...fake.users.values()].find((u) => u.name === b.by) : null) }),
     create: (b) => { const r = fake.handle({ method: 'POST', url: `${PREFIX}projects/`, headers: { Authorization: `Bearer ${b.token}` }, body: JSON.stringify({ snapshot: b.snapshot, title: b.title, doc_type: b.doc_type || 'plato' }) }); fake.log.pop(); return JSON.parse(r.body); },
     share: (b) => { const p = fake.projects.get(b.id); if (!p.public_token) p.public_token = randomUUID(); return { token: p.public_token }; },
     unshare: (b) => { fake.projects.get(b.id).public_token = null; return { ok: true }; },

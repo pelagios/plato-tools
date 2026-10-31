@@ -98,6 +98,8 @@ export function workflowOf(snapshot) {
 }
 /** The size in bytes of the request body `body` as it is sent (its JSON, in UTF-8). */
 export const bodySize = (body) => enc.encode(JSON.stringify(body)).length;
+/** Whether `s` holds U+0000, which WHG's database cannot keep (it answers 400 nul_character). */
+export const hasNul = (s) => typeof s === 'string' && s.includes('\u0000');
 /** The title a project is given in WHG: the workflow's name (WHG keeps 300 characters). */
 export const titleOf = (record) => String(record?.name || 'PLATO tools workflow').slice(0, 300);
 
@@ -143,7 +145,7 @@ export async function fitProject({ record, files = [], left = [], review = null,
 }
 
 // ---- Asking WHG -------------------------------------------------------------------------------------
-/** Why a request to the Workbench did not do what was asked. kind: token | unauthenticated | beta | origin | forbidden | gone | unlinked | conflict | too-large | rate | refused | server | network | permission | not-ours | bad-answer. */
+/** Why a request to the Workbench did not do what was asked. kind: token | unauthenticated | beta | origin | forbidden | gone | unlinked | conflict | too-large | bad-title | pruned | rate | refused | server | network | permission | not-ours | bad-answer. */
 export class WorkbenchError extends Error {
   constructor(kind, message, extra = {}) { super(message); this.name = 'WorkbenchError'; this.kind = kind; Object.assign(this, extra); }
 }
@@ -162,6 +164,8 @@ export const WORDS = {
   origin: 'WHG does not accept projects from this copy of PLATO tools: only from the tools at pelagios.org.',
   forbidden: {
     save: 'Your role in this WHG project lets you read it, not save to it: save it as a new WHG project of your own instead.',
+    restore: 'Your role in this WHG project lets you read it, not save to it, so you cannot restore a version of it either.',
+    history: 'WHG does not let your account read this project’s history: you are not a member of its team.',
     delete: 'Only the owner of a WHG project can delete it.',
     share: 'Only an editor or the owner of a WHG project can share it, or stop sharing it.',
     open: 'WHG does not let your account open this project: you are not a member of its team.',
@@ -171,9 +175,14 @@ export const WORDS = {
     share: 'WHG no longer has this project: it was deleted, perhaps from another browser. It is no longer linked here; “Save to WHG” makes a new one, to share.',
     open: 'WHG no longer has this project: it was deleted, perhaps from another browser.',
     list: 'WHG no longer has this project: it was deleted, perhaps from another browser.',
+    history: 'WHG no longer has this project: it was deleted, perhaps from another browser. It is no longer linked here.',
+    restore: 'WHG no longer has this project: it was deleted, perhaps from another browser. It is no longer linked here; “Save to WHG” makes a new one.',
     delete: 'WHG no longer has this project: it was already deleted, perhaps from another browser.',
   },
   goneShared: 'This share link no longer opens anything: the project was deleted, or its owner stopped sharing it.',
+  nulTitle: 'The workflow’s name holds a character that cannot be kept in WHG (a “null”, U+0000, often left by a paste): rename the workflow without it. Nothing was sent.',
+  pruned: 'WHG no longer keeps that version (it keeps only the newest 25 saves of a project), or the project was deleted.',
+  newer: (version, by, when) => `WHG has a newer save of this workflow (version ${version})${by || when ? `, saved ${[by ? `by ${by}` : '', when].filter(Boolean).join(' ')}` : ''}${by ? '' : ', perhaps your own from another browser'}, so this one was not saved over it: nothing was changed, here or there.`,
   tooLarge: (limit, size) => `Too large for WHG: the request came to ${fmtBytes(size)}, and ${capWords(limit)}.`,
   tooLargeAlone: (limit, review) => `Too large for WHG even with every file left out (${capWords(limit)}): the workflow${review ? ' and the review open' : ''} alone come to more. Save the project to a file instead (“Save the project”).`,
   rate: (s) => `WHG asks for a pause of ${s} ${s === 1 ? 'second' : 'seconds'} (too many requests in a minute).`,
@@ -184,6 +193,8 @@ export const WORDS = {
     open: 'The project was not opened from WHG.',
     delete: 'The project was not deleted from WHG.',
     share: 'Sharing was not changed.',
+    history: 'The history of this project could not be read from WHG.',
+    restore: 'The version was not restored.',
     shared: 'The shared project could not be read from WHG.',
   },
   server: (status) => `WHG answered with an error (${status}).`,
@@ -209,7 +220,10 @@ export function whyWords(e, action = 'save') {
  * it), and `userAgent`, sent where a fetch may set one (Node; a browser sends its own).
  */
 export function workbench({ fetch, token = () => null, base = WORKBENCH, userAgent = null } = {}) {
-  async function call(method, path, { body, auth = true } = {}) {
+  async function call(method, path, { body, auth = true, array = false } = {}) {
+    // A title with a U+0000 is refused here, before anything is sent (WHG answers 400 nul_character): the
+    // project itself is base64, so a title is the only text of ours that can hold one.
+    if (isObject(body) && typeof body.title === 'string' && hasNul(body.title)) throw new WorkbenchError('bad-title', WORDS.nulTitle);
     const headers = { Accept: 'application/json' };
     if (auth) {
       const t = typeof token === 'function' ? token() : null;
@@ -228,7 +242,7 @@ export function workbench({ fetch, token = () => null, base = WORKBENCH, userAge
     let j = null;
     try { j = JSON.parse(await r.text()); } catch { j = null; }
     if (r.status >= 200 && r.status < 300) {
-      if (!isObject(j)) throw new WorkbenchError('bad-answer', WORDS.badAnswer, { status: r.status });
+      if (!isObject(j) && !(array && Array.isArray(j))) throw new WorkbenchError('bad-answer', WORDS.badAnswer, { status: r.status });
       return j;
     }
     throw refusal(r, j);
@@ -259,6 +273,21 @@ export function workbench({ fetch, token = () => null, base = WORKBENCH, userAge
       if (!Number.isSafeInteger(j.version)) throw new WorkbenchError('bad-answer', WORDS.badAnswer);
       return j;
     },
+    /** The saves of a project, newest first, with no snapshots: [{ version, created, by }] (`by` the name WHG has for who saved it, or null). Any team member. */
+    async versions(id) {
+      const j = await call('GET', `projects/${need(id)}/versions/`, { array: true });
+      const all = Array.isArray(j) ? j : j.versions;
+      if (!Array.isArray(all)) throw new WorkbenchError('bad-answer', WORDS.badAnswer);
+      return all.filter((v) => isObject(v) && Number.isSafeInteger(v.version)).map(versionOf);
+    },
+    /** One save of a project with its snapshot: { version, created, by, snapshot }; a version WHG has pruned (or no project) is a WorkbenchError 'pruned'. */
+    async version(id, n) {
+      if (!Number.isSafeInteger(n) || n < 1) throw new WorkbenchError('pruned', WORDS.pruned);
+      let j;
+      try { j = await call('GET', `projects/${need(id)}/versions/${n}/`); } catch (e) { if (e instanceof WorkbenchError && e.kind === 'gone') throw new WorkbenchError('pruned', WORDS.pruned, { status: 404 }); throw e; }
+      if (!isObject(j.snapshot)) throw new WorkbenchError('bad-answer', WORDS.badAnswer);
+      return { ...versionOf(j.version === undefined ? { ...j, version: n } : j), snapshot: j.snapshot };
+    },
     /** Delete a project (its owner only). */
     async remove(id) { return call('DELETE', `projects/${need(id)}/`); },
     /** Share a project read-only: { token } (the same token while it stays shared; a new one after it was stopped). */
@@ -277,6 +306,12 @@ export function workbench({ fetch, token = () => null, base = WORKBENCH, userAge
     },
   };
 }
+/** A version's entry as the page reads it: who is a name WHG gave (never an address of anyone's). */
+function versionOf(v) {
+  const u = isObject(v.saved_by) ? v.saved_by : null;
+  const by = u ? [u.name, u.username].map((x) => (typeof x === 'string' ? x.trim() : '')).find(Boolean) || null : null;
+  return { version: v.version, created: typeof v.created === 'string' ? v.created : null, by };
+}
 // Only a UUID goes into an address: anything else is refused before a request is made, in words that do not repeat it.
 function need(id, link = false) {
   if (!isId(id)) throw new WorkbenchError(link ? 'gone' : 'not-ours', link ? WORDS.goneShared : 'That is not the id of a WHG project.');
@@ -291,6 +326,7 @@ function refusal(r, j) {
   if (status === 403 && code === 'origin_not_allowed') return new WorkbenchError('origin', WORDS.origin, { status, code });
   if (status === 403) return new WorkbenchError('forbidden', WORDS.forbidden.open, { status, code });
   if (status === 404) return new WorkbenchError('gone', WORDS.gone.open, { status });
+  if (status === 400 && code === 'nul_character') return new WorkbenchError('refused', WORDS.refused('it holds a “null” character, U+0000, which WHG cannot keep'), { status, code });
   if (status === 409) return new WorkbenchError('conflict', 'WHG has a newer save of this project than the one this browser last saved or opened.', { status, version: isObject(j) && Number.isSafeInteger(j.version) ? j.version : null, snapshot: isObject(j) && isObject(j.snapshot) ? j.snapshot : null });
   if (status === 413) { const limit = Number(j?.limit) || BODY_MAX, size = Number(j?.size) || 0; return new WorkbenchError('too-large', WORDS.tooLarge(limit, size), { status, limit, size }); }
   if (status === 429) {

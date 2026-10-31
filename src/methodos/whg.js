@@ -11,7 +11,7 @@
 // overwrites a newer save in WHG: a 409 comes back to the page, which offers to open WHG's copy or to save
 // this one as a new project.
 import { Sha256 } from '../engine/krisis/digest.js';
-import { fitProject, unwrap, workflowOf, withPause, titleOf, WorkbenchError, DOC_TYPE } from '../engine/workbench.js';
+import { fitProject, unwrap, workflowOf, withPause, titleOf, hasNul, WorkbenchError, WORDS, DOC_TYPE } from '../engine/workbench.js';
 import { projectName } from '../engine/methodos/project.js';
 
 /** The JSON of `v` with every object's keys in order, so that the same data gives the same text. */
@@ -46,6 +46,7 @@ export function whgProjects({ client, store, now = () => new Date() }) {
      */
     fit(project, linked = null) {
       const title = titleOf(project.record);
+      if (hasNul(title)) return Promise.reject(new WorkbenchError('bad-title', WORDS.nulTitle));
       return fitProject({ ...project, bodyOf: (snapshot) => (linked ? { snapshot, base_version: linked.version, title } : { snapshot, doc_type: DOC_TYPE, title }) });
     },
     /**
@@ -69,6 +70,28 @@ export function whgProjects({ client, store, now = () => new Date() }) {
       const link = linkOf(record, { projectId, version: j.version, sha256: fitted.snapshot.sha256, shared: to ? shared : false, title }, { state: stateOf(record, review) });
       await store.setLink(record.id, { ...(await store.linkFor(record.id)), ...link });
       return { link, tooLarge: fitted.tooLarge, size: fitted.size, created: !to };
+    },
+    /** The saves of the project `projectId`, newest first: [{ version, created, by }]; a project gone lets the link of `forId` (a workflow) go. */
+    async history(projectId, wait, forId = null) {
+      try { return await run(() => client.versions(projectId), wait); } catch (e) { if (e instanceof WorkbenchError && e.kind === 'gone' && forId) await this.forget(forId); throw e; }
+    },
+    /** Who saved version `version`, and when, for a conflict's message: { by, created }, or null if WHG does not say (never an error: the message goes on without). */
+    async savedBy(projectId, version, wait) {
+      try { const v = (await run(() => client.versions(projectId), wait)).find((x) => x.version === version); return v ? { by: v.by, created: v.created } : null; } catch { return null; }
+    },
+    /**
+     * Restore version `n` of the linked project `projectId`: it is read (checked whole, so a damaged one is
+     * never put back), and pushed as a new version on top of WHG's newest (its number the base_version), so
+     * nothing is overwritten and the versions between stay. A save in between is a 409 as any is. Returns the
+     * project as open() does, at its new version: { blob, name, title, version, sha256, … }.
+     */
+    async restore(projectId, n, wait, { title = '', shared = false } = {}) {
+      const [head] = await run(() => client.versions(projectId), wait);
+      if (!head) throw new WorkbenchError('bad-answer', WORDS.badAnswer);
+      const old = await run(() => client.version(projectId, n), wait);
+      const got = fromSnapshot(old.snapshot, title);
+      const j = await run(() => client.push(projectId, { snapshot: old.snapshot, base_version: head.version }), wait);
+      return { ...got, projectId, version: j.version, shared, restored: n };
     },
     /** Let the link of the workflow `id` go (its origin, if it was copied from a share link, is kept). */
     async forget(id) {
