@@ -5709,7 +5709,7 @@ def whg_checks(pw, url, tmp):
         until(a, "() => !document.getElementById('methodos-replace').hidden", 30)
         replace = view(a)['replace']
         a.click('#methodos-replace-yes')
-        until(a, "() => /restored in WHG as version %d/.test(document.getElementById('methodos-message').textContent)" % (newest + 1), 30)
+        until(a, "() => /from WHG \\(version %d\\)/.test(document.getElementById('methodos-message').textContent)" % (newest + 1), 30)
         after = next(x for x in projects() if x['id'] == r['second'])
         puts = [e for e in log() if e['method'] == 'PUT']
         links = a.evaluate(WHG_LINKS_JS)
