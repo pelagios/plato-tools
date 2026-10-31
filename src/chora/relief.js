@@ -8,11 +8,12 @@
 // The file is not in the repository (322 MB): the Pages workflow puts it in the site from a GitHub release asset.
 // Where it is not there (a local build, or before that release exists), the relief says it is not available.
 import { PMTiles } from 'pmtiles';
-import { RELIEF, toneRelief } from '../engine/chora/relief.js';
+import { RELIEF, COAST, coastColours, toneRelief } from '../engine/chora/relief.js';
 
-export { RELIEF };
+export { RELIEF, COAST };
 export const PROTOCOL = 'plato-relief';
 export const SOURCE = 'chora-relief', LAYER = 'chora-relief';
+export const COAST_SOURCE = 'chora-coast', COAST_LAND = 'chora-coast-land', COAST_SEA = 'chora-coast-sea';
 /** The relief file's address: this site's, beside the basemap's style. */
 export const reliefUrl = () => new URL(RELIEF.path, document.baseURI).href;
 
@@ -89,9 +90,15 @@ export function register(maplibregl) {
 export function add(map, { before = ['rivers', 'lakes', 'chora-overview-clusters'] } = {}) {
   if (map.getSource(SOURCE)) return;
   map.addSource(SOURCE, { type: 'raster', tiles: [`${PROTOCOL}://{z}/{x}/{y}`], tileSize: 256, minzoom: RELIEF.minzoom, maxzoom: RELIEF.maxzoom, bounds: RELIEF.bounds, attribution: RELIEF.attribution });
-  map.addLayer({ id: LAYER, type: 'raster', source: SOURCE, paint: { 'raster-resampling': 'linear', 'raster-fade-duration': 0 } }, before.find((id) => map.getLayer(id)));
+  const above = before.find((id) => map.getLayer(id));
+  // The finer coast (#39), from zoom COAST.minzoom: its land under the country tint (or the relief), its sea over the relief.
+  const style = map.getStyle(), c = coastColours(style), fine = { source: COAST_SOURCE, minzoom: COAST.minzoom };
+  map.addSource(COAST_SOURCE, { type: 'geojson', data: new URL(COAST.path, document.baseURI).href, maxzoom: 10, tolerance: 0.2 });
+  map.addLayer({ id: COAST_LAND, type: 'fill', ...fine, filter: ['==', ['get', 'part'], 'land'], paint: { 'fill-color': c.land, 'fill-antialias': false } }, map.getLayer('country-tint') ? 'country-tint' : above);
+  map.addLayer({ id: LAYER, type: 'raster', source: SOURCE, paint: { 'raster-resampling': 'linear', 'raster-fade-duration': 0 } }, above);
+  map.addLayer({ id: COAST_SEA, type: 'fill', ...fine, filter: ['==', ['get', 'part'], 'sea'], paint: { 'fill-color': c.sea } }, above);
 }
 export function remove(map) {
-  if (map.getLayer(LAYER)) map.removeLayer(LAYER);
-  if (map.getSource(SOURCE)) map.removeSource(SOURCE);
+  for (const id of [COAST_SEA, LAYER, COAST_LAND]) if (map.getLayer(id)) map.removeLayer(id);
+  for (const id of [SOURCE, COAST_SOURCE]) if (map.getSource(id)) map.removeSource(id);
 }

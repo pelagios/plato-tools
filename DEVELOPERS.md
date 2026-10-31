@@ -2893,8 +2893,12 @@ part is `export-ui.js`, `export-raster.js` (pictures), `export-fonts.js` (the fo
   permission is already allowed for showing them, through the permissions' fetch or MapLibre's guard.
 - **Not done**: a fully vector OpenFreeMap (it is a picture); labels along a line or curved; `<switch
   systemLanguage>` translations in one file (one language a file, by decision); Natural Earth's names in another
-  language than English; the inset's own coastline at 10m; measured scale (a map of 200 places with every option
-  is unmeasured). OpenStreetMap's tile usage policy discourages bulk downloads: a map on it fetches at most 400
+  language than English (a known limit, not cheap: the towns come from `ne_10m_populated_places_simple`, which
+  has one name, English; its other languages are in the full `ne_10m_populated_places`, and the seas' and regions'
+  `name_xx` columns, so a choice of language means re-fetching and re-pinning those sources, a name table per
+  language in `public/basemap/` (the place file alone grows several times over) and a per-feature fallback where
+  a language has no name; the places Chora draws are labelled in the language chosen in the panel already, and
+  only Natural Earth's own modern names are English); the inset's own coastline at 10m. OpenStreetMap's tile usage policy discourages bulk downloads: a map on it fetches at most 400
   tiles, once, when it is made.
 
 **Tests**: `test/chora-export.test.js` (projection, clipping, labels, the style read, the golden SVG parsed by
@@ -2942,6 +2946,23 @@ source file with its sha256), 322 MB, grey WebP tiles of 256 pixels: zooms 0 to 
   layer is under Natural Earth's rivers and lakes and Chora's own layers.
 - **In a map made**: the same toned tiles, stitched within the tile budget, embedded under the places; its
   attribution and its Commons templates (`{{PD-USGov-NASA-SRTM}}`, `{{PD-USGov-USGS}}`).
+- **The finer coast (#39).** Natural Earth's 50m coast (simplified to 60% of its vertices) is coarser than the
+  relief from about zoom 7, and the relief showed in the sea (islands, headlands the coast leaves out) or ended
+  short of the shore. With the relief on, from `COAST.minzoom` (7), `public/basemap/coast-fine.geojson` is also
+  drawn: Natural Earth's **10m land** (`ne_10m_land`, public domain like the rest; pinned and checked by sha256 in
+  `scripts/build-basemap.mjs`, which writes the file and lists it in `sources.json`), unsimplified to 4 decimals,
+  clipped to the relief's bounds, as two kinds of feature (`part`): the land, and the sea (the bounds less the
+  land, made by mapshaper's `-erase`). The land is drawn in the style's land colour above the 50m land and under
+  the country tint; the sea in its ocean colour **over the relief** and under the rivers, so the relief shows on
+  land alone, at the finer coast. On the screen these are the layers `chora-coast-land` and `chora-coast-sea`
+  (`src/chora/relief.js` `add`, with the relief; the file, 2.3 MB, 1 MB gzipped, is read only with the relief on);
+  in a map made `composeMap` takes `coast` (the file, fetched by `export-ui.js` only with the relief, on Natural
+  Earth, at zoom 7 or closer) and then orders the file as the screen is: ocean, land, finer land, country tint,
+  relief, finer sea (group `coast`), then the rivers, lakes, borders and names (group `background-overlay`);
+  without it the whole background comes first and the relief after it, as before. Nothing new to credit: it is
+  Natural Earth. It is still a 1:10 million coast, not the relief's: at the closest zooms a headland of the
+  relief can still end a few pixels from the shore. `test/chora-coast.test.js` holds the data (a point the 50m
+  land has as land that the finer coast has as sea) and the order; the browser checks hold the layers and the file.
 - **Tested** with `test/fixtures/chora/relief/relief-fixture.pmtiles` (590 bytes, made by `make-relief.py` beside
   it: every tile left half flat, upper right in shadow, lower right lit), served to the page by a route that
   honours ranges (206, `Content-Range`).

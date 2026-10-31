@@ -20,7 +20,7 @@ import { inView, recordSites, PLACE_CAP } from '../engine/chora/export/places.js
 import { PROJECTION_WORDS, exportView, mercator } from '../engine/chora/export/project.js';
 import { settingsIn } from '../engine/chora/export/svg.js';
 import { withMeta } from '../engine/chora/export/png-meta.js';
-import { RELIEF } from '../engine/chora/relief.js';
+import { RELIEF, COAST } from '../engine/chora/relief.js';
 import { TILE_BUDGET } from '../engine/chora/export/tiles.js';
 import { allmapsTransformationName, manifestNavDate } from '../engine/georef/index.js';
 import * as georef from '../engine/georef/index.js';
@@ -221,6 +221,13 @@ export function createExport(root, preview, ctx) {
     if (pictures.relief?.key !== key) pictures.relief = { key, value: await raster.reliefPicture(s.view, s.width, s.projection) };
     return pictures.relief.value;
   }
+  /** The finer coast (basemap/coast-fine.geojson) where the relief is drawn close enough to need it, else null. */
+  let coastData = null;
+  async function coastLayer(s) {
+    if (!s.relief || !bm().local || s.view.zoom < COAST.minzoom) return null;
+    coastData ??= fetch(new URL(COAST.path, document.baseURI)).then((r) => { if (!r.ok) throw new Error(`${COAST.path}: ${r.status}`); return r.json(); }).catch((e) => { coastData = null; throw e; });
+    return coastData;
+  }
   async function historicalLayer(s) {
     const h = s.historical, e = h ? entryOf(h.key) : null;
     if (!e) return null;
@@ -276,7 +283,9 @@ export function createExport(root, preview, ctx) {
     if (sites.length) lines.push(`Places identified with ${sites.map((x) => x.site).join(', ')}`);
     // The places' sources that ask for credit, by their own gazetteer (licence.js placeCredits).
     if (licence.placeCredits?.length) lines.push(`The places' sources: ${licence.placeCredits.join('; ')}`);
-    lines.push(alone ? `Coastline: as “${e.title}” draws it` : ex.coastline || `Coastline: as ${b.name} draws it`);
+    // With the relief close up the finer coast (10m) is drawn over the 50m one (relief.js COAST).
+    const fineCoast = !alone && s.relief && b.local && s.view.zoom >= COAST.minzoom;
+    lines.push(alone ? `Coastline: as “${e.title}” draws it` : fineCoast ? 'Modern coastline: Natural Earth, 50m and 10m (public domain)' : ex.coastline || `Coastline: as ${b.name} draws it`);
     return lines;
   }
 
@@ -287,7 +296,7 @@ export function createExport(root, preview, ctx) {
     try {
       const hist = await historicalLayer(s);
       const alone = hist && s.historical.over === 'alone';
-      const [bg, rel] = alone ? [null, null] : await Promise.all([background(s), reliefLayer(s)]);
+      const [bg, rel, coast] = alone ? [null, null, null] : await Promise.all([background(s), reliefLayer(s), coastLayer(s)]);
       if (mine !== seq) return;
       const contributor = contributors.load();
       const items = labelItems(s);
@@ -296,7 +305,7 @@ export function createExport(root, preview, ctx) {
       const meta = { ...s, made: new Date().toISOString().slice(0, 10), tools: 'PLATO tools' };
       const common = {
         view: s.view, width: s.width, projection: s.projection,
-        background: bg || { kind: 'none' }, relief: rel, historical: hist ? { name: hist.name, href: hist.href, opacity: hist.opacity, affine: hist.affine } : null,
+        background: bg || { kind: 'none' }, relief: rel, coast, historical: hist ? { name: hist.name, href: hist.href, opacity: hist.opacity, affine: hist.affine } : null,
         places: items, marks: !!s.furniture.key, keyRows: keyRows(),
         furniture: { north: s.furniture.north, inset: s.furniture.inset ? await landFeatures() : null, title: s.furniture.title ? s.title : '', attribution: attributionLines(s, licence, hist, author) },
         lang: s.lang || null, title: s.title, desc: s.description, settings: meta,

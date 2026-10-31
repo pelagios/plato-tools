@@ -40,6 +40,7 @@ what Chora's `transformRequest` allows by default. The font folder's name has sp
 | `country-labels.geojson` | 36,882 | Natural Earth's label point per country: `name`, `iso`, `min_zoom`, `max_zoom` |
 | `marine-labels.geojson` | 17,277 | the names of seas, gulfs, bays and straits (Natural Earth 50m marine polygons, each a point inside it): `name` (English), `kind`, `min_zoom`; layer `marine-labels`, hidden unless asked for |
 | `physical-labels.geojson` | 47,396 | the names of mountain ranges, deserts, plains, peninsulas and the like (Natural Earth 50m geographic regions, the physical kinds only, each a point inside it): `name`, `kind`, `min_zoom`; layer `physical-labels`, hidden unless asked for |
+| `coast-fine.geojson` | 2,271,225 | Natural Earth 10m land clipped to the shaded relief's bounds (15° W to 60° E, 15° N to 62° N), unsimplified: features with `part` `land` and `sea` (the bounds less the land); not in `style.json`: drawn only with the relief on, from zoom 7, so that the relief shows on land alone (DEVELOPERS.md, "The finer coast"). Public domain |
 | `relief.pmtiles.sha256` | 81 | the sha256 of the shaded relief, `relief.pmtiles`, which is not here (below) |
 | `ccodes.json` | 8,010 | a bounding box for each ISO 3166-1 alpha-2 code (below) |
 | `glyphs/Noto Sans Regular/*.pbf` | 781,564 | glyphs for 8 ranges: 0-255, 256-511, 512-767, 768-1023, 1024-1279, 7680-7935, 7936-8191, 8192-8447 (Latin, Latin Extended, Greek with polytonic, Cyrillic, punctuation) |

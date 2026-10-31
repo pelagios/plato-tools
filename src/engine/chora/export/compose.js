@@ -12,6 +12,7 @@ import { projectionOf, exportView } from './project.js';
 import { clipLine, clipRing, boxOf, thin } from './clip.js';
 import { placeLabels, shownText } from './labels.js';
 import { styleNodes } from './vector.js';
+import { coastStyle, COAST } from '../relief.js';
 import { unitOf, scaleBar, northArrow, attribution, titleBlock, inset, key, shapesSvg } from './furniture.js';
 import { circleAround } from '../geo.js';
 import { markShapes, placeShapes, MARK_SIZE } from '../marks.js';
@@ -68,15 +69,31 @@ export function composeMap(m) {
 
   // The background.
   const b = m.background || {};
+  // With the relief at COAST.minzoom or closer, and the finer coast given (m.coast: coast-fine.geojson), the order is the
+  // screen's: Natural Earth's ocean and land, the finer land, the country tint, the relief, the finer sea over it, then
+  // the rivers, lakes, borders and names. Otherwise the whole background, then the relief.
+  const fine = b.kind === 'vector' && m.relief?.href && m.coast && m.view.zoom >= COAST.minzoom;
   if (b.kind === 'vector') {
     const r = styleNodes(b.style, b.data, proj, { zoom: m.view.zoom, scale, only: b.layers || null });
-    body.push(layer('background', 'Background: Natural Earth', ...r.nodes));
     layersDrawn = r.drawn; neLabels = r.labels;
+    if (fine) {
+      const c = styleNodes(coastStyle(b.style), { coast: m.coast }, proj, { zoom: m.view.zoom, scale });
+      const node = (id) => c.nodes[c.drawn.indexOf(id)];
+      const UNDER = ['ocean', 'land', 'country-tint'];
+      let k = r.drawn.findIndex((id) => !UNDER.includes(id)); if (k < 0) k = r.nodes.length;
+      const tint = r.drawn.indexOf('country-tint'), at = tint >= 0 && tint < k ? tint : k;
+      const under = [...r.nodes.slice(0, at), ...(node('coast-land') ? [node('coast-land')] : []), ...r.nodes.slice(at, k)];
+      body.push(layer('background', 'Background: Natural Earth', ...under));
+      body.push(layer('relief', 'Shaded relief', el('image', { x: 0, y: 0, width: W, height: H, preserveAspectRatio: 'none', 'xlink:href': m.relief.href })));
+      rasterInSvg = true;
+      if (node('coast-sea')) body.push(layer('coast', 'Natural Earth’s finer coast, over the relief', node('coast-sea')));
+      if (k < r.nodes.length) body.push(layer('background-overlay', 'Natural Earth: water, borders and names', ...r.nodes.slice(k)));
+    } else body.push(layer('background', 'Background: Natural Earth', ...r.nodes));
   } else if (b.kind === 'image') {
     rasterInSvg = true;
     body.push(layer('background', `Background: ${b.name || 'a picture'}`, el('image', { x: 0, y: 0, width: W, height: H, preserveAspectRatio: 'none', 'xlink:href': b.href })));
   }
-  if (m.relief?.href) {
+  if (m.relief?.href && !fine) {
     rasterInSvg = true;
     body.push(layer('relief', 'Shaded relief', el('image', { x: 0, y: 0, width: W, height: H, preserveAspectRatio: 'none', 'xlink:href': m.relief.href })));
   }

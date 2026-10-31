@@ -7,7 +7,7 @@
 //   node scripts/build-basemap.mjs --hashes   print the sha256 of what is fetched, to re-pin
 // Simplification is by mapshaper, run through npx at a pinned version, so it is not a dependency.
 import { mkdir, readFile, writeFile, stat, readdir, rm } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -18,6 +18,8 @@ const NE_REPO = 'nvkelso/natural-earth-vector';
 const NE_COMMIT = 'ca96624a56bd078437bca8184e78163e5039ad19';
 const NE = {
   ne_50m_land: 'e874b27a51d146452be360cafb3cc50c86001074a67d534113e6534682f9826b',
+  // The finer coast (coast-fine.geojson, below), for the shaded relief only: its detail outruns the 50m coast.
+  ne_10m_land: '1ac90796408bc6ad6911d69448485d3c4dbf2190370080368a09976e1c9f7416',
   ne_50m_admin_0_countries: '3e458fc036ad0a66411f2c1e6cac49c5d7bfb81cb1123bc513b22511a2b7fdeb',
   ne_50m_admin_0_map_units: 'b8d421aca6e9e08e8cdf09cc26af111cc3e0deba4fe915611d58ade71e8a4db0',
   ne_50m_admin_0_boundary_lines_land: '2faac4f6b34386f3d21b6e018cf151f241f00e5c936d44dd17d7d9bfb147fa48',
@@ -233,6 +235,20 @@ const ccodes = Object.fromEntries([...byCode.keys()].sort().map((c) => [c, mainB
 
 // --- Write -----------------------------------------------------------------------------------
 
+// The finer coast, for the shaded relief (#39): at zoom 7 and closer the 50m coast is coarser than the relief, so
+// the relief shows in the sea (islands, headlands the 50m coast leaves out). Natural Earth's 10m land, unsimplified
+// (4 decimals), clipped to the relief's bounds (RELIEF.bounds in src/engine/chora/relief.js), as two parts: the
+// land, and the sea, which is the bounds' rectangle less the land. Drawn only with the relief on (relief.js,
+// export-ui.js); the sea over the relief, the land under the country tint.
+const COAST_BOUNDS = '-15,15,60,62';
+await mkdir(`${work}/coast`, { recursive: true });
+await writeFile(`${work}/ne_10m_land.json`, JSON.stringify(src.ne_10m_land));
+execFileSync('npx', ['-y', MAPSHAPER, '-i', `${work}/ne_10m_land.json`, 'name=land', '-filter-fields', '', '-clip', `bbox=${COAST_BOUNDS}`,
+  '-rectangle', `bbox=${COAST_BOUNDS}`, 'name=sea', '-erase', 'target=sea', 'source=land',
+  '-o', `${work}/coast/`, 'target=land,sea', 'format=geojson', 'geojson-type=FeatureCollection', 'precision=0.0001'],
+{ stdio: ['ignore', 'inherit', 'pipe'] });
+const coast = fc(['land', 'sea'].flatMap((part) => JSON.parse(readFileSync(`${work}/coast/${part}.json`, 'utf8')).features.map((f) => ({ ...f, properties: { part } }))));
+
 await mkdir(`${OUT}/glyphs/${FONT}`, { recursive: true });
 const written = {};
 const put = async (rel, data) => { await writeFile(join(OUT, rel), data); written[rel] = data; };
@@ -241,6 +257,7 @@ for (const name of names) {
   await put(`${name}.geojson`, dump(col));
 }
 await put('places.geojson', dump(places));
+await put('coast-fine.geojson', dump(coast));
 for (const name of Object.keys(labelLayers)) {
   const col = JSON.parse(await readFile(`${work}/${name}.out.json`, 'utf8'));
   col.features.sort((a, b) => a.properties.min_zoom - b.properties.min_zoom || a.properties.name.localeCompare(b.properties.name, 'en'));

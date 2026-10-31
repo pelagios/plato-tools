@@ -11668,8 +11668,12 @@ def open_map_basemap_checks(pw, url, tmp):
             flat = max(abs(a - b) for a, b in zip(off['flat'], with_relief['flat']))
             kept = page.evaluate('() => localStorage.getItem("chora-relief")')
             # Below the basemap's rivers and Chora's own layers.
-            order = page.evaluate('() => { const ids = window.__chora_map.getStyle().layers.map((l) => l.id); return [ids.indexOf("land"), ids.indexOf("chora-relief"), ids.indexOf("rivers"), ids.indexOf("chora-overview-clusters")]; }')
+            order = page.evaluate('() => { const ids = window.__chora_map.getStyle().layers.map((l) => l.id); return [ids.indexOf("land"), ids.indexOf("chora-relief"), ids.indexOf("rivers"), ids.indexOf("chora-overview-clusters"), ids.indexOf("chora-coast-land"), ids.indexOf("chora-coast-sea")]; }')
+            page.evaluate('() => window.__chora_map.jumpTo({ center: [24, 38], zoom: 7.5 })'); page.evaluate(SETTLE); soon(page, '() => window.__chora_map.isSourceLoaded("chora-coast")', 30)
+            coast = page.evaluate('() => { const m = window.__chora_map; return !!m.getSource("chora-coast") && m.querySourceFeatures("chora-coast", { filter: ["==", ["get", "part"], "sea"] }).length > 0 && m.querySourceFeatures("chora-coast", { filter: ["==", ["get", "part"], "land"] }).length > 0; }')
+            # The finer coast (#39): its land above the land and under the relief, its sea over the relief and under the rivers.
             return (on and st["ticked"] and darker > 60 and lighter >= 15 and flat <= 4 and kept == 'on' and order[0] < order[1] < order[2] < order[3]
+                    and coast and order[0] < order[4] < order[1] < order[5] < order[2]
                     and relief_asked(since) and not foreign(since)), {
                 'shown': on, 'state': st, 'shadow darker by': darker, 'lit lighter by': lighter, 'flat changed by': flat, 'kept': kept, 'order': order,
                 'asked': len(relief_asked(since)), 'foreign': foreign(since)}
@@ -12055,8 +12059,11 @@ def open_map_export_checks(pw, url, tmp):
             boot(relief_on=True)
             s = es(); svg_path, _ = get('svg'); svg = svg_path.read_text()
             return (s['licence']['ok'] and '{{PD-USGov-NASA-SRTM}}' in s['licence']['templates'] and '{{PD-USGov-USGS}}' in s['licence']['templates']
-                    and '<g id="relief"' in svg and 'Shaded relief from NASA SRTM (public domain); USGS GMTED2010 (public domain)' in svg and s['rasterInSvg']), {
-                'templates': s['licence'].get('templates'), 'relief layer': '<g id="relief"' in svg}
+                    and '<g id="relief"' in svg and 'Shaded relief from NASA SRTM (public domain); USGS GMTED2010 (public domain)' in svg and 'Modern coastline: Natural Earth, 50m and 10m (public domain)' in svg and s['rasterInSvg']
+                    # At zoom 8.6 the finer coast (#39) is in the file: its land after the land, its sea after the relief, a path of two or more rings.
+                    and svg.find('<g id="ne-land"') < svg.find('<g id="ne-coast-land"') < svg.find('<g id="relief"') < svg.find('<g id="ne-coast-sea"') and svg.find('<g id="ne-coast-land"') > 0
+                    and len(re.findall(r'M', svg.split('<g id="ne-coast-sea"')[1].split('</g>')[0])) >= 2), {
+                'templates': s['licence'].get('templates'), 'relief layer': '<g id="relief"' in svg, 'coast': '<g id="ne-coast-sea"' in svg, 'order': [svg.find(x) for x in ('<g id="ne-land"', '<g id="ne-coast-land"', '<g id="relief"', '<g id="ne-coast-sea"')]}
         finally:
             page.unroute('**/basemap/relief.pmtiles', relief_route)
     attempt('Make an open map: with the shaded relief on, the file carries it, credits NASA SRTM and USGS GMTED2010, and the Commons page names their public-domain templates', relief_in_file)

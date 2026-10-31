@@ -45,3 +45,25 @@ export function toneRelief(rgba) {
   }
   return rgba;
 }
+
+/**
+ * The finer coast under the relief (#39): at COAST.minzoom and closer Natural Earth's 50m coast is coarser than the
+ * relief, so the relief's islands and headlands showed in the sea. coast-fine.geojson (scripts/build-basemap.mjs) is
+ * Natural Earth's 10m land (public domain, the same source) over the relief's bounds, as two features: part "land"
+ * and part "sea" (the bounds less the land). The land is drawn under the relief, in the land's colour; the sea over
+ * it, in the ocean's, so that the relief shows on land alone. Drawn only with the relief on.
+ */
+export const COAST = Object.freeze({ path: 'basemap/coast-fine.geojson', minzoom: 7 });
+/** The style's colours for the two parts: { land, sea } (the style's own land fill and ocean background). */
+export function coastColours(style) {
+  const paint = (id, key) => (style.layers || []).find((l) => l.id === id)?.paint?.[key];
+  return { land: paint('land', 'fill-color') || '#f4f2ec', sea: paint('ocean', 'background-color') || '#d5e3ea' };
+}
+/** A style of the two parts, in the shape styleNodes (export/vector.js) draws, over source "coast". */
+export function coastStyle(style) {
+  const c = coastColours(style);
+  return { version: 8, sources: {}, layers: [
+    { id: 'coast-land', type: 'fill', source: 'coast', filter: ['==', ['get', 'part'], 'land'], paint: { 'fill-color': c.land, 'fill-antialias': false } },
+    { id: 'coast-sea', type: 'fill', source: 'coast', filter: ['==', ['get', 'part'], 'sea'], paint: { 'fill-color': c.sea } },
+  ] };
+}
