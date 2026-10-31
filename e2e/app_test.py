@@ -12157,6 +12157,23 @@ def open_map_historical_checks(pw, url, tmp):
                 and 'you state that the scan is a faithful reproduction of a map in the public domain' in hist and 'overrides the licence its holder states' in hist
                 and s2['licence']['ok'] and '{{PD-Art|PD-old-assumed}}' in s2['licence']['templates']), {'chosen': chosen, 'before': s.get('licence'), 'hist': hist[-400:], 'after': s2.get('licence')}
     attempt('Make an open map: a historical map dated 1746 that its holder licenses for no commercial use (CC BY-NC-SA 3.0) has nothing chosen for it: it is refused, saying so, and the panel says that stating its rights is stating the scan is of a public-domain map, which overrides the holder\'s licence; stated, it may go', nc_not_preselected)
+    def nkc_asks_for_a_statement():
+        # Rights "No Known Copyright" (rightsstatements.org NKC) is not a licence and not a claim that the map is in the public
+        # domain: the page shows it in the map's own words, refuses the map until the user states its rights, and lets it go once stated.
+        nav['date'] = None; nav['rights'] = 'http://rightsstatements.org/vocab/NKC/1.0/'
+        try:
+            a = boot()
+            s = es(); hist = page.inner_text('.export-hist'); chosen = page.input_value('#chora-export-statement')
+            disabled = page.evaluate('() => document.getElementById("chora-export-svg").disabled')
+            recomposed(lambda: page.select_option('#chora-export-statement', 'PD-Art|PD-old-assumed'))
+            s2 = es(); page_text = page.input_value('#chora-export-page')
+        finally:
+            nav['rights'] = None
+        return ('A Synthetic Historical Map Collection' in hist and 'licence RightsStatements.org NKC' in hist and chosen == '' and not disabled
+                and not s['licence']['ok'] and any('none are stated' in r['why'] for r in s['licence']['refused'])
+                and s2['licence']['ok'] and '{{PD-Art|PD-old-assumed}}' in s2['licence']['templates'] and 'are stated by Ada Mapmaker' in page_text), {
+            'hist': hist[:300], 'chosen': chosen, 'before': s.get('licence'), 'after': s2.get('licence'), 'disabled': disabled}
+    attempt('Make an open map: a historical map whose manifest gives the rights statement NKC (No Known Copyright) is shown with that statement and refused, nothing chosen for it, until its rights are stated (NKC is not a licence and not a claim of public domain); stated, it may go', nkc_asks_for_a_statement)
     attempt('Make an open map: a historical map its manifest dates 1746, its licence not stated, has "a faithful photograph of a map published more than 120 years ago" ({{PD-Art|PD-old-assumed}}) chosen for it, which the user may change', dated_preselects)
 
     # The middle of a cell of the grid (image pixel 96, 96: its lines are every 64 pixels), where the paper is blank.
