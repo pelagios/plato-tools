@@ -284,6 +284,9 @@ test('rights: the map\'s licence and the georeference\'s (Allmaps\' are CC0) giv
   assert.equal(freeToReuse(null), null);
   const free = rightsOf({ manifest: { id: 'https://x.example.org/m', rights: 'https://creativecommons.org/publicdomain/mark/1.0/' }, annotation: ROCQUE_A });
   assert.equal(free.free, true); assert.match(free.words, /^Free to reuse: the map is licensed Public Domain Mark, and its georeference is licensed CC0\.$/);
+  // No known copyright is not a licence: the words do not call it free, though `free` stays true for export/licence.js.
+  const nkc = rightsOf({ manifest: { id: 'https://x.example.org/m', rights: 'http://rightsstatements.org/vocab/NKC/1.0/' }, annotation: ROCQUE_A });
+  assert.equal(nkc.free, true); assert.doesNotMatch(nkc.words, /^Free to reuse/); assert.match(nkc.words, /^No known copyright is not a licence: the map is licensed /); assert.match(nkc.words, /State the map's rights/);
   const nc = rightsOf({ manifest: { id: 'https://www.davidrumsey.com/m' }, annotation: ROCQUE_A });
   assert.equal(nc.free, false); assert.match(nc.words, /CC BY-NC-SA 3\.0/);
   const unknown = rightsOf({ manifest: ROCQUE_M, annotation: ROCQUE_A });

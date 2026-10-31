@@ -107,6 +107,12 @@ export function rightsOf({ manifest = null, serviceId = null, annotation = null,
   if (free === null && inWords) {
     return { map, georeference, free, words: `Not known to be free to reuse: the map's credit says “${map.credit}”, which is not a licence, and ${named(georeference, 'its georeference')}. Check the holder's terms before you publish what you trace from it.` };
   }
+  // NKC says only that no copyright is known, which is not a licence: it is not called free, though free stays true
+  // for the callers that ask the user to state the rights (export/licence.js).
+  const nkc = /rightsstatements\.org\/vocab\/NKC\//.test(map.licence || '');
+  if (free === true && nkc) {
+    return { map, georeference, free, words: `No known copyright is not a licence: ${named(map, 'the map')}, and ${named(georeference, 'its georeference')}. State the map's rights before you publish what you make from it.` };
+  }
   const words = free === true ? `Free to reuse: ${named(map, 'the map')}, and ${named(georeference, 'its georeference')}.`
     : free === false ? `Not free to reuse as it is: ${named(map, 'the map')}, and ${named(georeference, 'its georeference')}. This may bear on how what you trace from it can be reused.`
     : `Not known to be free to reuse: ${named(map, 'the map')}, and ${named(georeference, 'its georeference')}. Check the holder's terms before you publish what you trace from it.`;
