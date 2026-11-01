@@ -11627,7 +11627,9 @@ def open_map_basemap_checks(pw, url, tmp):
         until(page, '() => window.__chora_map.getStyle()?.name?.includes("Natural Earth") && window.__chora_map.isStyleLoaded()', 30)
     def tick():
         page.evaluate("() => { document.getElementById('chora-basemaps').open = true; }")
-        page.check('#chora-relief')
+        # A click, not page.check(): where the file is not there the page unticks and disables the box as the answer
+        # comes, and check() then times out (30 s) if that is before it has seen the tick, and passes if it is after.
+        page.click('#chora-relief')
     # The chooser, open, lies over the map: closed before the map is looked at.
     shut = lambda: page.evaluate("() => { document.getElementById('chora-basemaps').open = false; }")
 
