@@ -2883,7 +2883,7 @@ part is `export-ui.js`, `export-raster.js` (pictures), `export-fonts.js` (the fo
   `{{PD-USGov-USGS}}`, a historical map's statement, `{{SVG with raster elements}}`). **The author is Chora's
   contributor, by name, with their ORCID iD where given; never an email address** (`authorWords` writes none,
   and a name with `@` in it is not written). "Upload to Wikimedia Commons ↗" is a link to `Special:Upload` with
-  `wpDestFile`, `wpUploadDescription` and `wpLicense` (`self|…` or the plain licence, as the page) filled in (`uploadUrl`), saying in words what
+  `wpDestFile` and `wpUploadDescription` (the licence tag in it, as on the page) filled in (`uploadUrl`); not `wpLicense`: the form's Licensing box has no value for own work under CC BY 4.0, and none for `cc-zero` in lower case, so it selected nothing and the form warned that the file would be deleted (checked on Commons, 2 Nov 2026), saying in words what
   following it sends, as the Allmaps Editor's link does: it is the user's own navigation, and nothing is sent by
   the page. A link longer than 7,000 characters is not offered: "Copy the description" is.
 - **The preview** is the SVG itself, put into the page over the map (`#chora-export-preview`), its labels drawn

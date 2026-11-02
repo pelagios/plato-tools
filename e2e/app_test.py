@@ -11972,7 +11972,7 @@ def open_map_export_checks(pw, url, tmp):
                 and 'The map covers ' in page_text and "The places' sources: Pleiades (CC BY 3.0)" in page_text
                 and 'pleiades.stoa.org/places/579885' in page_text and '@' not in page_text
                 and link.startswith('https://commons.wikimedia.org/wiki/Special:Upload?') and q.get('wpDestFile') == ['Places of Places of Attica (a test fixture).svg']
-                and q.get('wpLicense') == ['cc-by-4.0'] and q.get('wpUploadDescription', [''])[0].startswith('{{Map') and 'sends' in words and 'Wikimedia Commons' in words), {
+                and 'wpLicense' not in q and q.get('wpUploadDescription', [''])[0].startswith('{{Map') and '{{cc-by-4.0}}' in q.get('wpUploadDescription', [''])[0] and 'sends' in words and 'Wikimedia Commons' in words), {
             'page': page_text[:300], 'source': [l for l in page_text.split('\n') if l.startswith('|source')][:1], 'link': link[:160], 'words': words}
     attempt('Make an open map: the Commons page is the {{Map}} template filled (author by name and ORCID iD, no email, projection, the map\'s centre as its latitude and longitude, its bounds in words, the Pleiades record and Pleiades credited as the places\' source), CC BY 4.0 as the plain template, not {{self}}, since Pleiades\' work is in it, and {{Natural Earth}}; the upload link fills in the file\'s name, description and licence, and says what it sends', page_and_link)
 

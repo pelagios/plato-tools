@@ -2,7 +2,7 @@
 // filled in by Commons' {{Map}} template (title, description, legend, author, date, map date, projection,
 // scale, latitude and longitude, source, warp status and address, permission, other versions), then the
 // licence and the templates of what it is made from; and a link to Commons' Special:Upload with the file's
-// name, that description and the licence filled in, which the user follows themselves.
+// name and that description (the licence in it) filled in, which the user follows themselves.
 //
 // The author is the Chora contributor's name, with their ORCID iD where they gave one; NEVER an email address:
 // nothing here is given one, and authorWords refuses a name that looks like one. Pure.
@@ -42,9 +42,8 @@ export const licenceTemplate = (L) => (L.self ? `self|${L.licence.template}` : L
  * gazetteer records the places are identified with, a manifest), residuals: [words] (a georeference's misfit,
  * said in the description, not on the map), warp: { url } | null, licence: composeLicence's result, format:
  * 'svg' | 'png', rasterInSvg (an SVG that is mostly a picture), otherVersions: [file names] }.
- * `forUpload`: the licence is left out, as Special:Upload's own licence field adds it.
  */
-export function filePage(map, { forUpload = false } = {}) {
+export function filePage(map) {
   const L = map.licence;
   const [w, s, e, n] = map.bounds;
   // {{Map}}'s latitude and longitude are the map's centre, in decimal degrees; its bounds are said in the description.
@@ -69,20 +68,22 @@ export function filePage(map, { forUpload = false } = {}) {
     ['other versions', (map.otherVersions || []).map((f) => `[[:File:${f}]]`).join(' ')],
   ];
   const lines = ['{{Map', ...rows.map(([k, v]) => ` |${k} =${v ? ` ${v}` : ''}`), '}}'];
-  const licensing = [...(forUpload ? [] : [`{{${licenceTemplate(L)}}}`]), ...L.templates];
+  const licensing = [`{{${licenceTemplate(L)}}}`, ...L.templates];
   if (map.format === 'svg' && map.rasterInSvg) licensing.push('{{SVG with raster elements}}');
   return [...lines, '', '=={{int:license-header}}==', ...licensing].join('\n') + '\n';
 }
 
 /**
- * The link to Commons' upload form with `fileName`, the description (filePage's, for the upload) and the
- * licence filled in: the user's own navigation, which sends those in its address, and nothing else. Null when
+ * The link to Commons' upload form with `fileName` and the description (filePage's, the licence tag in it) filled in:
+ * the user's own navigation, which sends those in its address, and nothing else. The form's own Licensing box is left
+ * to the user: it lists no "own work, CC BY 4.0" and no lower-case cc-zero, so a value given for it (wpLicense) selected
+ * nothing for the licences most maps have, and the form then warned that the file would be deleted. Null when
  * it would be longer than MAX_LINK, or the map cannot go to Commons (licence.ok false): the page then offers
  * to copy the description instead.
  */
 export function uploadUrl(map, fileName) {
   if (!map.licence?.ok) return null;
-  const q = new URLSearchParams({ wpDestFile: fileName, wpUploadDescription: filePage(map, { forUpload: true }), wpLicense: licenceTemplate(map.licence) });
+  const q = new URLSearchParams({ wpDestFile: fileName, wpUploadDescription: filePage(map) });
   const url = `${UPLOAD_PAGE}?${q.toString().replace(/\+/g, '%20')}`;
   return url.length > MAX_LINK ? null : url;
 }

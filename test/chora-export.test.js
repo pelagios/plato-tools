@@ -314,7 +314,7 @@ test('licence: the places\' sources that ask for credit are credited by their ow
   assert.match(filePage({ ...PAGE_MAP, licence: L }), /\|source = .*; The places' sources: Pleiades \(CC BY 3\.0\), through the World Historical Gazetteer\n/);
   // Not wholly the maker's: the licence's plain template, on the page and in the upload link.
   assert.match(filePage({ ...PAGE_MAP, licence: L }), /\n\{\{cc-by-4\.0\}\}\n/); assert.doesNotMatch(filePage({ ...PAGE_MAP, licence: L }), /\{\{self\|/);
-  assert.equal(new URL(uploadUrl({ ...PAGE_MAP, licence: L }, 'a.svg')).searchParams.get('wpLicense'), 'cc-by-4.0');
+  assert.match(new URL(uploadUrl({ ...PAGE_MAP, licence: L }, 'a.svg')).searchParams.get('wpUploadDescription'), /\n\{\{cc-by-4\.0\}\}\n/);
   assert.equal(L.self, false, 'Pleiades\'s CC BY 3.0 is someone else\'s');
   assert.equal(composeLicence({ parts: [NE, RELIEF] }).self, true, 'the public domain and the maker\'s own');
   assert.equal(composeLicence({ parts: [CAWM] }).self, false);
@@ -358,13 +358,14 @@ test('the Commons page: the {{Map}} template filled, the author by name and ORCI
   assert.ok(!/@/.test(page), 'no address with @ in it');
   assert.equal(authorWords({ name: 'ada@example.org' }), 'Unknown author', 'a name that is an email address is not written');
   assert.match(filePage({ ...PAGE_MAP, format: 'svg', rasterInSvg: true }), /\{\{SVG with raster elements\}\}\n$/);
-  assert.ok(!filePage(PAGE_MAP, { forUpload: true }).includes('{{self|'), 'the upload form adds the licence itself');
-  // The link: Special:Upload with the name, the description and the licence; none when too long, or not for Commons.
+  // The link: Special:Upload with the name and the description, the licence tag in it (the form's Licensing box has no value
+  // for own work under CC BY 4.0, so none is given for it); none when too long, or not for Commons.
   const url = new URL(uploadUrl(PAGE_MAP, 'Attica in antiquity.svg'));
   assert.equal(url.origin + url.pathname, 'https://commons.wikimedia.org/wiki/Special:Upload');
   assert.equal(url.searchParams.get('wpDestFile'), 'Attica in antiquity.svg');
-  assert.equal(url.searchParams.get('wpLicense'), 'self|cc-by-4.0');
-  assert.equal(url.searchParams.get('wpUploadDescription'), filePage(PAGE_MAP, { forUpload: true }));
+  assert.equal(url.searchParams.has('wpLicense'), false);
+  assert.equal(url.searchParams.get('wpUploadDescription'), filePage(PAGE_MAP));
+  assert.match(url.searchParams.get('wpUploadDescription'), /\n\{\{self\|cc-by-4\.0\}\}\n/);
   assert.equal(uploadUrl({ ...PAGE_MAP, description: 'x'.repeat(MAX_LINK) }, 'a.svg'), null);
   assert.equal(uploadUrl({ ...PAGE_MAP, licence: composeLicence({ parts: [CARTO] }) }, 'a.svg'), null);
   assert.equal(commonsName('Attica: places [ancient] / 1', 'svg'), 'Attica places ancient 1.svg');
