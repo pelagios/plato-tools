@@ -8677,6 +8677,10 @@ def chora_checks(pw, url, tmp):
     attempt('Chora: Ancient World (CAWM), allowed and chosen, is still the basemap after a reload, and its tiles are asked again', cawm_remembered)
     def cawm_unreachable():
         cawm_mode['fail'] = True
+        # On a slow machine (a runner under load) MapLibre drew no frame after the last tile failed, so no 'idle' came and
+        # the fallback never ran, until a pan; the processor slowed twelvefold shows it every time without the repaint
+        # asked for in map.js (#41), and the check passed or failed by the runner's speed.
+        cdp = ctx.new_cdp_session(page); cdp.send('Emulation.setCPUThrottlingRate', {'rate': 12})
         try:
             h0 = hits['cawm']
             fresh({'basemap:cawm': {'state': 'allowed'}}, 'cawm')
@@ -8684,6 +8688,7 @@ def chora_checks(pw, url, tmp):
             text = page.inner_text('#chora-basemap-options'); s = cstate(page)
         finally:
             cawm_mode['fail'] = False
+            cdp.send('Emulation.setCPUThrottlingRate', {'rate': 1}); cdp.detach()
         err = s.get('basemapError') or ''
         return (hits['cawm'] > h0 and back and err.startswith(f'Ancient World (CAWM) could not be loaded from {CAWM} (none of its tiles could be loaded')
                 and 'back on Natural Earth' in err and err in text), {'asked': hits['cawm'] - h0, 'back': back, 'error': err, 'said': text[:300]}

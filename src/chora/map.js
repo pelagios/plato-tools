@@ -77,6 +77,10 @@ export function createMap(container, { state, onPlaceClick, onStyleError, polygo
     const why = redact(e?.error?.message || e?.error || 'unknown error');
     if (styleLoading && !e?.sourceId && !e?.tile) { styleLoading = false; onStyleError?.(why); }
     if (tiles && e?.sourceId === 'basemap' && e?.tile && !/Refused a request to /.test(why)) { tiles.failed++; tiles.why ||= why; }
+    // MapLibre emits 'idle' only from a frame it draws, and none is asked for once the last tile has failed (on a slow
+    // machine, with all of a basemap's tiles failing, the map is loaded, nothing is dirty, and it waits for a pan): one is
+    // asked for, so that the idle above comes and the fallback to Natural Earth is not left waiting for it.
+    if (e?.tile) map.triggerRepaint();
     // A refused request surfaces as an error event; it has been counted, and is not a fault.
     if (!/Refused a request to /.test(why)) console.warn(`Map, ${kindOf(e)}:`, why);
   });
