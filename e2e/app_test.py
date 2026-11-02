@@ -2078,7 +2078,10 @@ def krisis_wikidata_case(page, tmp, url):
         page.check('input[name="review-output"][value="attestations"]'); page.click('#finish')
         s = wait_state(page, lambda s: s.get('action') == 'apply' and s.get('phase') in ('done', 'error'), 120, 'finish')
         out = json.loads(download(page, s['outputs'][0]['name'], tmp / 'mint-attestations.json').read_text()) if s.get('phase') == 'done' and s.get('outputs') else {}
-        return {'cites': cites, 'out': out, 'phase': s.get('phase'), 'report': s.get('report')}
+        # What the page was doing, for the failure that has been seen once (#41: no output, the phase back at 'reviewing'
+        # after 120 s): whether the wait timed out, the action, the review's warning and the name asked for, in the page's words.
+        seen = page.evaluate("() => ({ warning: document.getElementById('review-warning')?.hidden ? null : document.getElementById('review-warning')?.textContent, askName: !document.getElementById('review-who')?.hidden, finishDisabled: document.getElementById('finish')?.disabled })")
+        return {'cites': cites, 'out': out, 'phase': s.get('phase'), 'report': s.get('report'), 'timed out': s.get('timedOut'), 'action': s.get('action'), 'outputs': s.get('outputs'), **seen}
     f = step(finish)
     atts = (f.get('out') or {}).get('attestations', [])
     ids = sorted((x['about'], i['object'], i['identityType'], (x.get('citations') or [{}])[0].get('source', {}).get('title')) for x in atts for i in x.get('identities', []))
@@ -2112,7 +2115,7 @@ def krisis_wikidata_case(page, tmp, url):
           ht.get('held') == 2 and ht.get('released') == 0 and ht.get('drawn while held') is True and 'not known yet' in ht.get('gate during', '') and 'CC-BY-4.0' in ht.get('gate after', ''), ht)
     check('Wikidata items: Finish writes one attestation per place, its identity to the new item, citing Wikidata, with no address with @ in it anywhere',
           'Wikidata (https://www.wikidata.org/)' in f.get('cites', '') and ids == [(a + 'kirkby', 'http://www.wikidata.org/entity/Q78', 'exactMatch', 'Wikidata'), (a + 'newstead', 'http://www.wikidata.org/entity/Q77', 'exactMatch', 'Wikidata')]
-          and '@example' not in json.dumps(f.get('out')) and all('krisis-wikidata 1' in x.get('notes', '') for x in atts), {k: f.get(k) for k in ('cites', 'phase', 'report', 'error')} if not atts else ids)
+          and '@example' not in json.dumps(f.get('out')) and all('krisis-wikidata 1' in x.get('notes', '') for x in atts), {k: f.get(k) for k in ('timed out', 'action', 'phase', 'outputs', 'warning', 'askName', 'finishDisabled', 'cites', 'error', 'report')} if not atts else ids)
     page.unroute(wd)
 
 # Krisis: region review (Methodos #28, stages 3 and 4). WHG is never called: page.route answers for it
