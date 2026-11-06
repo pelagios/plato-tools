@@ -1,7 +1,7 @@
 # TEI fixtures
 
 Test fixtures for reading TEI XML editions (`src/engine/hermes/tei.js`, `test/hermes-tei.test.js`).
-One is a real EpiDoc edition, copied unchanged; six are constructed, and say so. No Perseus text is
+One is a real EpiDoc edition, copied unchanged; seven are constructed, and say so. No Perseus text is
 committed (Perseus's TEI is CC BY-SA): the TEI P4 fixture is constructed, and a real Perseus P4 file
 is checked only locally, by `scripts/check-perseus-p4.mjs` (opt-in: `PERSEUS_P4_FILE`).
 

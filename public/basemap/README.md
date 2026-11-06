@@ -45,9 +45,9 @@ what Chora's `transformRequest` allows by default. The font folder's name has sp
 | `ccodes.json` | 8,010 | a bounding box for each ISO 3166-1 alpha-2 code (below) |
 | `glyphs/Noto Sans Regular/*.pbf` | 781,564 | glyphs for 8 ranges: 0-255, 256-511, 512-767, 768-1023, 1024-1279, 7680-7935, 7936-8191, 8192-8447 (Latin, Latin Extended, Greek with polytonic, Cyrillic, punctuation) |
 | `glyphs/Noto Sans Regular/OFL.txt` | 4,301 | the font's licence |
-| `sources.json` | 4,512 | what was fetched (commit, sha256) and the sha256 of every file written |
+| `sources.json` | 5,154 | what was fetched (commit, sha256) and the sha256 of every file written |
 
-About 5.1 MB in all, uncompressed; GitHub Pages sends the GeoJSON gzipped, at roughly a quarter of
+About 7.4 MB in all, uncompressed, 2.3 MB of it `coast-fine.geojson`; GitHub Pages sends the GeoJSON gzipped, at roughly a quarter of
 that. Places come from the 10m set because 50m has too few for zoom 6 and beyond; geometry is 50m,
 simplified (Visvalingam, 60% of vertices kept, no shape dropped) with coordinates to 4 decimals
 (about 11 m, far finer than 50m's detail).
@@ -86,8 +86,8 @@ says it is not available. It is read by range requests (src/chora/relief.js).
 
 - **Natural Earth**, public domain: <https://www.naturalearthdata.com/>, from the official mirror
   [nvkelso/natural-earth-vector](https://github.com/nvkelso/natural-earth-vector) at commit
-  `ca96624a56bd078437bca8184e78163e5039ad19`, its `geojson/` folder: `ne_50m_land`,
-  `ne_50m_admin_0_countries`, `ne_50m_admin_0_map_units`, `ne_50m_admin_0_boundary_lines_land`,
+  `ca96624a56bd078437bca8184e78163e5039ad19`, its `geojson/` folder: `ne_50m_land`, `ne_10m_land`
+  (the finer coast only), `ne_50m_admin_0_countries`, `ne_50m_admin_0_map_units`, `ne_50m_admin_0_boundary_lines_land`,
   `ne_50m_admin_1_states_provinces_lines`, `ne_50m_lakes`, `ne_50m_rivers_lake_centerlines`,
   `ne_10m_populated_places_simple`, `ne_50m_geography_marine_polys`, `ne_50m_geography_regions_polys`. The sha256 of each is in the script and in `sources.json`.
 - **Noto Sans**, SIL Open Font License 1.1 (`glyphs/Noto Sans Regular/OFL.txt`): OpenMapTiles'

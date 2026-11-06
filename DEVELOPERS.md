@@ -393,8 +393,8 @@ a second file; totals only where marked; plain numbers only) are the design.
   (`conservation()` in `figures-text.js`, used by `summary()` in `words.js`).
 - **Kinds and words** are in `figures-text.js` (`FIGURES_KINDS` for severity, `FIGURES_TEXT` for the words,
   merged into `LOSS_TEXT`), so that the report module need not load the reader.
-- **Not done here** (later branches of the plan): the page's panel, Methodos's recipe, the Elenchos kinds and
-  `check.cube` for P-1 to P-4 and IC-19, Agora's rendering of figures, and the measured size.
+- **Not done here** (later branches of the plan): the page's panel, Methodos's recipe, and the measured size
+  (the Elenchos kinds, `check.cube` for P-1 to P-4 and IC-19, and Agora's rendering of figures are above).
 
 ### Web annotations
 
@@ -2063,7 +2063,8 @@ below), and its engine `src/engine/chora/` (`store.js`, `view.js`, `draw.js`, `s
 
 - **The worker** is the page's engine, a worker of Chora's own, with commands of its own, sent one at a time: `chora-load`,
   `chora-search`, `chora-overview` (every place's point, at most 50,000), `chora-place` (one
-  place's view, with its identities as Krisis reads the whole dataset) and `chora-save`.
+  place's view, with its identities as Krisis reads the whole dataset), `chora-save`, `chora-mint` (a
+  traced place's address, below) and `chora-export-places` (the places of a map made, below).
 - **The session database.** `chora-load` reads the dataset with `run()` and `options.sink`, so every
   format arrives as place-centric records, and writes each to `/chora.sqlite3` on the origin
   private file system, with the boxes and points of its current geometries and the names it is
@@ -2346,7 +2347,7 @@ below), and its engine `src/engine/chora/` (`store.js`, `view.js`, `draw.js`, `s
   the site's origin can write, so at load, and when a permission changes (which may be another tab's
   doing), the map stays on Natural Earth, the site is asked nothing, and one line names it as the
   remembered choice with "Use it now"; the user's click (that button, its radio, or pasting) uses it,
-  for this load. A provider of the `REGISTRY` (OpenFreeMap, CAWM, OpenStreetMap, CARTO), whose sites are
+  for this load. A provider of the `REGISTRY` (OpenFreeMap, CAWM, DARE, OpenStreetMap, CARTO), whose sites are
   fixed in the code, loads as before. After the reload for a pasted site's permission the click is
   needed again, which is the cost of the rule. A basemap whose style cannot be loaded
   gives way to Natural Earth, and the page says why ("… could not be loaded from <site> (…)"). So does
@@ -3524,8 +3525,8 @@ and the Methodos step `wikidata.items`. The words are `WIKIDATA_WORDS` in words.
 Methodos runs a workflow, a named sequence of the tools' own operations, from a recipe
 (`docs/plans/methodos.md`). It is a coordinator over the engine, not a second engine: plain ES modules
 in `src/engine/methodos/`, with no page, no storage and no framework, so that the same code runs in
-Node (the tests) and in the worker. Phases 0, 1 and 3 are built: the engine, its adapters, and the
-page's interview and tracker (below); keeping a workflow beyond the tab is phase 2.
+Node (the tests) and in the worker. Phases 0 to 3 are built: the engine, its adapters, keeping a
+workflow beyond the tab (phase 2) and the page's interview and tracker (phase 3), below.
 
 - **Operations** (`operations.js`) describe the calls the tools already make: each says whether it is
   automatic or interactive (done by the user, so the step waits), what types it takes and gives,
@@ -3533,8 +3534,8 @@ page's interview and tracker (below); keeping a workflow beyond the tab is phase
   lookup do; a conversion or a part of publishing is all or nothing, and the runner names what such
   a step had written for the host to remove: stopping the engine's call and removing its files are
   the host's, as the page does now). An operation that does not
-  exist yet (regions level by level, the containment relation, adopting a match's geometry, finding
-  places in a text) is declared with the reason it is not available, and a
+  exist yet (adopting a match's geometry, finding places in a text) is declared with the reason it is
+  not available, and a
   workflow whose answers would reach it is refused at the start, in those words.
   Chora's save is no operation of its own: it completes the interactive step `place`, or `trace` (`placed()` in
   `src/methodos/page.js`; "Chora, the map", above); a map downloaded from Chora's "Make a map" completes the step
@@ -3560,7 +3561,7 @@ page's interview and tracker (below); keeping a workflow beyond the tab is phase
   take no file at all (`files: {}`), which the page starts at once when it is followed.
 - **Hand-offs** (`handoffs.js`) are references, never content: `{ type, name, size, sha256 }`, made by
   Krisis's `fileRecords`, with a type from a closed list (`files`, `dataset`, `mapping`,
-  `work.krisis`, `work.hermes-text`, `deposit`, `site`, `w3id`). A hand-off of the wrong type is
+  `work.krisis`, `work.hermes-text`, `deposit`, `site`, `w3id`, `map`). A hand-off of the wrong type is
   refused in words; a file that is not the one a reference names is refused by Krisis's `filesDiffer`.
 - **The runner** (`runner.js`) is pure: a workflow's state is JSON, and `start`, `next`, `complete`,
   `waiting`, `resume`, `stop`, `fail`, `cancel`, `progress` and `invalidate` each return a new state
@@ -3576,8 +3577,9 @@ page's interview and tracker (below); keeping a workflow beyond the tab is phase
   takes them. A step whose options say `problems: 'report'` (the check of a match's other dataset) is done
   with what its report found, `complete(state, id, outputs, { findings })`, kept with the step and shown
   ("done, with a report"); one that could not read its file to the end still stops.
-- **The adapters** (`adapters.js`) are one per automatic operation that has landed (check, convert,
-  compare, revise, the four parts of publishing, match, apply, lookup), each calling the engine as the worker
+- **The adapters** (`adapters.js`) are one per automatic operation that has landed (detect, check,
+  `check.cube`, convert, compare, revise, the four parts of publishing, match, apply, lookup,
+  `relate.containment`), each calling the engine as the worker
   does. The front end gives a host: `open(ref)` for the file a reference names, `env()` for one run's
   environment, `file(output)` for what the run wrote, and, for the lookup, a lookup made on the page
   thread through the permissions module. `drive()` runs the automatic steps until the workflow waits,
@@ -3604,7 +3606,7 @@ permission, which waits) fails keeping the answers received as its declared part
 file; done again, it begins from that file and asks only for the places not yet answered. `exportRecord()` and `importRecord()` write and read the
 downloadable `.workflow.json`. Tested in `test/methodos-record.test.js`, and in the browser by
 `e2e/app_test.py` through a test hook (`e2e/methodos-hook.js`) the harness bundles and serves itself,
-until the page has a Methodos panel (phase 3).
+written before the page had a Methodos panel (phase 3) and still run.
 
 **On the page** (phase 3): two self-contained components, mounted by `mountMethodos()` in
 `src/methodos/page.js` on elements the host gives it, so that where they sit can change without
@@ -4048,7 +4050,7 @@ the user's WHG token; nothing is sent until the user asks, and only under the `c
   `openOrAsk()` in the workflow's place (asked first), linked at the new version. A conflict on "Save to WHG"
   asks `savedBy()` who saved the newer version and says "saved by <name> on <date>"; if WHG does not say, the
   message goes on without (`WORDS.newer`). Not built (follow-up): the decision merge on a conflict (D2(c)) with
-  the common base fetched through `version()`. Not built either: gzip uploads, which were measured (below).
+  the common base fetched through `version()`. Not built either: gzip uploads, which were measured (above).
 - **The page** (`src/methodos/whg.js` for what is done, `src/methodos/page.js` for what is said; the tracker's
   folded "Save, open or share the project", its part "In the World Historical Gazetteer"): "Save to WHG", on
   click only and at a step boundary (D3), to the personal team (D4); a workflow with no link first looks in
@@ -4137,8 +4139,8 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   `unprotected`, `moved` or `network`, and whose message names the site, never the address (a key may
   be in it); every kind but `moved` (sent, and answered with a redirect or from another site) and
   `network` (sent, or tried, and failed beneath the module) means nothing was sent. What it does with
-  an answer is the core's `checkAnswer(r, url, sites)`, so that a fetch in Node (Hermes's, for
-  `--fetch-georef`) refuses exactly what the page does: a redirect, a browser's opaque one or Node's
+  an answer is the core's `checkAnswer(r, url, sites)`, so that a fetch in Node (the command line's,
+  for `wikidata`) refuses exactly what the page does: a redirect, a browser's opaque one or Node's
   3xx, and an answer from another site. The gazetteer lookup must be given it as its `fetch` by every
   page caller (`createLookup` refuses a later caller with another);
   `transformRequest(() => [[cat, subj], …], { onBlocked })` for MapLibre; `needs(el, cat, subj)` for
@@ -4325,11 +4327,13 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   `--allow-host` that names a known service (`allmaps`) grants that service; a site grants it only for
   the category of what the command fetches (`hostCategory`, `iiif` for a georeference's maps), and is
   refused when the command gives none. **Changed on 1 October 2026:** a site given to `--allow-host`
-  used to be granted for `iiif` and `linked` both. No command asks another site yet, so nothing that
-  runs today changes; a command written against the old rule must now say its `hostCategory`.
-- **Adopting it.** Chora's basemaps and historical maps (`iiif`, `allmaps`) use it now. Krisis's
-  gazetteer lookup (`allowed('gazetteer', 'whg')` before sending; `token` for the token) moves onto
-  it in its own branch, and Hermes's linked sites (`linked`, per host) when it fetches.
+  used to be granted for `iiif` and `linked` both. No command asked another site then, so nothing that
+  ran changed; a command written against the old rule must say its `hostCategory`, as `wikidata` does
+  (`gazetteer`).
+- **Adopting it.** Chora's basemaps and historical maps (`iiif`, `allmaps`) use it, as do Krisis's
+  gazetteer lookup (`allowed('gazetteer', 'whg')` before sending; `token` for the token: "Gazetteer
+  lookup", above), the Wikidata search (`gazetteer:wikidata`), WHG's Workbench (`collaborate:whg`) and
+  the language-model services (`llm`); Hermes's linked sites (`linked`, per host) when it fetches.
 
 ## Limits
 
@@ -4385,11 +4389,12 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   which ends the worker, stops at once.
 - **Memory that grows with the named things written.** Streaming keeps memory flat in the number
   of records, except for two sets that grow, linearly, with the distinct addresses written: with
-  `--typing`, `Json2Rdf` keeps each named node it has typed (`typedNamed`, one set of addresses per
-  class), so that none is typed twice; the LPF writers keep each place written (`placed`), to
-  report an identity match whose place is not in the file. On data rich in addresses they dominate:
-  the audit of 30 September 2026 measured 358 MB converting 300,000 places whose attestations all
-  have minted addresses to N-Triples with `--typing`, against 221 MB without.
+  typing (the default for N-Triples; `--no-typing` leaves it out), `Json2Rdf` keeps each named node
+  it has typed (`typedNamed`, one set of addresses per class), so that none is typed twice; the LPF
+  writers keep each place written (`placed`), to report an identity match whose place is not in the
+  file. On data rich in addresses they dominate: the audit of 30 September 2026 measured 358 MB
+  converting 300,000 places whose attestations all have minted addresses to N-Triples with typing,
+  against 221 MB without.
 - **`datacube` holds the cube's graph in memory** (`graphOfFile` in `src/lib/datacube.js`): the
   file streams in, but every statement is kept until the checks have run, so a cube export larger
   than memory cannot be checked. The page's *Check the Data Cube* holds it too, in the tab, and from a

@@ -93,8 +93,9 @@ U+202E, U+2066 to U+2069, U+FEFF), not only white space, and not `.` or `..`.
 
 - **`workflow.json`**: the workflow's record, exactly as Methodos writes it to a `.workflow.json`
   (`src/engine/methodos/record.js`: `{ methodos: 1, recipe: { key, version, digest }, answers, files,
-  steps, status, current, id, name, created, saved, scope? }`). It names every file by `{ type, name,
-  size, sha256 }`; its `scope` is the workflow's Scope.
+  steps, status, current, id, name, created, saved, scope?, late? }`). It names every file by `{ type, name,
+  size, sha256 }`; its `scope` is the workflow's Scope; its `late`, when the recipe has files chosen at a
+  later step (the other dataset of a match), names them by key, in the recipe's words.
 - **`review.krisis.json`**: the Krisis work file of the review open when the project was saved, with
   its decisions, candidates and regions.
 - **`chora-handback.json`**: `{ "handback": 1, "workflow": "<the record's id>", "files": [{ "type":

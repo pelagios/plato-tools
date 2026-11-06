@@ -22,7 +22,7 @@ Status: IMPLEMENTED; engine and CLI tests pass (test/krisis.test.js, test/krisis
   - Places and candidates are looked up with `Object.hasOwn`, never `in` (a `candidate_source` of
     `constructor` is refused as a place the file does not list).
   - `serialiseWork(work) -> string` (JSON, 2-space indent, trailing newline).
-  - `decide(work, candidateId, kind, { identityType = 'exactMatch', basis, at = new Date().toISOString() } = {}) -> candidate`
+  - `decide(work, candidateId, kind, { identityType = 'exactMatch', basis, certainty, at = new Date().toISOString() } = {}) -> candidate`
     kind: `'match' | 'not-this' | 'distinct' | null` (null clears the decision). Sets
     `candidate_status` ('confirmed' | 'rejected' | 'suggested') to agree. 'distinct' requires a
     non-empty basis (throws otherwise).
@@ -122,13 +122,14 @@ Status: IMPLEMENTED; engine and CLI tests pass (test/krisis.test.js, test/krisis
 - `src/engine/krisis/blocking.js`: `new NameIndex(otherPlacesNames, subjectPlacesNames, Q)`;
   `.best(names, threshold) -> Map(other place number -> score)` (only scores reaching the
   threshold; its `.rule` maps each place only the qualifier rule reached to `{ added, names }`), `.candidates(normalised, threshold)`, `.comparisons` (pairs of names scored), `.weight`;
-  `BLOCKING` `{ share: 0.4, commonShare: 0.01, commonFloor: 50, keys: 4, spread: 4 }`, `BLOCKING_RULE`,
+  `BLOCKING` `{ share: 0.4, commonShare: 0.01, commonFloor: 50, keys: 4, spread: 4, far: 10 }`, `BLOCKING_RULE`,
   `canReach(lengthA, lengthB, threshold)`.
 
-## Work file (version 2)
+## Work file (version 2; version 3 below)
 
-See the comment at the top of `work.js`. `readWork` reads version 1 and gives it back as version 2;
-every file written is version 2. Version 2 adds `lookups: [...]` (empty after `match`), lets `others`
+See the comment at the top of `work.js`. `readWork` reads versions 1 and 2 and gives them back as version 3
+(`WORK_VERSION`); every file written is version 3 (the region review's additions are under "Region review",
+below). Version 2 adds `lookups: [...]` (empty after `match`), lets `others`
 be `null` (a review of lookups alone; then every candidate is a lookup's, and finishing cites the
 gazetteer for each), and lets `places` hold places looked up without a candidate found. Candidate `other: { label, names, point, source: { title, uri? }, ccodes?, types? }`;
 `decision: null | { kind, identityType (not for 'not-this'), basis?, decided_at }`. Each side

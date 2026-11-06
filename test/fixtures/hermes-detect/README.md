@@ -1,7 +1,7 @@
 # Detection fixtures (Hermes)
 
 Files that `detect()` (src/engine/input.js) must tell apart from the inputs the tools read, used by
-test/hermes-generic.test.js.
+test/hermes-detect.test.js.
 
 ## IIIF Georeference Annotations (Allmaps)
 

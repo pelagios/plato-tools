@@ -108,8 +108,8 @@ implementation.
 | `apply` | Krisis | `src/engine/krisis/apply.js` | automatic | subjects, work file | dataset or attestations; version-checked |
 | `lookup` | Krisis / Chora | `src/engine/gazetteer/index.js` (WHG in `whg.js`), on the page thread through `permissions.fetch` | automatic, networked, permission-gated | names (+ filters) | candidates, into a work file |
 | `place` | Chora | `src/chora/app.js`, mounted in the main page at `#chora` (since 13 October 2026; a page of its own, `chora.html`, before) | interactive, in the page; done by Chora's save | a dataset | a saved dataset (Mneme-checked) |
-| `text.find` | Hermes | branch `llm-extract` (deferred): `src/engine/hermes/text/run.js` | automatic, networked, permission-gated | a text | a work file (`.hermes-text.json`) |
-| `text.review` | Hermes | same branch | interactive | work file | confirmed, linked mentions |
+| `text.find` | Hermes | `src/engine/hermes/text/run.js` (from branch `llm-extract`, since landed) | automatic, networked, permission-gated | a text | a work file (`.hermes-text.json`) |
+| `text.review` | Hermes | the same | interactive | work file | confirmed, linked mentions |
 
 Four things every operation declares, and the runner enforces: its **kind** (automatic, interactive,
 networked); the **types** of what it takes and gives (section 4.3); which **permission** it needs,
