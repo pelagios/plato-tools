@@ -3,7 +3,7 @@
 How the tools are built, what they do beyond what the
 [PLATO guide](https://pelagios.org/place-attestation-ontology/guide/tools.html) says of them, how
 they are tested, and the conventions to keep. For what the tools are and how to run them, see the
-[README](README.md).
+[README](README.md); for what each release changed, [CHANGELOG.md](CHANGELOG.md).
 
 ## How it works
 
@@ -4562,7 +4562,8 @@ A push to `main` runs the tests, builds the site and publishes it to GitHub Page
   release; `test/badges.test.js` fails while a committed badge differs from what the script makes,
   and `node scripts/badges.mjs --check` says the same. Only the concept DOI
   (`10.5281/zenodo.23133141`) belongs in the repository: a version's own DOI does not exist until
-  Zenodo has archived the tag.
+  Zenodo has archived the tag. Before tagging, turn `CHANGELOG.md`'s *Unreleased* section into the
+  release's, dated, and open a new empty one above it.
 - **The page's layout** (Issue #33, Stephen's decision of 12 October 2026), desktop first, after the
   Furo layout of the PLATO guide: `main.layout` is a grid in `src/styles.css`. From 78rem, three
   columns: the tools as a rail on the left (`#toolbox`, each card its name and label, its sentence moved

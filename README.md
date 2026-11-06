@@ -348,7 +348,8 @@ npm run dev                               # a local server
 ```
 
 [DEVELOPERS.md](DEVELOPERS.md) has the rest: how the tools are built, how they are pinned to PLATO,
-every test and what it proves, and the conventions to keep.
+every test and what it proves, and the conventions to keep. [CHANGELOG.md](CHANGELOG.md) records
+what each release changed.
 
 ## Citing
 

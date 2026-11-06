@@ -3219,10 +3219,11 @@ def main():
     print('RESULT:', 'ALL PASS' if not failed else f'{len(failed)} FAILED'); sys.exit(1 if failed else 0)
 
 # ---- Methodos: saving and resuming (phase 2) ----------------------------------------------------------
-# The page has no Methodos panel yet (phase 3), so these drive the record and its store through a test
-# hook (e2e/methodos-hook.js), bundled from src/ here and served through Playwright's routing alone: it
-# is not in the build, and no visitor can load it. It runs in the page's origin, with the page's own
-# IndexedDB, sessionStorage and "keep working data" choice, and does nothing on a page with no tools.
+# The page's Methodos panel (phase 3) is driven by methodos_page_checks; these check phase 2, the record
+# and its store, directly, through a test hook (e2e/methodos-hook.js), bundled from src/ here and served
+# through Playwright's routing alone: it is not in the build, and no visitor can load it. It runs in the
+# page's origin, with the page's own IndexedDB, sessionStorage and "keep working data" choice, and does
+# nothing on a page with no tools.
 HOOK_PATH = '__e2e/methodos-hook.js'
 def methodos_checks(pw, url, tmp):
     hook = tmp / 'methodos-hook.js'
