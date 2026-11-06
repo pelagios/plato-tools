@@ -1,6 +1,7 @@
 // TEI XML editions -> PLATO attestations (Hermes, src/engine/hermes/tei.js). The fixtures, and where
-// each comes from, are described in test/fixtures/tei/README.md. The pipeline does not dispatch to
-// the reader yet, so it is tested through teiToDocument and teiSource, and detection through detect().
+// each comes from, are described in test/fixtures/tei/README.md. The pipeline dispatches a TEI input to
+// teiSource (src/engine/pipeline.js); here the reader is tested directly, through teiToDocument and
+// teiSource, and detection through detect().
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -406,7 +407,7 @@ test('every kind the reader reports has words, and a severity the report knows',
   assert.ok(raised.size >= 18, [...raised].join(', '));
 });
 
-// ---- the source generator, as the pipeline will call it ------------------------------------------
+// ---- the source generator, as the pipeline calls it ----------------------------------------------
 test('teiSource passes the run\'s options to the reader, which keeps them; one it does not know changes nothing', async () => {
   const read = async (options) => { const evs = []; for await (const ev of teiSource({ format: 'tei', files: [file('pointers-constructed.xml')] }, new Report(), options)) evs.push(ev); return evs; };
   const plain = await read(), given = await read({ sameId: true, fileName: 'not-the-file.xml', title: 'T' });

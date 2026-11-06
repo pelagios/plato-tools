@@ -11594,10 +11594,10 @@ def ink_checks(page, base, tmp, h):
 
 # ---- Make an open map (#37): the backgrounds a map may be made on -------------------------------------
 # The shaded relief over Natural Earth (src/chora/relief.js), and the Digital Atlas of the Roman Empire's tiles.
-# The relief file is never the real one (322 MB, on pelagios.org only once its release exists): this site's
-# own address for it is answered by a route with test/fixtures/chora/relief/relief-fixture.pmtiles, honouring
+# The relief file is never the real one (322 MB, on pelagios.org from the asset of the release relief-v1): this
+# site's own address for it is answered by a route with test/fixtures/chora/relief/relief-fixture.pmtiles, honouring
 # the range each request asks (206, Content-Range), as the reader needs; where the route is not set, the build
-# has no relief file, as a build before the release asset exists has none. DARE's tiles are answered by a route.
+# has no relief file, as a build that found no release asset (404) has none. DARE's tiles are answered by a route.
 RELIEF_FX = (ROOT / 'test/fixtures/chora/relief/relief-fixture.pmtiles').read_bytes()
 def relief_route(route):
     """The fixture, as a static host serves a file asked for in ranges."""

@@ -1,8 +1,9 @@
 // A test hook for Methodos's saving and resuming (phase 2), for e2e/app_test.py only. It is not part
 // of the site: the harness bundles it from src/ with Vite when it runs (e2e/methodos-hook.mjs) and serves it to
-// the page through Playwright's routing, so that no visitor can load it. The page has no Methodos panel
-// yet (phase 3); until it has, the browser checks drive the store and the record through this, in the
-// page's own origin, with its own IndexedDB, sessionStorage and "keep working data" choice. On a page
+// the page through Playwright's routing, so that no visitor can load it. The page's Methodos panel
+// (phase 3) is checked through the page itself (methodos_page_checks); these checks drive the store and
+// the record directly, through this, in the page's own origin, with its own IndexedDB, sessionStorage
+// and "keep working data" choice. On a page
 // that is not the tools' (the harness's --prove-it-fails), it does nothing.
 import { RECIPES } from '../src/engine/methodos/recipes/index.js';
 import * as runner from '../src/engine/methodos/runner.js';
@@ -25,7 +26,7 @@ if (window.__plato) {
   let made = 0;
   window.__methodos_e2e = {
     // Begin Publish a dataset with a file of `text`, and take it to the FAIR report, which stops on a
-    // problem in the data; saved at each step boundary, as the page will.
+    // problem in the data; saved at each step boundary, as the page does (src/methodos/page.js).
     async begin(text, name) {
       const files = await refsOf([new File([text], 'p.json')], 'files');
       let { record: s } = await store.save(runner.start(PUBLISH, {}, { files }), { name });
