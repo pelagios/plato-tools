@@ -121,6 +121,14 @@ the commit of PLATO the tools are checked against is pinned in `package.json`.
 - The README, DEVELOPERS.md and the smaller docs brought into step with the
   code: the command table lists all fourteen commands, and statements
   overtaken by later branches are corrected.
+- The README's Methodos row names all eight workflows, and `preview`'s
+  options include `--split` and `--clusters`, as its help does; the page's
+  Methodos card no longer says Release a new version is to come. The plan
+  `docs/plans/methodos.md` marks each passage its "As built" sections
+  supersede (branch counts, "waits on", the Planned card), keeping the
+  planning record. DEVELOPERS.md's figures that can be re-measured cheaply
+  were, and two corrected: the map chunk is 1.1 MB (the shared chunk of
+  12 October is gone), and the finer coast is 0.7 MB gzipped, not 1 MB.
 
 ### Fixed
 

@@ -2979,7 +2979,7 @@ source file with its sha256), 322 MB, grey WebP tiles of 256 pixels: zooms 0 to 
   land, made by mapshaper's `-erase`). The land is drawn in the style's land colour above the 50m land and under
   the country tint; the sea in its ocean colour **over the relief** and under the rivers, so the relief shows on
   land alone, at the finer coast. On the screen these are the layers `chora-coast-land` and `chora-coast-sea`
-  (`src/chora/relief.js` `add`, with the relief; the file, 2.3 MB, 1 MB gzipped, is read only with the relief on);
+  (`src/chora/relief.js` `add`, with the relief; the file, 2.3 MB, 0.7 MB gzipped at gzip's default level (0.9 MB at level 1; measured 6 November 2026), is read only with the relief on);
   in a map made `composeMap` takes `coast` (the file, fetched by `export-ui.js` only with the relief, on Natural
   Earth, at zoom 7 or closer) and then orders the file as the screen is: ocean, land, finer land, country tint,
   relief, finer sea (group `coast`), then the rivers, lakes, borders and names (group `background-overlay`);
@@ -3397,7 +3397,9 @@ To WHG only: another service is sent nothing of it.
   keeper takes it). The drawn area uses Chora's `createMap` with its drawing, on the Natural Earth basemap
   from this site, imported with `import()` only when that mode is first opened: `vite.config.js` keeps
   `src/chora/map.js` and `basemaps.js` out of the shared chunk, so the main page preloads no MapLibre
-  (the map chunk is 1.2 MB, the shared one 527 KB). The page's policy needs nothing more for it.
+  (the map chunk, `map-*.js`, which Chora's own chunk `app-*.js` also imports, is 1.1 MB, and Chora's 358 KB:
+  `npx vite build`, 6 November 2026; on 12 October the map chunk was 1.2 MB with a shared chunk of 527 KB
+  beside it). The page's policy needs nothing more for it.
 - **What WHG is asked, and how:** `GET /types/tree/` (the roots), `/types/tree/<n>/` (a node's children;
   `guide: true` nodes are headings, shown in italics and not choosable; nested lists with buttons that open
   a type, no `tree` role), `/types/tree/search/?q=`, `/types/expand/?ids=` and `/api/sources/`, all

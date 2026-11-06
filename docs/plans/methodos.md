@@ -1,8 +1,14 @@
 # Methodos: a workflow manager for the toolbox
 
-*Plan, 2 October 2026. Name decided by Stephen the same day: Methodos (section 2). Status: decided (section 12 lists the decisions); nothing here is built. WHG
+*Plan, 2 October 2026. Name decided by Stephen the same day: Methodos (section 2). Status: decided (section 12 lists the decisions); nothing here was built when the plan was written. WHG
 confirmed and corrected Map your Data's stages (section 5.1) and surveyed what its collaboration
 machinery can expose (section 5.4), both on 2 October.*
+
+*Since then (note of 6 November 2026), phases 0 to 4 and 6 of section 9 and all but two of the workflows
+of section 6 have been built. The "As built" subsections (5.4, 6.1 to 6.5) and DEVELOPERS.md, "Workflows
+(Methodos)", say how, and supersede the plan-tense passages they cover: the branch names and commit counts,
+the "waits on" and "needs" columns, and the Planned card. Those passages are kept as written, as the
+planning record, each with a note saying what superseded it.*
 
 ## 1. Verdict
 
@@ -277,6 +283,15 @@ that a changed decision at one level resets the levels below it, as WHG does.
 
 ### 5.3 Stages, tools and gaps
 
+*Superseded: the "State today" and "Gap" columns are as of 2 October 2026, branch names and commit counts
+included. Every branch named has since landed, and the gaps of stages 1, 3, 5, 6 and 8 are built: region
+columns and their levels, a column of regions split into levels, the pasted list, grid references and
+spelling clustering (README, the reading options; DEVELOPERS.md, "Hermes: TEI, and tables of places"); the
+regions looked up and reviewed level by level (DEVELOPERS.md, "Gazetteer lookup"); the containment relation
+(PLATO #23, section 12, item 5; DEVELOPERS.md, "Regions matched to a gazetteer, in LPF", which the LPF writer
+carries); adoption ("Adopting a gazetteer location"); and the whole under "Workflows (Methodos)". The table
+is kept as the record of what was found.*
+
 | Stage | What happens | Tool and module | State today | Gap |
 |---|---|---|---|---|
 | 1. Bring the names in | A CSV, TSV or workbook of names, each with up to N containing-region columns (parish, county, region…), ids if any, coordinates if any (OSGB included), dates if any; or names found in a text; or, new to both, a pasted plain list | Hermes: `src/engine/hermes/columns.js` guesses the columns, the page's `#columns` lets the user correct them; workbooks on branch `hermes-workbook` | CSV/GeoJSON reading and column mapping landed | **Containing-region columns have no role in the mapping.** Hermes needs a role "contained in (level n)", WHG's `contains:<child>` chain, giving each row a chain of region names, with WHG's "split into levels" transform for a single "Rotherhithe, Surrey, England" column. Also new: a pasted list (a textarea that becomes a one-column CSV); OSGB and other grid coordinates; spelling clustering before lookup. Free text: `llm-extract` is deferred (section 10); WHG's per-row extraction from a column is a later option. |
@@ -433,6 +448,11 @@ written now; the rest wait on a branch.
 | **Trace a historical map** | Chora: a georeferenced map, traced into a new dataset → save → Elenchos → Krisis lookup within the map's outline → review → apply (if identifying) → Elenchos → Mneme → write out → Publish (if publishing) | Built (14 October 2026): section 6.3 |
 | **Make an open map** | Hermes columns → Elenchos → Metaphrasis (a list or a table), or Elenchos (a PLATO dataset) → Krisis lookup → review → apply → Chora (each place located) → Elenchos → Chora's "Make a map" (an SVG and a PNG for Wikimedia Commons) | Built (15 October 2026): section 6.4 |
 | **Map your data** | Section 5 | Krisis lookup, adoption, region columns, hand-back |
+
+*Superseded: the "Waits on" column is as of 2 October 2026 where it gives no later date. Map your data
+and Publish a dataset were built first (their recipes, 3 October 2026; DEVELOPERS.md, "Workflows
+(Methodos)"), and Release a new version on 18 October 2026 ("Releasing a new version (Mneme)"). Census
+figures as a Data Cube and Places from a text are the two not built.*
 
 "Convert for WHG" and "Convert for Peripleo" are not workflows: each is Metaphrasis to LPF, one step,
 and the interview's "a file in another format" answer covers them.
@@ -701,6 +721,13 @@ the pinned commit; `e2e/app_test.py` through `~/.config/plato-tools/heavy.sh`, o
 | **7. Live editing** | Only once WHG has an origin check, `iss` and `aud`, a membership re-check, a typed store and a per-key `meta` merge for the PLATO `doc_type` | As WHG specifies |
 | **8. Optional** | `plato-tools workflow` on the CLI; custom recipes | Only if asked for |
 
+*Superseded: phases 0 to 3 are built, as DEVELOPERS.md, "Workflows (Methodos)", describes; phase 4, Map
+your data end to end, is built (README, the Methodos row) and checked in the browser (`e2e/app_test.py`),
+every branch its row names having landed; phase 5 as its row says, with Match two datasets, Trace a
+historical map, Make an open map and Release a new version since (sections 6.2 to 6.4, and the note under
+section 6's table); phase 6 as section 5.4's "As built" says (snapshots, a share link and a version
+history, with no merge: a stale save is refused, D2). Phases 7 and 8 are not built.*
+
 Three rules from the shared notes apply to every test here: a check must be shown able to fail
 (`--prove-it-fails`); an absence (no request to another site) is asserted only beside a presence (the
 allowed request was made); and a step-level count is never a percentage the engine did not measure.
@@ -800,6 +827,11 @@ coordinator: Peripleo stays a ghosted card; Krisis's card is untouched; ISHI sta
 no inline scripts and no `title=` attributes; dark CSS needs its `data-theme` twins. The grouped
 order below was decided by Stephen on 2 October.
 
+*Superseded: the card is built and live, not Planned: a link (`#methodos-card`) that opens the
+interview, first under the heading "Guided workflows" (not "Start here", 11.2), its text naming the
+workflows built (`index.html`; DEVELOPERS.md, "The toolbox"); the temPlato line of 11.4 is in step 1.
+The markup of 11.1 is the card as it was first proposed.*
+
 ### 11.1 The Planned card, first
 
 The same markup as Peripleo's planned card, placed first in `ul.tools.choose`, with the tooltip in
@@ -896,3 +928,8 @@ server (section 5.4).
 - The WHG-side dependency (section 5.4): whether workbench calls are charged to the daily API limit,
   the body size the host allows, and whether the PLATO `doc_type`'s merge is opaque or keyed. These
   go to WHG as an Issue (drafted; to be filed with WHG).
+
+*Superseded: both have since closed. The containment relation as item 5 says (PLATO #23, 3 October 2026),
+built in Krisis and the LPF writer (DEVELOPERS.md, "Regions matched to a gazetteer, in LPF"); the WHG-side
+dependency as section 5.4's "As built" says (14 October 2026: uncharged to the daily allowance, a 2 MiB body
+cap, an opaque `plato` doc_type).*
