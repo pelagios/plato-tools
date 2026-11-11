@@ -124,6 +124,42 @@ test('RDF -> JSON: the table\'s structure decides, then the property\'s type, th
   const again = await nt(x.back);
   assert.ok(lines(again.text).includes('<https://example.org/f> <https://example.org/attr/unknown> "v" .'));
 });
+test('RDF -> JSON: an attribute with several values comes back as a list, one value as a scalar; a dimension still keeps one', async () => {
+  const F = 'https://example.org/attr/flag', C = [{ dimension: 'https://example.org/dim/a' }, { measure: 'https://example.org/m' }, { attribute: F }];
+  const a = { '@id': 'https://example.org/code/a' }, b = { '@id': 'https://example.org/code/b' };
+  // several, declared: a list, in a fixed order whichever order it was written in
+  let x = await backFigure(oneFigure({ attributes: { [F]: [b, a] } }, C));
+  assert.deepEqual(x.f.attributes, { [F]: [a, b] });
+  assert.equal(losses(x.r).filter((l) => l.kind === 'multiple-values').length, 0);
+  assert.equal(errors((await go([textFile(JSON.stringify(x.back), 'b.json')], 'check'))).length, 0, 'the list is valid PLATO JSON');
+  // mixed types, and the SDMX obsStatus that no structure declares
+  x = await backFigure(oneFigure({ attributes: { [F]: [true, 'x'], [SA + 'obsStatus']: [a, b] } }, C));
+  assert.deepEqual(x.f.attributes[F].map((v) => JSON.stringify(v)).sort(), ['"x"', 'true']);
+  assert.deepEqual(x.f.attributes[SA + 'obsStatus'], [a, b]);
+  // one value, written as a one-item list: a scalar back, and the same graph
+  x = await backFigure(oneFigure({ attributes: { [F]: [a] } }, C));
+  assert.deepEqual(x.f.attributes, { [F]: a });
+  // the same value twice is one statement
+  x = await backFigure(oneFigure({ attributes: { [F]: [a, a] } }, C));
+  assert.deepEqual(x.f.attributes, { [F]: a });
+  // the round trip: JSON -> RDF -> JSON -> RDF gives the same graph
+  x = await backFigure(oneFigure({ attributes: { [F]: [a, b] } }, C));
+  assert.equal(await canon((await nt(x.back)).text), await canon((await nt(oneFigure({ attributes: { [F]: [a, b] } }, C))).text));
+  // dimensions are unchanged: one value; a second is a loss
+  x = await backFigure(oneFigure({ dimensions: { 'https://example.org/dim/a': 'v' } }), '<https://example.org/f> <https://example.org/dim/a> "w" .\n');
+  assert.equal(typeof x.f.dimensions['https://example.org/dim/a'], 'string');
+  assert.equal(losses(x.r).filter((l) => l.kind === 'multiple-values').length, 1);
+});
+test('the statistics example: two obsStatus values on one figure are accepted by check, --cube and the round trip', async () => {
+  const d = doc(); const f = figures(d).find((g) => Array.isArray(g.attributes?.[SA + 'obsStatus']));
+  assert.ok(f, 'the example has a figure with two obsStatus values');
+  assert.equal(errors(await go([file(STATS)], 'check')).length, 0);
+  const cube = await nt(doc(), 'place-centric-statistics.json', { cube: true });
+  assert.equal(errors(cube.r).length, 0);
+  assert.equal(lines(cube.text).filter((l) => l.startsWith(`<${f['@id']}> <${SA}obsStatus>`)).length, 2);
+  const { doc: back } = await jsonBack(cube.text);
+  assert.deepEqual(figures(back).find((g) => g['@id'] === f['@id']).attributes, { [SA + 'obsStatus']: [...f.attributes[SA + 'obsStatus']].sort((p, q) => (JSON.stringify(p) < JSON.stringify(q) ? -1 : 1)) });
+});
 test('RDF -> JSON: on a property value that is not a figure, only a typed or SDMX property is taken; anything else is a loss', async () => {
   const d = oneFigure({ attributes: { [SA + 'obsStatus']: { '@id': 'https://example.org/code/e' }, 'https://example.org/other': 'x' } });
   delete d.spatialEntities[0].attestations[0].properties[0].dataSet;

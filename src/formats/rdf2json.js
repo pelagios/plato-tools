@@ -508,7 +508,12 @@ export class Rdf2Json {
     }
     const box = (obj[where] ||= {});
     if (box[p] === undefined) box[p] = v;
-    else if (JSON.stringify(box[p]) !== JSON.stringify(v)) this.issue({ kind: 'multiple-values', key: p, node: id, value: JSON.stringify(v) });
+    else if (where === 'attributes') {
+      // An attribute may take several values (PLATO's attributeValue): a list, in a fixed order so the
+      // same graph always gives the same JSON; one value stays a scalar.
+      const have = Array.isArray(box[p]) ? box[p] : [box[p]], key = JSON.stringify(v);
+      if (!have.some((x) => JSON.stringify(x) === key)) box[p] = [...have, v].sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1));
+    } else if (JSON.stringify(box[p]) !== JSON.stringify(v)) this.issue({ kind: 'multiple-values', key: p, node: id, value: JSON.stringify(v) });
   }
   /** A table's structure: its components listed, where the graph describes them, or its IRI. */
   _structure(o) {

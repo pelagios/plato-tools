@@ -46,7 +46,10 @@ function differences(doc) {
     const g = byKey.get(key(w));
     if (!g) { out.push(`no figure for ${key(w)}`); continue; }
     for (const k of ['property', 'label', 'value', 'sourceLabel', 'attributes']) {
-      if (JSON.stringify(g[k]) !== JSON.stringify(w[k])) out.push(`${key(w)}: ${k} is ${JSON.stringify(g[k])}, wanted ${JSON.stringify(w[k])}`);
+      // A figure in the example may carry several values for an attribute (obsStatus-E and -P, PLATO 0cd9af7): the
+      // table has no column for that, so they are not asked of the reader.
+      const wk = k === 'attributes' && w.attributes ? Object.fromEntries(Object.entries(w.attributes).filter(([, v]) => !Array.isArray(v))) : w[k];
+      if (JSON.stringify(g[k]) !== JSON.stringify(k === 'attributes' && !Object.keys(wk || {}).length ? undefined : wk)) out.push(`${key(w)}: ${k} is ${JSON.stringify(g[k])}, wanted ${JSON.stringify(w[k])}`);
     }
     if (g.dataSet !== doc.dataSets?.[0]?.['@id']) out.push(`${key(w)}: dataSet ${g.dataSet}`);
     if (JSON.stringify(g.dimensions) !== JSON.stringify(w.dimensions)) out.push(`${key(w)}: dimensions ${JSON.stringify(g.dimensions)}`);

@@ -21,7 +21,8 @@ function firstArrays(doc) {
   (function walk(v, path) {
     if (!v || typeof v !== 'object') return;
     for (const [k, c] of Object.entries(v)) {
-      if (Array.isArray(c) && !Array.isArray(v) && !found.has(k)) found.set(k, [...path, k]);
+      // A list under `attributes` is optional (PLATO's attributeValue takes one value or a list), so a lone value there is no wrong shape.
+      if (Array.isArray(c) && !Array.isArray(v) && !found.has(k) && path.at(-1) !== 'attributes') found.set(k, [...path, k]);
       walk(c, [...path, k]);
     }
   })(doc, []);
@@ -103,6 +104,17 @@ for (const f of examples) {
     assert.deepEqual({ threw, silent }, { threw: [], silent: [] });
   });
 }
+
+test('an attribute\'s list must have a value, and its values are not lists', async () => {
+  const f = 'place-centric-statistics.json', doc = JSON.parse(readFileSync(`${EX}/${f}`, 'utf8'));
+  const at = doc.spatialEntities[0].attestations[0].properties.find((p) => Array.isArray(p.attributes?.['http://purl.org/linked-data/sdmx/2009/attribute#obsStatus']));
+  const K = 'http://purl.org/linked-data/sdmx/2009/attribute#obsStatus';
+  for (const bad of [[], [[1]]]) {
+    const d = structuredClone(doc); d.spatialEntities[0].attestations[0].properties.find((p) => p['@id'] === at['@id']).attributes[K] = bad;
+    const r = await go([textFile(JSON.stringify(d), f)], 'check');
+    assert.ok(r.report.errors > 0, `${JSON.stringify(bad)} is accepted`);
+  }
+});
 
 // Linked Places Format input: a PLATO example converted to LPF, and the LPF samples, whose lists
 // are the ones LPF has (some only in the samples). A list LPF has that none of them holds is added.
