@@ -35,7 +35,7 @@ test('the report says what became of every cell, in the summary, beside the plac
   const out = scratch();
   const c = cli('convert', '--to', 'plato-json', '--columns', COLUMNS, '--base', BASE, '--out', out, TABLE);
   assert.equal(c.code, 0, c.out);
-  assert.match(c.out, /Read 5 rows, 1 place, 5 attestations, 125 triples\. 5 cells of figures: 4 figures, 1 printed dash, 0 blank, 0 left out\./);
+  assert.match(c.out, /Read 5 rows, 1 place, 5 attestations, 127 triples\. 5 cells of figures: 4 figures, 1 printed dash, 0 blank, 0 left out\./);
   assert.match(c.out, /the total looked for, has no figure for occupation Miner/);
   assert.match(c.out, /Warnings\./);
 });

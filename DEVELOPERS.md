@@ -358,8 +358,8 @@ figures"); the decisions of 30 October 2026 (interview: long and wide, one heade
 extended, not a second panel; one attestation to a source row; place key; period as given; code lists in
 a second file; totals only where marked; plain numbers only) are the design.
 
-- **The mapping** is Hermes's (`columns.js`) with four more fields (`FIGURE_FIELDS`: `period`, `dimension`,
-  `value`, `figure`), their entries (`dimension`, `measure`, `coordinates`, `totalOf`, checked by
+- **The mapping** is Hermes's (`columns.js`) with five more fields (`FIGURE_FIELDS`: `period`, `dimension`,
+  `value`, `figure`, `attribute`), their entries (`dimension`, `measure`, `coordinates`, `totalOf`, `attribute`, `separator`, checked by
   `figureEntryProblem`, a bad one keeping the column in the notes as everywhere) and `{ columns, table }`
   for the description (`figuresSpec`; the `table` may be left out; a column headed "columns" or "table"
   is still a column when its entry is a field). `resolveColumns` unwraps it and gives `figures` (the
@@ -382,6 +382,14 @@ a second file; totals only where marked; plain numbers only) are the design.
 - **Figure addresses** are `<place>#f-<16 hex of SHA-256 of [table slug, measure slug, period, coordinates]>`,
   with the coordinates as the table's labels (not addresses), so a re-read, a reordering of the rows or a
   change of base address does not change which figure is which. A repeat is left out, reported, and counted.
+- **Attributes.** An `attribute` column's cell (split on its `separator`, if it has one) gives codes looked up
+  in the description's `attributes.<name>.codes`; a value with no code is `figures-attribute-value` (a loss) and
+  left out. All of a row's attribute columns apply to every figure of that row, and values collect per
+  attribute IRI (the description's `iri`, else `<base>attr/<slug>`), so one `obsStatus` list holds a dash's
+  code and the flags'. They are not in the figure's address hash and not counted as cells. An IRI outside
+  SDMX's attribute namespace is declared as an `attribute` component of each data set's structure: without it
+  the RDF-to-JSON reader would class it as a dimension (rdf2json.js `_figure`). The output is a scalar for one
+  value and a list, sorted by IRI, for several (PLATO's `attributeValue`, pinned from 0cd9af7).
 - **Universes.** A wide column's `totalOf` links its parts to it (a part in one total only, of one measure,
   no loops: refused with `figures-mapping`). A dimension's `total` links a figure to the figure with
   that code in place of its own in the last marked dimension where it is not the total (so

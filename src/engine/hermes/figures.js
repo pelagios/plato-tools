@@ -49,7 +49,7 @@ import { LOSS_TEXT } from '../report.js';
 import { tableIds } from '../../formats/tables.js';
 import { sha256 } from '../../lib/sha256.js';
 import { iri, literal, tripleNT } from '../../lib/ntriples.js';
-import { REF_AREA, REF_PERIOD, OBS_STATUS, QB } from '../../formats/cube.js';
+import { REF_AREA, REF_PERIOD, OBS_STATUS, SDMX_ATTRIBUTE, QB } from '../../formats/cube.js';
 import { RDF } from '../../lib/context.js';
 
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -115,8 +115,9 @@ export function parsePeriod(cell) {
 const yearOf = (d) => /^(-?\d{4})/.exec(d)?.[1];
 
 // ---- the description of the table -------------------------------------------------------------------
-const TABLE_KEYS = ['id', 'title', 'description', 'source', 'measure', 'period', 'coordinates', 'dimensions', 'dashes'];
+const TABLE_KEYS = ['id', 'title', 'description', 'source', 'measure', 'period', 'coordinates', 'dimensions', 'attributes', 'dashes'];
 const DIMENSION_KEYS = ['label', 'iri', 'codes', 'total'];
+const ATTRIBUTE_KEYS = ['label', 'iri', 'codes'];
 /** The table's description, checked: what is wrong with it is reported (figures-mapping-table) and left out. */
 function readTable(given, say) {
   const t = {};
@@ -156,6 +157,21 @@ function readTable(given, say) {
       t.dimensions[d] = o;
     }
   }
+  if (given.attributes !== undefined) {
+    t.attributes = {};
+    if (!isObject(given.attributes)) say('figures-mapping-table', '"attributes" must be an object with a key for each attribute named');
+    else for (const [a, v] of Object.entries(given.attributes)) {
+      if (!isObject(v)) { say('figures-mapping-table', `the attribute "${a}" must be described by an object, {"codes": {"E": "https://…"}}`); continue; }
+      for (const k of Object.keys(v)) if (!ATTRIBUTE_KEYS.includes(k)) say('figures-mapping-table', `"${k}" is not part of an attribute's description (${ATTRIBUTE_KEYS.join(', ')}), in "${a}"`);
+      const o = { codes: {} };
+      if (v.iri !== undefined) { if (isWeb(v.iri)) o.iri = v.iri.trim(); else say('figures-code-address', `the attribute "${a}": ${JSON.stringify(v.iri)}`); }
+      if (v.codes !== undefined) {
+        if (!isObject(v.codes)) say('figures-mapping-table', `the codes of the attribute "${a}" must be an object, {"E": "https://…"}`);
+        else for (const [label, x] of Object.entries(v.codes)) { if (isWeb(x)) o.codes[label] = x.trim(); else say('figures-code-address', `the attribute "${a}", ${JSON.stringify(label)}: ${JSON.stringify(x)}`); }
+      }
+      t.attributes[a] = o;
+    }
+  }
   if (given.dashes !== undefined) {
     if (Array.isArray(given.dashes) && given.dashes.every(text)) t.dashes = given.dashes.map((x) => x.trim()); else say('figures-mapping-table', '"dashes" must be a list of the marks the table prints for a figure that is absent, ["-", "n.a."]');
   }
@@ -192,11 +208,12 @@ export async function* figuresSource(input, rep, options = {}, defaultBase = 'ht
   const byAddress = fields.includes('address'), hasId = fields.includes('id'), hasName = fields.includes('name') || fields.includes('alternativeNames');
   const dashes = [...DASHES, ...(table.dashes || [])];
   const faults = [];
-  const dimCols = [], figureCols = [];
+  const dimCols = [], figureCols = [], attrCols = [];
   let periodCol;
   for (const h of t.headers) {
     const f = mapping[h], g = figures[h] || {};
     if (f === 'period') periodCol = h;
+    else if (f === 'attribute') attrCols.push({ col: h, name: g.attribute ?? h, separator: g.separator });
     else if (f === 'dimension') dimCols.push({ col: h, name: g.dimension ?? h });
     else if (f === 'value') figureCols.push({ col: h, measure: g.measure ?? table.measure ?? h, coords: {}, totalOf: [] });
     else if (f === 'figure') figureCols.push({ col: h, measure: g.measure ?? table.measure ?? h, coords: g.coordinates ?? {}, totalOf: g.totalOf ?? [] });
@@ -220,6 +237,13 @@ export async function* figuresSource(input, rep, options = {}, defaultBase = 'ht
     else parent.set(m, c.col);
   }
   for (const c of figureCols) for (let p = parent.get(c.col), n = 0; p !== undefined; p = parent.get(p)) if (p === c.col || ++n > figureCols.length) { faults.push(`the totals of columns loop round at "${c.col}"`); break; }
+  // Attributes: each named attribute's address (the table's own, else made under the base), and the codes its values may take.
+  const attrNames = [...new Set(attrCols.map((x) => x.name))];
+  const attrDef = (a) => table.attributes?.[a] || { codes: {} };
+  const attrIri = (a) => attrDef(a).iri || `${b}attr/${slug(a) || withHash('', a)}`;
+  const attrSlug = new Map();
+  for (const a of attrNames) { const i = attrIri(a); if (attrSlug.has(i) && attrSlug.get(i) !== a) faults.push(`the attributes "${attrSlug.get(i)}" and "${a}" would have one address`); attrSlug.set(i, a); }
+  for (const a of Object.keys(table.attributes || {})) if (!attrNames.includes(a)) report('figures-mapping-table', `the table describes an attribute "${a}", which no column gives`);
   // The measures, each a data set; the dimensions of each, in the order they are given.
   const measures = new Map();
   for (const c of figureCols) {
@@ -254,7 +278,9 @@ export async function* figuresSource(input, rep, options = {}, defaultBase = 'ht
   const title = table.title || `Figures in ${file.name}`;
   const dataSets = [...measures.values()].map((m) => ({
     '@id': m.iri, title: several ? `${title}: ${m.label}` : title, ...(table.description ? { description: table.description } : {}), isPartOf: source['@id'],
-    structure: { '@id': `${m.iri}/structure`, components: [{ dimension: REF_AREA }, ...(hasPeriod ? [{ dimension: REF_PERIOD }] : []), ...m.dims.map((d) => ({ dimension: dimIri(d) })), { measure: measureIri(m) }] },
+    structure: { '@id': `${m.iri}/structure`, components: [{ dimension: REF_AREA }, ...(hasPeriod ? [{ dimension: REF_PERIOD }] : []), ...m.dims.map((d) => ({ dimension: dimIri(d) })), { measure: measureIri(m) },
+      // An attribute outside SDMX's namespace is declared, or reading the figures back would take it for a dimension.
+      ...attrNames.map(attrIri).filter((i) => !i.startsWith(SDMX_ATTRIBUTE)).map((i) => ({ attribute: i }))] },
   }));
   yield { type: 'header', value: {
     profile: 'attestation-centric',
@@ -294,8 +320,21 @@ export async function* figuresSource(input, rep, options = {}, defaultBase = 'ht
       ts = parsePeriod(text);
       if (!ts) { say('figures-period-invalid', `${r.where}, column "${periodCol}": ${text}`); ts = { sourceLabel: text }; }
     } else if (!ts && table.period) ts = { ...table.period };
+    // The attributes of the row: each column's cell, split where it has a separator, each value a declared code or
+    // else reported and left out (never made up); the same value twice is one.
+    const attrs = new Map();
+    for (const { col, name, separator } of attrCols) {
+      const cell = cellText(row[col]);
+      if (cell === '') continue;
+      for (const v of separator ? cell.split(separator).map((x) => x.trim()).filter((x) => x !== '') : [cell]) {
+        const code = attrDef(name).codes[v];
+        if (!code) { say('figures-attribute-value', `${r.where}, column "${col}", attribute "${name}": ${JSON.stringify(v)}`); continue; }
+        const set = attrs.get(attrIri(name)) || attrs.set(attrIri(name), new Set()).get(attrIri(name));
+        set.add(code);
+      }
+    }
     const dims = new Map(dimCols.map(({ col, name }) => { const v = cellText(row[col]); return [name, v === '' ? null : v]; }));
-    return { a, place, ts, dims, row };
+    return { a, place, ts, dims, attrs, row };
   };
   // The figures of a row: for each column of figures its cell read, its coordinates, its address. Counted
   // as it goes (`n`), so that every cell is one of a figure, a dash, a blank or one left out.
@@ -369,7 +408,16 @@ export async function* figuresSource(input, rep, options = {}, defaultBase = 'ht
         dimensions: Object.fromEntries(coords.map(([d, v]) => [dimIri(d), { '@id': codeIri(d, v) }])),
         ...(cell.label !== undefined ? { sourceLabel: cell.label } : {}),
       };
-      if (cell.kind === 'dash') { prop.attributes = { [OBS_STATUS]: { '@id': `${b}code/obs-status/${ABSENT.slug}` } }; sawAbsence = true; counts['declared absences']++; } else counts.figures++;
+      // Attributes: the row's flags and, for a printed dash, the declared absence; one value is a scalar, several a list
+      // in a fixed order (PLATO's attributeValue), the same code twice one.
+      const have = new Map([...p.attrs].map(([k, v]) => [k, new Set(v)]));
+      if (cell.kind === 'dash') { (have.get(OBS_STATUS) || have.set(OBS_STATUS, new Set()).get(OBS_STATUS)).add(`${b}code/obs-status/${ABSENT.slug}`); sawAbsence = true; counts['declared absences']++; } else counts.figures++;
+      if (have.size) {
+        prop.attributes = Object.fromEntries([...have].map(([k, codes]) => {
+          const list = [...codes].sort().map((c) => ({ '@id': c }));
+          return [k, list.length === 1 ? list[0] : list];
+        }));
+      }
       let universe;
       if (parent.has(c.col)) {
         universe = idOfCol.get(parent.get(c.col));

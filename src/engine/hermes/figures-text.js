@@ -17,6 +17,7 @@ export const FIGURES_KINDS = {
   'figures-mapping-table': 'warning',
   'figures-coordinate-filled': 'warning',
   'figures-code-address': 'warning',
+  'figures-attribute-value': 'loss',
 };
 
 export const FIGURES_TEXT = {
@@ -33,6 +34,7 @@ export const FIGURES_TEXT = {
   'figures-total-unmet': 'A code marked as the total of a dimension never occurs in that dimension, so it is the total of nothing. Check its spelling against the table\'s cells. The example gives the dimension and the code.',
   'figures-mapping-table': 'Part of the table\'s description is not used: a key the reader does not know, or one given wrongly. The example says which.',
   'figures-coordinate-filled': 'The columns of one measure do not all have the same dimensions, so a figure lacking one is given the dimension\'s "unknown" code, as a blank cell is: the Data Cube needs every figure of a table to have a value for every dimension. The example gives the measure and the dimension.',
+  'figures-attribute-value': 'A value in an attribute column that the table\'s description gives no code for is left out, never made up: add it under "attributes" in the description, {"attributes": {"status": {"codes": {"E": "https://…"}}}}.',
   'figures-code-address': 'A code given for a dimension\'s value in the table\'s description is not a web address, so it is not used and the code is made under the base address like any other.',
 };
 

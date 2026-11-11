@@ -47,10 +47,11 @@ export const FIELDS = {
   period: { single: true, words: 'the period the figures are for, as the table gives it: a year, an ISO date, or two years (1851-1861)' },
   dimension: { single: false, words: 'a coordinate of the figures in the same row (occupation, sex, age group…), each different value a code of that dimension; given as {"field": "dimension", "dimension": "occupation"}' },
   value: { single: false, words: 'a figure, one to a row, its coordinates the row\'s dimension columns; given as {"field": "value", "measure": "persons"}' },
+  attribute: { single: false, words: 'a flag or other fact about the figures in the same row, its values codes the table\'s description declares; several columns may give one attribute, and one cell may hold several values with a separator; given as {"field": "attribute", "attribute": "status", "separator": ";"}' },
   figure: { single: false, words: 'a figure whose coordinates are the column\'s own (a table with the categories across): {"field": "figure", "coordinates": {"occupation": "Farmers"}, "measure": "persons", "totalOf": ["Farmers", "Miners"]}' },
 };
 /** The fields that make a table a table of figures. */
-export const FIGURE_FIELDS = new Set(['period', 'dimension', 'value', 'figure']);
+export const FIGURE_FIELDS = new Set(['period', 'dimension', 'value', 'figure', 'attribute']);
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 /**
  * A saved mapping with the table's description beside it, { columns: { column: field }, table: { … } }
@@ -381,7 +382,7 @@ export function resolveColumns(headers, sampleRows, saved, headerText, options) 
       continue;
     }
     // A level goes with "within"; a separator, levels and firstIsName with "split".
-    const misplaced = entry ? Object.keys(given).filter((k) => (k === 'level' && f !== 'within') || ((k === 'separator' || k === 'levels' || k === 'firstIsName') && f !== 'split')) : [];
+    const misplaced = entry ? Object.keys(given).filter((k) => (k === 'level' && f !== 'within') || ((k === 'separator' && f !== 'split' && f !== 'attribute') || ((k === 'levels' || k === 'firstIsName') && f !== 'split'))) : [];
     const bad = misplaced.length ? `${misplaced.map((k) => `"${k}"`).join(' and ')} ${misplaced.length === 1 ? 'goes' : 'go'} with ${misplaced.includes('level') ? '"within"' : '"split"'}, not "${f}"`
       : f === 'within' && entry && Object.hasOwn(given, 'level') && !isLevel(given.level) ? `the level ${JSON.stringify(given.level)} is not a whole number of 1 or more (1 is the widest)`
         : f === 'split' ? splitProblem(given) : null;
@@ -392,8 +393,8 @@ export function resolveColumns(headers, sampleRows, saved, headerText, options) 
       continue;
     }
     if (entry && FIGURE_FIELDS.has(f)) {
-      const { dimension, measure, coordinates, totalOf } = given;
-      figures[h] = Object.assign(Object.create(null), dimension !== undefined ? { dimension } : {}, measure !== undefined ? { measure } : {}, coordinates !== undefined ? { coordinates: { ...coordinates } } : {}, totalOf !== undefined ? { totalOf: [...totalOf] } : {});
+      const { dimension, measure, coordinates, totalOf, attribute, separator } = given;
+      figures[h] = Object.assign(Object.create(null), dimension !== undefined ? { dimension } : {}, attribute !== undefined ? { attribute } : {}, f === 'attribute' && separator !== undefined ? { separator } : {}, measure !== undefined ? { measure } : {}, coordinates !== undefined ? { coordinates: { ...coordinates } } : {}, totalOf !== undefined ? { totalOf: [...totalOf] } : {});
     }
     if (f === 'within' && entry && Object.hasOwn(given, 'level')) {
       // Two columns cannot be one level: the second is kept in the notes.
@@ -437,14 +438,18 @@ export function resolveColumns(headers, sampleRows, saved, headerText, options) 
 }
 
 // The keys a figure role takes in its entry, and what is wrong with an entry that has others or has them wrongly.
-const FIGURE_KEYS = { dimension: ['dimension'], value: ['measure'], figure: ['coordinates', 'measure', 'totalOf'] };
+const FIGURE_KEYS = { dimension: ['dimension'], value: ['measure'], figure: ['coordinates', 'measure', 'totalOf'], attribute: ['attribute', 'separator'] };
 const text = (v) => typeof v === 'string' && v.trim() !== '';
 /** What is wrong with the figure keys of an entry of a saved mapping ("dimension", "measure", "coordinates", "totalOf"), in words, or null. */
 function figureEntryProblem(f, given) {
   const own = FIGURE_KEYS[f] || [];
-  for (const k of ['dimension', 'measure', 'coordinates', 'totalOf']) {
+  if (f === 'attribute') {
+    if (!text(given.attribute)) return 'an attribute column needs the attribute\'s name as text: {"field": "attribute", "attribute": "status"}';
+    if (Object.hasOwn(given, 'separator') && (typeof given.separator !== 'string' || given.separator === '')) return 'the separator must be text, such as ";"';
+  }
+  for (const k of ['dimension', 'measure', 'coordinates', 'totalOf', 'attribute']) {
     if (!Object.hasOwn(given, k)) continue;
-    if (!own.includes(k)) return `"${k}" goes with ${k === 'dimension' ? '"dimension"' : k === 'measure' ? '"value" or "figure"' : '"figure"'}, not "${f}"`;
+    if (!own.includes(k)) return `"${k}" goes with ${k === 'dimension' ? '"dimension"' : k === 'attribute' ? '"attribute"' : k === 'measure' ? '"value" or "figure"' : '"figure"'}, not "${f}"`;
   }
   if (Object.hasOwn(given, 'dimension') && !text(given.dimension)) return 'the dimension\'s name must be text, such as "occupation"';
   if (Object.hasOwn(given, 'measure') && !text(given.measure)) return 'the measure\'s name must be text, such as "persons"';

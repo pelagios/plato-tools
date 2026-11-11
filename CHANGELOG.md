@@ -18,6 +18,12 @@ the commit of PLATO the tools are checked against is pinned in `package.json`.
 
 ### Added
 
+- **Several values for one attribute of a figure.** The figures reader has a new column role, `attribute`, for
+  flags and other facts about a figure: the same attribute on several columns, or a `separator` in one cell,
+  gives a list; each value is a code the table's description declares, and one that is not is reported and
+  left out. Reading PLATO RDF back gives a list for several values of one attribute and a single value for one
+  (PLATO's `attributeValue`, from 0cd9af7). Figure addresses are unchanged.
+
 - **Workflows (Methodos).** *Places from an edition (TEI)* and *Places from
   Recogito*; *Match two datasets* (the other dataset chosen at the match and
   checked by its hash, its problems reported without stopping, the decisions

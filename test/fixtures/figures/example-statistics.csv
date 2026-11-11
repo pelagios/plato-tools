@@ -1,6 +1,6 @@
-County,Year,Occupation,Sex,Persons
-Example County,1851,All,T,1000
-Example County,1851,Agricultural labourer,T,300
-Example County,1851,Agricultural labourer,M,280
-Example County,1851,Agricultural labourer,F,20
-Example County,1851,Miner,F,—
+County,Year,Occupation,Sex,Persons,Status,Status 2
+Example County,1851,All,T,1000,,
+Example County,1851,Agricultural labourer,T,300,E,P
+Example County,1851,Agricultural labourer,M,280,,
+Example County,1851,Agricultural labourer,F,20,,
+Example County,1851,Miner,F,—,,

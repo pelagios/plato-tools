@@ -2,16 +2,35 @@
   "columns": {
     "County": "name",
     "Year": "period",
-    "Occupation": { "field": "dimension", "dimension": "occupation" },
-    "Sex": { "field": "dimension", "dimension": "sex" },
-    "Persons": { "field": "value", "measure": "persons" }
+    "Occupation": {
+      "field": "dimension",
+      "dimension": "occupation"
+    },
+    "Sex": {
+      "field": "dimension",
+      "dimension": "sex"
+    },
+    "Persons": {
+      "field": "value",
+      "measure": "persons"
+    },
+    "Status": {
+      "field": "attribute",
+      "attribute": "status"
+    },
+    "Status 2": {
+      "field": "attribute",
+      "attribute": "status"
+    }
   },
   "table": {
     "title": "Occupations of persons aged 20 and over, 1851 (illustrative)",
     "description": "Persons aged 20 and over, by occupation and sex, for each county. The figures here are invented.",
     "source": "Census of Great Britain, 1851: occupations (illustrative)",
     "dimensions": {
-      "occupation": { "total": "All" },
+      "occupation": {
+        "total": "All"
+      },
       "sex": {
         "iri": "http://purl.org/linked-data/sdmx/2009/dimension#sex",
         "total": "T",
@@ -19,6 +38,15 @@
           "T": "http://purl.org/linked-data/sdmx/2009/code#sex-T",
           "M": "http://purl.org/linked-data/sdmx/2009/code#sex-M",
           "F": "http://purl.org/linked-data/sdmx/2009/code#sex-F"
+        }
+      }
+    },
+    "attributes": {
+      "status": {
+        "iri": "http://purl.org/linked-data/sdmx/2009/attribute#obsStatus",
+        "codes": {
+          "E": "http://purl.org/linked-data/sdmx/2009/code#obsStatus-E",
+          "P": "http://purl.org/linked-data/sdmx/2009/code#obsStatus-P"
         }
       }
     }

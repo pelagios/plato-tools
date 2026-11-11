@@ -205,6 +205,14 @@ a table is one; only a description given makes it so (there is no page for it ye
   `dashes` adds) is a figure with no value and the status "nil or not applicable", never a 0; a blank is
   no figure; anything else is reported and left out. The report adds up every cell: *5 cells of
   figures: 4 figures, 1 printed dash, 0 blank, 0 left out.*
+- **Flags and other attributes** are columns with the role `attribute`:
+  `{"field": "attribute", "attribute": "status", "separator": ";"}`. A figure takes the values of its row's
+  attribute columns. Several values for one attribute are written either way, or both: the same
+  `attribute` on several columns (one value in each), or a `separator` in one cell (`E;P`). Each value must
+  be a code the table's description declares, `"attributes": {"status": {"iri": "…", "codes": {"E": "https://…"}}}`;
+  a value with no code is reported and left out, never made up. One value is written as a single value, several
+  as a list in a fixed order, a repeat once; a printed dash adds its own status to the same list when
+  the attribute is `obsStatus`. A figure's address does not depend on its attributes.
 - **Totals** are linked (`plato:universe`) only where you say so: `totalOf` on a `figure` column ("this
   is the printed total of these columns"), or `"total"` on a dimension's code in the table's description
   ("All" is the total of the others). A name or a sum never makes one; a total the table lacks is
