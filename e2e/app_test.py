@@ -5790,7 +5790,10 @@ def myd_tracker_checks(pw, url, tmp):
     attempt('Map your data (tracker): at the regions step the dataset the step before made is offered by name and chosen in one press, and the step\'s words name the button to press, with no "step 5"', regions_step)
 
     # ---- One walk to the end: the review after a reload, the comparison in one press, and what the format cannot hold
-    ctx, page = fresh()
+    # Opened outside any check, so a page that cannot be opened (--prove-it-fails: no storage on the page with no tools)
+    # must not end the run: each check of the walk then fails for want of its page, as it should.
+    try: ctx, page = fresh()
+    except Exception: ctx = page = None
     r = {}
     def need(*keys):
         missing = [k for k in keys if not r.get(k)]
@@ -10839,7 +10842,7 @@ def methodos_page_checks(browser, url):
                         and all(x['state'] == 'todo' and x['current'] is None for x in a['track'][1:])
                         and a['hash'] == '' and a['tool'] is None and a['note'] and (a['title'] or '').startswith(f"Step 1 of {len(ids)}: Hermes") and 'step 1 of' not in a['note'].lower()
                         and a['where'].startswith(f"Step 1 of {len(ids)}") and '%' not in a['where'] + a['note'] and a['focus'] == 'methodos-tracker-h'
-                        and a['done shown'] is False and 'in step 1 to begin' in a['message'])
+                        and a['done shown'] is False and 'Choose your table to begin' in a['message'])
             second_ok = (b['track'][0]['state'] == 'done' and b['track'][0]['words'] == 'Done' and b['track'][1]['state'] == 'current'
                          and b['hash'] == '#tool=check' and b['tool'] == 'check' and 'Elenchos' in (b['note'] or '') and (b['title'] or '').startswith(f"Step 2 of {len(ids)}: Elenchos") and 'step 2 of' not in (b['note'] or '').lower())
             back_ok = c['track'][0]['state'] == 'current' and c['hash'] == '' and c['tool'] is None
