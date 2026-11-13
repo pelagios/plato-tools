@@ -768,6 +768,31 @@ export const NO_STORAGE = 'This browser window does not let the page keep workin
 /** Whether an error's words are that refusal: Firefox's, SQLite's (no storage at all), and a browser's for a `navigator.storage` that is not there. */
 export const storageRefused = (message) =>
   /Security error when calling GetDirectory|Missing required OPFS APIs|navigator\.storage|reading 'getDirectory'|Storage directory access is denied/.test(String(message ?? ''));
+/**
+ * The browser has the file storage, but not the part of it the engine needs: its worker writes its working
+ * files and every output through FileSystemFileHandle.createSyncAccessHandle() (src/engine/worker.js), which
+ * GNOME Web and other WebKitGTK browsers lack ("Backend does not support this operation"), or it has no
+ * navigator.storage at all. Asked for as the page loads (src/app.js, engineProbe), and said in place of the
+ * run buttons, which stay off; a private window is not the matter, so NO_STORAGE's remedy is not given.
+ */
+export const NO_ENGINE_STORAGE = 'This browser cannot run the tools: it lacks the file storage they keep their working files in. Use a current Chrome, Edge or Firefox.';
+/** Whether an error's words are that lack, met by a run (or by Chora's engine) all the same. */
+export const engineStorageLacking = (message) =>
+  /Backend does not support this operation|createSyncAccessHandle is not a function|createSyncAccessHandle is undefined/.test(String(message ?? ''));
+/**
+ * The browser's allowance of storage for this site ran out while a run wrote its result (src/engine/output-file.js):
+ * nothing is kept of it, and no step is done by it. Until November 2026 the result was cut short and called good.
+ */
+export const NO_ROOM = 'This browser has no room left for the result, so nothing was written: free some of the storage it allows this site, or use the command line for a file of this size.';
+/** Whether an error's words are that: the engine's own, the browser's (QuotaExceededError), or SQLite's of its working database. */
+export const noRoom = (message) => String(message ?? '') === NO_ROOM || /QuotaExceededError|database or disk is full/.test(String(message ?? ''));
+/**
+ * Chora's map is drawn with WebGL (MapLibre), which a browser may have turned off, or a window may be without
+ * (a remote desktop, a virtual machine, Firefox's "resist fingerprinting", a graphics driver it refuses). The map
+ * is not made; Chora's panel says so, and its engine starts all the same, so that the dataset, its places and their
+ * cards, the gazetteer and the save still work (src/chora/app.js, src/chora/map.js).
+ */
+export const NO_WEBGL = 'The map cannot be shown: it needs WebGL, which this browser or window has turned off. The rest of the tools work: the places can still be found, read and saved here.';
 /** The engine's own files (its script, SQLite's WebAssembly, PLATO's schemas, all from this site) did not arrive: the connection, not the data. Nothing is stuck. */
 export const NOT_DOWNLOADED = 'The tools could not be downloaded: check the connection and press the button again.';
 /**

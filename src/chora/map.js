@@ -42,18 +42,57 @@ const kindOf = (e) => (e?.tile ? 'a tile' : e?.sourceId ? 'a source' : 'the styl
  * data of one of a style's sources (not a tile; Natural Earth's are GeoJSON files) cannot be. `polygonValidation`, if
  * given, is Terra Draw's validation for the polygons drawn (Scope's area: src/scope-page.js); Chora gives none.
  */
-export function createMap(container, { state, onPlaceClick, onStyleError, onSourceError, polygonValidation = null }) {
+/** Whether this window gives a page a WebGL context at all (MapLibre draws with one); the one made to ask is let go at once. */
+export function webglWorks() {
+  try {
+    const c = document.createElement('canvas'), gl = c.getContext('webgl2') || c.getContext('webgl');
+    if (!gl) return false;
+    try { gl.getExtension('WEBGL_lose_context')?.loseContext(); } catch { /* kept until collected, then */ }
+    return true;
+  } catch { return false; }
+}
+/**
+ * The map where there can be none (no WebGL): what createMap returns then, so that Chora's panel, which tells the
+ * map what to show at every turn, need not ask each time whether it is there. `none` is why. Every method of it,
+ * and of its `map` (MapLibre's, to the code that uses it directly), does nothing and answers undefined, but for
+ * the few whose answer is read: where the view is (the world, as the map starts), that nothing is being drawn,
+ * no candidate is marked, no layer or source is there. Nothing is drawn, so `draw` is null, as before a style loads.
+ */
+export function noMap(why) {
+  const hollow = (own) => new Proxy(own, { get: (t, k) => (k in t ? t[k] : typeof k === 'symbol' || k === 'then' ? undefined : () => undefined) });
+  const centre = { lng: 10, lat: 30, toArray: () => [10, 30] };
+  const map = hollow({
+    getCenter: () => centre, getZoom: () => 1.2, getBearing: () => 0, getPitch: () => 0,
+    getBounds: () => ({ getWest: () => -180, getSouth: () => -85, getEast: () => 180, getNorth: () => 85, toArray: () => [[-180, -85], [180, 85]] }),
+    isStyleLoaded: () => false, loaded: () => false, isMoving: () => false, hasImage: () => false,
+    on: () => map, once: () => map, off: () => map,
+  });
+  return hollow({ none: why || 'no WebGL', map, draw: null, relief: false, zoom: () => 1.2, candidateMarkers: () => [] });
+}
+
+export function createMap(container, { state, onPlaceClick, onStyleError, onSourceError, onNoMap, polygonValidation = null }) {
   let subjects = [];   // the permissions of the basemap shown, [category, subject] pairs
   state.blocked = 0; state.blockedOrigins = [];
   const guard = transformRequest(() => subjects, { onBlocked: (origin) => {
     state.blocked++;
     if (!state.blockedOrigins.includes(origin)) state.blockedOrigins.push(origin);
   } });
-  const map = new maplibregl.Map({
-    container, style: { version: 8, sources: {}, layers: [{ id: 'blank', type: 'background', paint: { 'background-color': '#dde3ea' } }] },
-    center: [10, 30], zoom: 1.2, attributionControl: { compact: NARROW() }, maplibreLogo: false,
-    transformRequest: guard,
-  });
+  // A window without WebGL (it is turned off, or the machine gives the browser none) cannot have the map: MapLibre's
+  // constructor throws ("Failed to initialize WebGL"), which thrown out of Chora's mount left Chora at 'loading' for
+  // good, its engine never started. Asked first, the constructor's error caught, and the browser's own event for a
+  // context it would not make listened for (it says why, and may come where the first two did not): any of them, and
+  // what is returned is a map that is not there (noMap), with which the rest of Chora works.
+  let failed = webglWorks() ? null : 'this window gives the page no WebGL context', map = null;
+  const refused = (e) => { failed ||= e.statusMessage || 'the browser would not make a WebGL context'; if (map) onNoMap?.(failed); };
+  container.addEventListener('webglcontextcreationfailed', refused, true);
+  if (!failed) try {
+    map = new maplibregl.Map({
+      container, style: { version: 8, sources: {}, layers: [{ id: 'blank', type: 'background', paint: { 'background-color': '#dde3ea' } }] },
+      center: [10, 30], zoom: 1.2, attributionControl: { compact: NARROW() }, maplibreLogo: false,
+      transformRequest: guard,
+    });
+  } catch (e) { failed ||= String(e?.message || e); map = null; }
+  if (!map) { container.replaceChildren(); return noMap(failed); }
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
   map.addControl(new maplibregl.ScaleControl(), 'bottom-left');
   // MapLibre opens the compact attribution at first: closed here, it is one button beside the scale.

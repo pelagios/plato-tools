@@ -5,7 +5,7 @@
 // id it makes starts with `chora-` (the adoption panel's with `adopt-`), so that none clashes with the
 // page's. The engine is the same worker as the main page's (src/engine/worker.js, its chora-* commands),
 // a worker of its own. It publishes its state on window.__chora for automated tests; nothing else reads it.
-import { fmtBytes, formatName, progressText, summary, choraDrawingNote, choraSaveText, choraSavedFormat, choraSaveProgress, choraStorageWarning, choraProblemText, CHORA_TEXT, NO_STORAGE, storageRefused } from '../engine/words.js';
+import { fmtBytes, formatName, progressText, summary, choraDrawingNote, choraSaveText, choraSavedFormat, choraSaveProgress, choraStorageWarning, choraProblemText, CHORA_TEXT, NO_STORAGE, storageRefused, NO_ENGINE_STORAGE, engineStorageLacking, NO_WEBGL } from '../engine/words.js';
 import { sizeRead, loadNeed, saveNeed, storageShort } from '../engine/chora/storage.js';
 import { detect } from '../engine/input.js';
 import { newGeometryAttestation, checkGeoJSON, wrapLongitudes, DrawError, ROLES, PRECISIONS } from '../engine/chora/draw.js';
@@ -47,6 +47,7 @@ import { version as toolsVersion } from '../../package.json';
 const html = () => `<div class="chora-panel" id="chora-panel">
     <section id="chora-data" class="chora-data" aria-label="The dataset on the map">
       <p id="chora-phase" aria-live="polite"></p>
+      <p id="chora-no-map" class="warn" role="status" hidden></p>
       <p id="chora-storage-warning" class="warn" hidden></p>
       <div id="chora-dataset" hidden></div>
     </section>
@@ -1608,6 +1609,7 @@ function keepOverlay(o) { ov.keepShown(o.key, o).catch((err) => console.warn('Ch
  * one reload brings them all back. A map that needs a permission set to Never is done without, silently.
  */
 async function readmitKept() {
+  if (mapApi.none) return;   // no map to show them on (no WebGL): they stay kept
   const shownKeys = new Set(layers.entries.map((e) => e.key));
   const subjects = []; let maps = 0;
   for (const k of await ov.kept()) {
@@ -1652,9 +1654,25 @@ function inAnotherTab() {
   Object.assign(state, { phase: 'in-another-tab' });
 }
 function fail(message) {
-  // The browser's refusal of its file storage (a Firefox private window), in the main page's words for it (words.js).
-  $('phase').innerHTML = `<span class="warn">${esc(storageRefused(message) ? NO_STORAGE : `Something went wrong: ${message}`)}</span>`;
+  // The browser's refusal of its file storage (a Firefox private window), in the main page's words for it (words.js);
+  // and a browser without the storage the engine writes through, as the page has found by then (src/app.js, engineProbe).
+  const lacking = engineStorageLacking(message) || window.__plato?.storage === 'unsupported';
+  $('phase').innerHTML = `<span class="warn">${esc(lacking ? NO_ENGINE_STORAGE : storageRefused(message) ? NO_STORAGE : `Something went wrong: ${message}`)}</span>`;
   Object.assign(state, { phase: 'error', error: message });
+}
+// The map could not be made: this window gives the page no WebGL (turned off in the browser, or not to be had on the
+// machine). Until November 2026 the map's making threw out of the mount, before the engine was started: Chora stayed
+// at 'loading' for good, and a private window's refusal of the storage was never said. Now it is said in the panel and
+// where the map would be, in plain words (NO_WEBGL); what only a map can do (the basemaps, the historical maps and
+// tracing, drawing, "Make a map") is put away (styles.css, .chora-no-map); and the rest goes on. window.__chora.map
+// is 'none', and .mapWhy the browser's reason.
+function mapMissing(why) {
+  Object.assign(state, { map: 'none', mapWhy: String(why || '') });
+  root.classList.add('chora-no-map');
+  $('no-map').textContent = NO_WEBGL; $('no-map').hidden = false;
+  const said = Object.assign(document.createElement('p'), { className: 'no-map-said', textContent: NO_WEBGL });
+  said.setAttribute('aria-hidden', 'true');   // said once to a screen reader, in the panel
+  $('map').replaceChildren(said);
 }
 const n = (x) => (x || 0).toLocaleString('en-GB');
 function boxOf(geoms) {
@@ -1793,7 +1811,10 @@ export function mountChora(rootEl, context = {}) {
 
   // The map, its key, its drawing and its historical maps.
   listenForTileErrors();
-  mapApi = createMap($('map'), { state, onPlaceClick: (id) => selectPlace(id), onStyleError: styleFailed, onSourceError: (id, why) => { if (localSources.has(id)) localFailed(why); } });
+  mapApi = createMap($('map'), { state, onPlaceClick: (id) => selectPlace(id), onStyleError: styleFailed, onSourceError: (id, why) => { if (localSources.has(id)) localFailed(why); }, onNoMap: mapMissing });
+  // No map could be made (a window without WebGL): said in the panel, and all that follows goes on with a map that
+  // is not there (map.js, noMap), so that the engine below starts and the dataset, its places and the save work.
+  if (mapApi.none) mapMissing(mapApi.none);
   renderKey();
   mapApi.onDraw({
     finish: onFinish,

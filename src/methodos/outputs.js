@@ -59,7 +59,11 @@ export function outputStore({ root = () => navigator.storage.getDirectory(), kee
           if (kept.size !== ref.size) throw new Error('not kept whole');
           tab.set(ref.sha256, kept); backed.add(ref.sha256);
           return { file: kept, kept: 'browser' };
-        } catch { /* the tab's, then */ }
+        } catch {
+          // The tab's, then; and the file made for it, empty or cut short (getFileHandle made it before createWritable
+          // or the write was refused: a Safari before 26, a full disk), is not left behind to be counted as kept.
+          try { await (await dir(false)).removeEntry(ref.sha256); } catch { /* none made */ }
+        }
       } else await remove();
       const copy = new File([await file.arrayBuffer()], ref.name, { type: file.type });
       tab.set(ref.sha256, copy); backed.delete(ref.sha256);
@@ -145,13 +149,16 @@ export function outputStore({ root = () => navigator.storage.getDirectory(), kee
         return kept;
       } catch { return null; }
     },
-    /** What is kept in OPFS: { count, bytes, files }, `files` each { sha256, size }. */
+    /**
+     * What is kept in OPFS: { count, bytes, files }, `files` each { sha256, size }. A file of no bytes is not one kept
+     * (no step's output is empty: it is what a write that failed left, in this tab or another), and is not counted.
+     */
     async kept() {
       let count = 0, bytes = 0;
       const files = [];
       await sweep();
       if (!keeping()) return { count, bytes, files };
-      try { for await (const [name, h] of (await dir(false)).entries()) if (h.kind === 'file' && HEX64.test(name)) { const size = (await h.getFile()).size; count++; bytes += size; files.push({ sha256: name, size }); } } catch { /* none */ }
+      try { for await (const [name, h] of (await dir(false)).entries()) if (h.kind === 'file' && HEX64.test(name)) { const size = (await h.getFile()).size; if (!size) continue; count++; bytes += size; files.push({ sha256: name, size }); } } catch { /* none */ }
       return { count, bytes, files };
     },
     /** Let the kept files named by `refs` go (a workflow left), from OPFS and the tab. */

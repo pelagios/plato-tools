@@ -427,6 +427,11 @@ kbd { font: .8em var(--font-mono); border: 1px solid var(--line); border-bottom-
 .chora-mapwrap { position: relative; min-height: 20rem; }
 #chora-map { position: absolute; inset: 0; }
 #chora-map.drawing canvas { cursor: crosshair; }
+/* No map could be made (a window without WebGL: src/chora/app.js, mapMissing): it is said where the map would be, and
+   what only a map can do is put away, whatever shows it later. The dataset, its places, their cards and the save stay. */
+.chora-no-map #chora-map { display: grid; place-items: center; padding: 1.5rem; background: var(--bg); }
+.chora-no-map #chora-map .no-map-said { max-width: 30rem; margin: 0; text-align: center; color: var(--muted); }
+.chora-no-map :is(#chora-maps, #chora-export, #chora-export-preview, #chora-draw-tools, #chora-ink-panel, #chora-name-panel, #chora-map-key, #chora-basemaps) { display: none !important; }
 .muted { color: var(--muted); }
 .dataset-title { font-family: var(--font-headings); font-size: 1.1rem; margin: .3rem 0 0; }
 #chora-q { width: 100%; font: inherit; padding: .35rem .5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); }

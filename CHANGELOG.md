@@ -143,6 +143,20 @@ the commit of PLATO the tools are checked against is pinned in `package.json`.
 
 ### Fixed
 
+- Chora in a window without WebGL (turned off in the browser, or not to be
+  had on the machine) stayed at "loading" for good: the map's making threw
+  before the engine was started. It now says that the map needs WebGL, and
+  the dataset, its places, their cards and the save work without the map.
+- A browser without the storage the engine writes through (GNOME Web and
+  other WebKitGTK browsers) is told as the page loads that it cannot run the
+  tools, and the run buttons stay off; every Check and Convert used to fail
+  there with "Backend does not support this operation".
+- When the browser's storage filled while a conversion wrote its result, the
+  result was cut short, the run said "No problems found" and a workflow's
+  step was ticked. Every write is now checked: the run fails in plain words,
+  nothing cut is kept or offered, and the step is not done.
+- A step's output the browser would not write left an empty file that the
+  tracker counted as kept ("1 file the steps made (0 bytes)").
 - Browser checks that failed now and then in CI under load (#41): a repaint
   asked for when a tile fails, so that a map whose basemap tiles all fail
   falls back to Natural Earth on a slow machine; the Shaded relief check

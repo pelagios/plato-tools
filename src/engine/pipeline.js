@@ -781,7 +781,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       if (regions && ev.region && ev.type === 'record' && typeof ev.value?.['@id'] === 'string') { regions.named.add(ev.value['@id']); regions.nameRecord(ev.value.attestations, ev.value['@id'], regionLabel(ev.value)); }
       if (writer) {
         try { await write(ev); }
-        catch (e) { if (e instanceof Aborted) throw e; rep.error('record-failed', 'A record could not be written and is left out of the output; the rest of the file was still converted', `${ev.value?.['@id'] || `item ${ev.n}`}: ${e && e.message || e}`); }
+        catch (e) { if (e instanceof Aborted || e?.kind === 'no-room') throw e; rep.error('record-failed', 'A record could not be written and is left out of the output; the rest of the file was still converted', `${ev.value?.['@id'] || `item ${ev.n}`}: ${e && e.message || e}`); }
       }
       beat('reading');
     }
@@ -1137,7 +1137,7 @@ async function runCandidateSet(events, { V, rep, writer, dry, notAList, collect,
     if (dry) dry.record('candidates', ev.value);
     if (writer) {
       try { writer.candidate(ev.value); }
-      catch (e) { if (e instanceof Aborted) throw e; rep.error('record-failed', 'A record could not be written and is left out of the output; the rest of the file was still converted', `${ev.value?.['@id'] || `candidate ${ev.n}`}: ${e && e.message || e}`); }
+      catch (e) { if (e instanceof Aborted || e?.kind === 'no-room') throw e; rep.error('record-failed', 'A record could not be written and is left out of the output; the rest of the file was still converted', `${ev.value?.['@id'] || `candidate ${ev.n}`}: ${e && e.message || e}`); }
     }
   }
   if (writer) await writer.close();

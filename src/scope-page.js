@@ -373,6 +373,8 @@ export function mountScope({ methodos, lookup, token, onChange, state }) {
         // Made in the element already in the editor, which has its size; moved, never made again, on a redraw.
         const box = editor.querySelector('#scope-map') || h('div', { id: 'scope-map', className: 'scope-map' });
         const api = createMap(box, { state: mapState, onPlaceClick: () => {}, polygonValidation });
+        // No map could be made (a window without WebGL: map.js, noMap): said here as any failure of the map is, as it was when the map's making threw.
+        if (api.none) throw new Error('it needs WebGL, which this browser or window has turned off');
         api.box = box;
         api.setStyle(await basemaps.styleFor(basemaps.builtIn().find((b) => b.local)));
         api.onDraw({ finish: (id) => {

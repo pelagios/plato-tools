@@ -12,6 +12,8 @@ import { mintCollector } from './krisis/wikidata.js';
 import { apply } from './krisis/apply.js';
 import { review, choraLoadFailure } from './words.js';
 import { DataError } from './input.js';
+// A run's output files, each write checked (a full disk ends the run, and is not a short file).
+import { output } from './output-file.js';
 import { pragmas } from '../lib/store.js';
 import { detect, readable } from './input.js';
 import { columnsOf, mappingOf, withSheet } from './hermes/generic.js';
@@ -145,18 +147,6 @@ async function afterCancel(ms = 15000) {
     catch (e) { if (e?.kind !== 'pool-busy' || Date.now() - t0 > ms) return null; await later(1200); }
   }
 }
-async function output(dir, name) {
-  const h = await (await dir.getFileHandle(name, { create: true })).createSyncAccessHandle();
-  h.truncate(0);
-  const enc = new TextEncoder();
-  let at = 0;
-  return {
-    write(s) { at += h.write(enc.encode(s), { at }); },
-    writeBytes(b) { at += h.write(b, { at }); },
-    async close() { h.flush(); h.close(); return { name, size: at }; },
-  };
-}
-
 /**
  * What one run is given: its working databases, its outputs, and where progress goes. A run may
  * open several databases, one after another (the version check reads two inputs, and keeps a ledger
@@ -289,7 +279,10 @@ self.onmessage = async ({ data }) => {
       const candidates = data.candidates ? await Promise.all(data.candidates.map((f) => detect([f]))) : undefined;
       const { env, tidy } = await runEnv();
       let result;
-      try { result = await run({ input, action: data.action, target: data.target, options: { ...(data.options || {}), candidates } }, env); } finally { tidy(); }
+      try { result = await run({ input, action: data.action, target: data.target, options: { ...(data.options || {}), candidates } }, env); }
+      // No room left for an output (output-file.js): no other file of the run is kept either. The page says it.
+      catch (e) { if (e?.kind === 'no-room') { tidy(); await outputsDir(true).catch(() => {}); } throw e; }
+      finally { tidy(); }
       // Stopped part-way: what it had begun writing (closed by run()) is not kept.
       if (result.incomplete) await outputsDir(true);
       postMessage({ type: 'done', ...result });

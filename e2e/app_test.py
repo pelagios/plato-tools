@@ -3228,6 +3228,14 @@ def main():
 # page's own state, the page outside a workflow), and each was seen to fail on the page as it was before.
 NO_STORAGE_WORDS = 'This browser window does not let the page keep working files, so the tools cannot run here: use an ordinary window, not a private one.'
 NOT_DOWNLOADED_WORDS = 'The tools could not be downloaded: check the connection and press the button again.'
+NO_WEBGL_WORDS = 'The map cannot be shown: it needs WebGL, which this browser or window has turned off. The rest of the tools work: the places can still be found, read and saved here.'
+NO_ENGINE_WORDS = 'This browser cannot run the tools: it lacks the file storage they keep their working files in. Use a current Chrome, Edge or Firefox.'
+NO_ROOM_WORDS = 'This browser has no room left for the result, so nothing was written: free some of the storage it allows this site, or use the command line for a file of this size.'
+# The engine's storage probe (src/engine/storage-probe.js), answered as a WebKitGTK browser answers it: the call is there, and refuses.
+# Put at the head of the probe's own script as it is served (a worker takes no init script), so the rest of it runs as built.
+PROBE_REFUSED = """FileSystemFileHandle.prototype.createSyncAccessHandle = async () => { throw new DOMException('Backend does not support this operation', 'NotSupportedError'); };\n"""
+# No navigator.storage at all, as WebKitGTK browsers come (GNOME Web).
+NO_NAVIGATOR_STORAGE = """Object.defineProperty(Navigator.prototype, 'storage', { configurable: true, get() { return undefined; } });"""
 SHELL_CSV = ROOT / 'test/fixtures/generic/with-ids.csv'
 SHELL_STATE = """() => { const $ = (id) => document.getElementById(id), v = (e) => !!e && !e.closest('[hidden]') && !!(e.offsetWidth || e.offsetHeight), p = window.__plato || {};
   return { phase: p.phase || null, storage: p.storage || null, error: p.error || null, said: p.said || null, warning: v($('storage-warning')) ? $('storage-warning').textContent : null,
@@ -3291,10 +3299,11 @@ def page_shell_checks(pw, url, tmp):
     attempt('Page shell: a run that meets the refusal itself (a Firefox private window whose page was answered, its engine refused: "Security error when calling GetDirectory") says the same plain words, not the browser\'s', refused_at_the_run)
 
     def chora_private():
-        # Chora makes its map before it starts its engine, and where the window has no WebGL the map is not made, the refusal is
-        # never met and Chora stays at 'loading' (seen here with webgl.disabled, and what the Gates run of this check reported,
-        # in a Firefox with no graphics card). So WebGL is asked for whatever the machine, and a failure says whether the window had it.
-        ff, p = firefox(True, prefs={'webgl.force-enabled': True})
+        # Chora makes its map before it starts its engine, and where the window has no WebGL the map was not made, the refusal
+        # never met, and Chora stayed at 'loading' (seen here with webgl.disabled, and what the Gates run of this check reported:
+        # its Firefox has no WebGL, asked for or not). The page now starts its engine without the map (chora_no_webgl, below), so
+        # this check takes the window as the machine gives it, with WebGL or without, and says which it had.
+        ff, p = firefox(True)
         try:
             loaded(p)
             faults = []; p.on('pageerror', lambda e: faults.append(str(e)[:200]))
@@ -3307,6 +3316,64 @@ def page_shell_checks(pw, url, tmp):
         finally: ff.close()
         return got['phase'] == 'error' and 'GetDirectory' in (got['error'] or '') and got['says'] == NO_STORAGE_WORDS, got
     attempt('Page shell: Chora in a Firefox private window says the same plain words of the refusal', chora_private)
+
+    # A window without WebGL (Firefox with webgl.disabled: turned off in the browser, as a machine without it is to the page).
+    # The map cannot be made. Before, its making threw out of Chora's mount: Chora stayed at 'loading', its engine never started.
+    NO_MAP = """() => { const $ = (id) => document.getElementById(id), v = (e) => !!e && !e.closest('[hidden]') && !!(e.offsetWidth || e.offsetHeight), c = window.__chora || {};
+      const gl = document.createElement('canvas');
+      return { phase: c.phase || null, map: c.map || null, error: c.error || null, 'WebGL in this window': !!(gl.getContext('webgl2') || gl.getContext('webgl')),
+        panel: v($('chora-no-map')) ? $('chora-no-map').textContent : null, 'in the map': v($('chora-map')) ? $('chora-map').textContent.trim() : null, says: $('chora-phase')?.textContent || '',
+        canvas: !!document.querySelector('#chora-map canvas'), places: document.querySelectorAll('#chora-list button[data-id]').length, card: v($('chora-card')),
+        shown: ['chora-maps', 'chora-draw-tools', 'chora-basemaps', 'chora-export'].filter((id) => v($(id))) }; }"""
+    CHORA_SHELL_FILE = ROOT / 'test/fixtures/chora/place-centric-judgements.json'
+    def chora_no_webgl():
+        got = {}
+        ff, p = firefox(False, prefs={'webgl.disabled': True})
+        try:
+            loaded(p)
+            faults = []; p.on('pageerror', lambda e: faults.append(str(e)[:200]))
+            p.goto('about:blank'); p.goto(NOTOOLS if PROVE else base + '#chora')
+            try: until(p, "window.__chora && ['error', 'ready', 'loaded'].includes(window.__chora.phase)", 60)
+            except Exception as e: return False, {'without WebGL': p.evaluate(NO_MAP), 'page errors': faults, 'waited': str(e)[:300]}
+            got['without WebGL, started'] = p.evaluate(NO_MAP)
+            # What needs no map still works: the dataset opens, its places are listed, and one chosen shows its card.
+            p.set_input_files('#picker', [str(CHORA_SHELL_FILE)])
+            until(p, '["loaded", "error", "unrecognised"].includes(window.__chora.phase)', 60)
+            got['without WebGL, a dataset'] = p.evaluate(NO_MAP)
+            p.click('#chora-list button[data-id]')
+            until(p, 'window.__chora.phase === "place" && !!window.__chora.placeId', 30)
+            got['without WebGL, a place'] = p.evaluate(NO_MAP)
+            got['page errors'] = faults
+        finally: ff.close()
+        # The presence beside the absence: a window with WebGL (Chromium with its software renderer, as every map check here), where nothing is said.
+        cr = pw.chromium.launch(headless=True, args=GL)
+        try:
+            cp = cr.new_context(viewport={'width': 1280, 'height': 900}).new_page()
+            cp.goto(NOTOOLS if PROVE else base + '#chora')
+            until(cp, 'window.__chora && window.__chora.phase === "ready" && window.__chora.mapReadyCount >= 1', 90)
+            got['with WebGL'] = cp.evaluate(NO_MAP)
+        finally: cr.close()
+        a, b, c, w = got['without WebGL, started'], got['without WebGL, a dataset'], got['without WebGL, a place'], got['with WebGL']
+        ok = (not a['WebGL in this window'] and a['phase'] == 'ready' and a['map'] == 'none' and a['panel'] == NO_WEBGL_WORDS and a['in the map'] == NO_WEBGL_WORDS and not a['canvas'] and a['shown'] == []
+              and b['phase'] == 'loaded' and b['places'] == 6 and b['panel'] == NO_WEBGL_WORDS and b['shown'] == []
+              and c['phase'] == 'place' and c['card'] and c['panel'] == NO_WEBGL_WORDS and not faults
+              and w['WebGL in this window'] and w['map'] is None and w['panel'] is None and w['canvas'] and 'chora-basemaps' in w['shown'])
+        return ok, got
+    attempt('Page shell: in a window without WebGL (Firefox, webgl.disabled) Chora says in its panel, and where the map would be, that the map needs WebGL and the rest works; its engine starts all the same, a dataset opens, its places are listed and one chosen shows its card, with no page error; in a window with WebGL nothing is said and the map is drawn', chora_no_webgl)
+
+    def chora_private_no_webgl():
+        # Both at once, as the Gates run's Firefox is: no WebGL, and (a private window) the file storage refused. Each is said, in its own place.
+        ff, p = firefox(True, prefs={'webgl.disabled': True})
+        try:
+            loaded(p)
+            p.goto('about:blank'); p.goto(NOTOOLS if PROVE else base + '#chora')
+            try: until(p, "window.__chora && ['error', 'ready', 'loaded'].includes(window.__chora.phase)", 60)
+            except Exception as e: return False, {'state': p.evaluate(NO_MAP), 'waited': str(e)[:300]}
+            got = p.evaluate(NO_MAP)
+        finally: ff.close()
+        return (not got['WebGL in this window'] and got['phase'] == 'error' and 'GetDirectory' in (got['error'] or '') and got['says'] == NO_STORAGE_WORDS
+                and got['map'] == 'none' and got['panel'] == NO_WEBGL_WORDS), got
+    attempt('Page shell: Chora in a Firefox private window without WebGL says both, each in plain words: the map needs WebGL, and the window does not let the page keep working files', chora_private_no_webgl)
 
     browser = pw.chromium.launch(headless=True, args=GL)
     def fresh(**kw):
@@ -3332,6 +3399,75 @@ def page_shell_checks(pw, url, tmp):
                   and again['phase'] == 'done' and again['error'] is None and NOT_DOWNLOADED_WORDS not in (again['summary'] or NOT_DOWNLOADED_WORDS))
             return ok, {'stopped': [u.rsplit('/', 1)[-1] for u in stopped][:3], 'failed': failed, 'again': again}
         attempt('Page shell: the engine\'s files not arriving (SQLite\'s WebAssembly stopped on its way) is said as a download that failed, "check the connection and press the button again"; and, the connection back, the button pressed again runs', engine_not_downloaded)
+
+        def engine_storage_lacking():
+            # The browser has the page's file storage and not what the engine's worker writes through (WebKitGTK), or none at all.
+            probe_js = re.compile(r'/assets/storage-probe-[^/]*\.js(\?|$)'); got = {}; answered = []
+            def refuse(route):
+                r = route.fetch(); answered.append(route.request.url.rsplit('/', 1)[-1]); route.fulfill(response=r, body=PROBE_REFUSED + r.text())
+            asked = lambda p: wait_state(p, lambda s: s.get('phase') == 'ready' and (s.get('engineStorage') or s.get('storage') == 'unsupported'), T(30), 'the storage asked')
+            ENGINE = "() => ({ engine: window.__plato?.engineStorage || null, why: window.__plato?.engineStorageWhy || null })"
+            for name, route, init in (('the call refused', True, None), ('no navigator.storage', False, NO_NAVIGATOR_STORAGE), ('an ordinary window', False, None)):
+                ctx = browser.new_context(viewport={'width': 1400, 'height': 900}, reduced_motion='reduce')
+                try:
+                    if route: ctx.route(probe_js, refuse)
+                    if init and not PROVE: ctx.add_init_script(init)
+                    p = ctx.new_page(); p.set_default_timeout(T(8) * 1000); p.goto(NOTOOLS if PROVE else base)
+                    asked(p); got[name] = {**state(p), **p.evaluate(ENGINE)}
+                    got[name]['a file'] = detect(p, FRONT_FILE); got[name]['with it'] = state(p)
+                    if name == 'an ordinary window': p.click('#check'); ran(p); got[name]['checked'] = state(p)
+                finally: ctx.close()
+            got['probe answered for'] = answered
+            lacking = lambda x: (x['storage'] == 'unsupported' and x['engine'] == 'lacking' and x['warning'] == NO_ENGINE_WORDS and x['a file']
+                                 and x['with it']['warning'] == NO_ENGINE_WORDS and x['with it']['off'] == ['check', 'convert', 'publish', 'match'])
+            o = got['an ordinary window']
+            ok = (len(answered) == 1 and lacking(got['the call refused']) and 'Backend does not support this operation' in (got['the call refused']['why'] or '')
+                  and lacking(got['no navigator.storage'])
+                  and o['storage'] == 'ok' and o['engine'] == 'ok' and o['warning'] is None and o['a file'] and o['checked']['phase'] == 'done' and o['checked']['off'] == [])
+            return ok, got
+        attempt('Page shell: a browser without what the engine writes through (its storage probe answered "Backend does not support this operation", as WebKitGTK answers; or no navigator.storage at all) is told as the page loads that it cannot run the tools, "Use a current Chrome, Edge or Firefox", and Check, Convert, Prepare and Match are off; in an ordinary window the probe passes, nothing is said, and Check runs', engine_storage_lacking)
+
+        def no_room_for_the_result():
+            # Map your data, a table of 30,000 places, the origin allowed 6 MB of storage (its dataset is some 14 MB): the
+            # conversion's output does not fit. Before, it was cut short, "No problems found", the step ticked.
+            big = tmp / 'thirty-thousand.csv'
+            with open(big, 'w', newline='') as f:
+                w = csv.writer(f); w.writerow(['id', 'name', 'type', 'latitude', 'longitude', 'source'])
+                for i in range(30000): w.writerow([f'p{i}', f'Place number {i} by the water', 'village', f'{50 + (i % 900) / 100:.4f}', f'{-5 + (i % 700) / 100:.4f}', 'A survey of the thirty thousand places, 1851'])
+            AFTER = """async () => { const out = []; try { const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('outputs'); for await (const [n, h] of d.entries()) out.push([n, (await h.getFile()).size]); } catch {}
+              return { saves: [...document.querySelectorAll('#saves button')].map((b) => b.textContent), outputs: out, tracker: document.getElementById('methodos-message').textContent,
+                quota: (await navigator.storage.estimate()).quota }; }"""
+            def leg(quota):
+                ctx = None
+                try:
+                    ctx, p = fresh()
+                    step_of = lambda step: p.evaluate(f"() => document.querySelector('#methodos-track li[data-step=\"{step}\"]')?.dataset.state || null")
+                    step_is = lambda step, st, timeout=60: until(p, f"() => document.querySelector('#methodos-track li[data-step=\"{step}\"]')?.dataset.state === '{st}'", timeout)
+                    if quota: ctx.new_cdp_session(p).send('Storage.overrideQuotaForOrigin', {'origin': p.evaluate('() => location.origin'), 'quotaSize': quota})
+                    p.evaluate("() => { const b = document.getElementById('base'); b.value = %s; b.dispatchEvent(new Event('change')); }" % json.dumps(MYDATA_BASE))
+                    p.click('#methodos-ask'); until(p, "!document.getElementById('methodos').hidden", 5)
+                    p.check('input[name="methodos-have"][value="table"]'); p.check('input[name="methodos-want"][value="map"]')
+                    for k in ('has-regions', 'will-draw', 'will-publish'): p.check(f'input[name="methodos-ask-{k}"][value="no"]')
+                    p.click('#methodos-start'); until(p, "['pending', 'idle'].includes(document.getElementById('methodos-tracker').dataset.status)", 10)
+                    if not detect(p, big): return {'detected': False}
+                    until(p, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+                    wait_state(p, lambda s: (s.get('columns') or {}).get('mapping'), T(30), 'columns')
+                    p.click('#methodos-done'); step_is('columns', 'done', 15)
+                    p.click('#check'); checked = ran(p, 300).get('phase'); step_is('check', 'done')
+                    p.click('#convert'); run = ran(p, 300); p.wait_for_timeout(1000)   # the tracker has heard of the run's end
+                    s = state(p)
+                    return {'checked': checked, 'phase': run.get('phase'), 'error': (s['error'] or '')[:200] or None, 'said': s['said'], 'summary': s['summary'], 'step': step_of('dataset'), **p.evaluate(AFTER)}
+                finally: ctx and ctx.close()
+            # The presence first: with the browser's own allowance, the same table is converted, the step done and the file offered.
+            with_room = leg(None)
+            without = leg(6000000) if with_room.get('phase') else {}
+            if not without.get('phase'): return False, {'with room': with_room, 'allowed 6 MB': without}
+            ok = (with_room['phase'] == 'done' and with_room['step'] == 'done' and len(with_room['saves']) == 1 and len(with_room['outputs']) == 1 and with_room['outputs'][0][1] > 6000000
+                  and 'No problems found' in (with_room['summary'] or '')
+                  and without['quota'] == 6000000 and without['phase'] == 'error' and without['said'] == NO_ROOM_WORDS and without['summary'] == NO_ROOM_WORDS
+                  and without['step'] != 'done' and without['saves'] == [] and without['outputs'] == [])
+            return ok, {'with room': with_room, 'allowed 6 MB': without}
+        attempt('Page shell: when the browser\'s storage fills while a conversion writes its result (Map your data, 30,000 places, the site allowed 6 MB) the run fails in plain words, "no room left for the result, so nothing was written", the step is not ticked and no cut file is offered or kept; with room, the same table is converted, the step done and the file offered', no_room_for_the_result)
 
         def chora_loading():
             # Chora's module and the map libraries held back on their way, as a slow connection holds them.

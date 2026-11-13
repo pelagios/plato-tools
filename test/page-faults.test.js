@@ -6,7 +6,7 @@
 // seen in the review of November 2026, word for word.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { NO_STORAGE, storageRefused, NOT_DOWNLOADED, downloadFailed, POOL_BUSY, POOL_STUCK } from '../src/engine/words.js';
+import { NO_STORAGE, storageRefused, NOT_DOWNLOADED, downloadFailed, POOL_BUSY, POOL_STUCK, NO_ENGINE_STORAGE, engineStorageLacking, NO_ROOM, noRoom, NO_WEBGL } from '../src/engine/words.js';
 
 test('the browser refusing its file storage is recognised from each browser\'s words for it, and from nothing else', () => {
   for (const m of [
@@ -40,4 +40,28 @@ test('the words name a remedy, not an interface of the browser', () => {
   assert.match(NO_STORAGE, /use an ordinary window, not a private one/);
   assert.match(NOT_DOWNLOADED, /check the connection and press the button again/);
   for (const w of [NO_STORAGE, NOT_DOWNLOADED]) assert.doesNotMatch(w, /getDirectory|OPFS|SecurityError|ASSERTIONS|wasm/i);
+});
+
+// November 2026, from the WebKitGTK check and the robustness review: a browser without the storage the engine's
+// worker writes through, and the browser's allowance used up while a result is written.
+test('a browser without what the engine writes through is told from a private window\'s refusal, and said with its own remedy', () => {
+  for (const m of ['Backend does not support this operation', 'NotSupportedError: Backend does not support this operation', 'h.createSyncAccessHandle is not a function']) {
+    assert.equal(engineStorageLacking(m), true, m); assert.equal(storageRefused(m), false, m);
+  }
+  for (const m of ['Security error when calling GetDirectory', 'The engine stopped: unknown error', NO_ROOM, POOL_BUSY, '', undefined, null]) assert.equal(engineStorageLacking(m), false, String(m));
+  assert.match(NO_ENGINE_STORAGE, /^This browser cannot run the tools/);
+  assert.match(NO_ENGINE_STORAGE, /Use a current Chrome, Edge or Firefox\.$/);
+  assert.doesNotMatch(NO_ENGINE_STORAGE, /private|createSyncAccessHandle|OPFS|Backend/);
+});
+
+test('no room left for a result is recognised from the engine\'s words, the browser\'s and SQLite\'s, and from nothing else', () => {
+  for (const m of [NO_ROOM, 'QuotaExceededError: The operation failed because it would cause the application to exceed its storage quota.', 'SQLITE_FULL: sqlite3 result code 13: database or disk is full']) assert.equal(noRoom(m), true, m);
+  for (const m of ['Security error when calling GetDirectory', 'Backend does not support this operation', 'line 3: a place has no name', POOL_BUSY, '', undefined, null]) assert.equal(noRoom(m), false, String(m));
+  assert.match(NO_ROOM, /no room left for the result, so nothing was written/);
+  assert.doesNotMatch(NO_ROOM, /QuotaExceeded|OPFS|SQLITE/);
+});
+
+test('the words for a map that cannot be made name WebGL, say what turned it off, and that the rest works', () => {
+  assert.match(NO_WEBGL, /it needs WebGL, which this browser or window has turned off/);
+  assert.match(NO_WEBGL, /The rest of the tools work/);
 });

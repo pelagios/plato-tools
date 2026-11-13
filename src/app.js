@@ -9,7 +9,7 @@ import { pastedListFile } from './engine/hermes/pasted.js';
 // Hermes: grouping similar spellings for lookup, a panel of its own (src/hermes-spellings.js).
 import { spellingsPanel } from './hermes-spellings.js';
 import { splitMatching } from './engine/hermes/cluster.js';
-import { review as W, POOL_BUSY, POOL_STUCK, PREVIEW_WORDS, CANCEL_RELEASING, CHORA_HANDOVER, NO_STORAGE, storageRefused, NOT_DOWNLOADED, downloadFailed } from './engine/words.js';
+import { review as W, POOL_BUSY, POOL_STUCK, PREVIEW_WORDS, CANCEL_RELEASING, CHORA_HANDOVER, NO_STORAGE, storageRefused, NOT_DOWNLOADED, downloadFailed, NO_ENGINE_STORAGE, engineStorageLacking, NO_ROOM, noRoom } from './engine/words.js';
 const REVIEW_WORDS = W;   // the review's words, where W names the words for the columns
 import { readable } from './engine/input.js';
 import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions, flag, noteOn, setRowState, kindOfCandidate, acceptedFor } from './engine/krisis/work.js';
@@ -174,12 +174,47 @@ function onDetected({ input: inp, targets: t }) {
 // refusal anyway, and Chora of its own (src/chora/app.js). window.__plato.storage is 'ok' or 'refused'.
 let noStorage = false;
 async function storageProbe() {
+  // No navigator.storage at all (GNOME Web and other WebKitGTK browsers, as they come): not a private window's
+  // refusal, and an ordinary window would not mend it.
+  if (typeof navigator.storage?.getDirectory !== 'function') return engineLacking('this browser has no navigator.storage.getDirectory');
   try { await navigator.storage.getDirectory(); } catch { noStorage = true; }
   state.storage = noStorage ? 'refused' : 'ok';
-  if (!noStorage) return;
+  if (!noStorage) return engineProbe();
   const w = $('storage-warning');
   w.textContent = NO_STORAGE; w.hidden = false;
   buttons(true);
+}
+// The storage answers the page; whether it has what the engine's worker needs of it (a synchronous access handle,
+// which a page cannot ask for) is asked of a small worker (src/engine/storage-probe.js) as the page loads. Lacking
+// (WebKitGTK: "Backend does not support this operation"), every Check and Convert would fail in the browser's words:
+// the page says at once that this browser cannot run the tools, and the run buttons stay off, as for a refusal.
+// Only the browser's plain "no" is taken for a lack (NotSupportedError; a TypeError, where the call or the storage is
+// not there): a probe that does not arrive (the connection), does not answer, or meets anything else (no room, a file
+// in use, a refusal the page's own asking did not meet) leaves the buttons on, and a run says what it meets (fail()).
+// window.__plato.engineStorage is 'ok', 'lacking' or 'unknown'; .storage becomes 'unsupported' where it is lacking.
+const LACKING = new Set(['NotSupportedError', 'TypeError']);
+function engineLacking(why) {
+  noStorage = true;
+  Object.assign(state, { storage: 'unsupported', engineStorage: 'lacking', engineStorageWhy: why });
+  const w = $('storage-warning');
+  w.textContent = NO_ENGINE_STORAGE; w.hidden = false;
+  buttons(true);
+}
+function engineProbe() {
+  let probe, timer;
+  const done = (answer) => {
+    clearTimeout(timer); try { probe?.terminate(); } catch { /* gone */ }
+    if (state.engineStorage) return;
+    if (answer && answer.ok === false && LACKING.has(answer.name)) engineLacking(`${answer.name}: ${answer.message}`);
+    else state.engineStorage = answer?.ok ? 'ok' : 'unknown';
+  };
+  try {
+    probe = new Worker(new URL('./engine/storage-probe.js', import.meta.url), { type: 'module' });
+    probe.onmessage = ({ data }) => done(data);
+    probe.onerror = () => done(null);
+    timer = setTimeout(() => done(null), 15000);
+    probe.postMessage('probe');
+  } catch { done(null); }
 }
 async function storageCheck() {
   const w = $('storage-warning');
@@ -331,7 +366,9 @@ function fail(message, words) {
   // Two faults that are not the data's, in plain words (words.js): the browser's refusal of its file storage, said as
   // the page says it at load (storageProbe), and the engine's own files not arriving (on a dropped connection SQLite
   // said "Build with -sASSERTIONS for more info"): nothing is stuck, and the button pressed again runs.
-  words ||= storageRefused(message) ? NO_STORAGE : downloadFailed(message) ? NOT_DOWNLOADED : undefined;
+  // And two more: a browser without the storage the engine writes through (said at load too, engineProbe), and the
+  // browser's allowance used up while the result was written (output-file.js), where the result was once cut short.
+  words ||= storageRefused(message) ? NO_STORAGE : engineStorageLacking(message) ? NO_ENGINE_STORAGE : noRoom(message) ? NO_ROOM : downloadFailed(message) ? NOT_DOWNLOADED : undefined;
   busy = false;
   engineReady(false);
   if (runOp) { methodos.ended({ op: runOp, error: words || message }); runOp = null; }

@@ -157,3 +157,30 @@ test('the user\'s own file is not written where the browser says there is not ro
   assert.match(keptWords({ files: [], own: [r], missed: [{ name: 'big.csv', why: 'short' }] }), /^big\.csv could not be kept in this browser \(it has not room enough\): after a reload, choose it again/);
   assert.match(keptWords({ files: [{ sha256: 'c'.repeat(64), size: 10 }], own: [r], missed: [{ name: 'big.csv', why: 'failed' }] }), /file the steps made .*big\.csv could not be kept in this browser \(it would not keep it\)/);
 });
+
+// November 2026, the WebKitGTK check (F2): with createWritable refused, the file getFileHandle had made for a step's
+// output stayed, empty, and the tracker counted it: "1 file the steps made (0 bytes)".
+test('a step\'s output the browser would not write is the tab\'s, and no empty file is left or counted as kept', async () => {
+  const made = new File(['{"made":1}'], 'made.json');
+  const m = { type: 'dataset', name: made.name, size: made.size, sha256: await sha(made) };
+  // The presence first: written, it is kept in the browser and counted.
+  const good = fakeOpfs(), kept = outputStore({ root: good.root, keep: () => true });
+  assert.equal((await kept.put(m, made)).kept, 'browser');
+  assert.deepEqual(await kept.kept(), { count: 1, bytes: made.size, files: [{ sha256: m.sha256, size: made.size }] });
+  // createWritable refused (a Safari before 26, as the check approximated it): the file is made, then nothing is written.
+  const disk = fakeOpfs(), real = await disk.root();
+  const refuse = async () => { throw Object.assign(new Error('refused'), { name: 'NotSupportedError' }); };
+  const refusing = async () => ({ getDirectoryHandle: async (...a) => {
+    const d = await real.getDirectoryHandle(...a);
+    return { getFileHandle: async (...b) => ({ ...(await d.getFileHandle(...b)), createWritable: refuse }), removeEntry: (n) => d.removeEntry(n), entries: () => d.entries() };
+  }, removeEntry: (n) => real.removeEntry(n) });
+  const store = outputStore({ root: refusing, keep: () => true });
+  const r = await store.put(m, made);
+  assert.equal(r.kept, 'tab'); assert.equal(await r.file.text(), '{"made":1}');
+  assert.equal(disk.dirs.get('methodos-outputs')?.has(m.sha256) ?? false, false, 'the empty file is not left behind');
+  assert.deepEqual(await store.kept(), { count: 0, bytes: 0, files: [] });
+  // And one left by an earlier visit (or another tab) is not counted, nor taken for the output.
+  disk.dirs.get('methodos-outputs').set(m.sha256, new Uint8Array(0));
+  assert.deepEqual(await outputStore({ root: disk.root, keep: () => true }).kept(), { count: 0, bytes: 0, files: [] });
+  assert.equal(await outputStore({ root: disk.root, keep: () => true }).get(m), null);
+});
