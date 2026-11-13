@@ -3243,8 +3243,8 @@ SHELL_LOOKUP = """() => { const $ = (id) => document.getElementById(id), v = (e)
 def page_shell_checks(pw, url, tmp):
     import re
     base = url.rstrip('/') + '/'
-    def firefox(private, init=None):
-        ff = pw.firefox.launch(headless=True, firefox_user_prefs={'browser.privatebrowsing.autostart': True} if private else {})
+    def firefox(private, init=None, prefs=None):
+        ff = pw.firefox.launch(headless=True, firefox_user_prefs={**({'browser.privatebrowsing.autostart': True} if private else {}), **(prefs or {})})
         ctx = ff.new_context(viewport={'width': 1280, 'height': 900})
         if init and not PROVE: ctx.add_init_script(init)   # not on the page with no tools, which it could not change
         page = ctx.new_page(); page.set_default_timeout(T(8) * 1000)
@@ -3291,12 +3291,19 @@ def page_shell_checks(pw, url, tmp):
     attempt('Page shell: a run that meets the refusal itself (a Firefox private window whose page was answered, its engine refused: "Security error when calling GetDirectory") says the same plain words, not the browser\'s', refused_at_the_run)
 
     def chora_private():
-        ff, p = firefox(True)
+        # Chora makes its map before it starts its engine, and where the window has no WebGL the map is not made, the refusal is
+        # never met and Chora stays at 'loading' (seen here with webgl.disabled, and what the Gates run of this check reported,
+        # in a Firefox with no graphics card). So WebGL is asked for whatever the machine, and a failure says whether the window had it.
+        ff, p = firefox(True, prefs={'webgl.force-enabled': True})
         try:
             loaded(p)
+            faults = []; p.on('pageerror', lambda e: faults.append(str(e)[:200]))
             p.goto('about:blank'); p.goto(NOTOOLS if PROVE else base + '#chora')
-            until(p, "window.__chora && ['error', 'ready', 'loaded'].includes(window.__chora.phase)", 60)
+            webgl = p.evaluate("() => { const c = document.createElement('canvas'); return !!(c.getContext('webgl2') || c.getContext('webgl')); }")
+            try: until(p, "window.__chora && ['error', 'ready', 'loaded'].includes(window.__chora.phase)", 60)
+            except Exception as e: return False, {'WebGL in this window': webgl, 'page errors': faults, 'waited': str(e)[:300]}
             got = p.evaluate("() => ({ phase: window.__chora.phase, error: window.__chora.error || null, says: document.getElementById('chora-phase').textContent })")
+            got['WebGL in this window'] = webgl
         finally: ff.close()
         return got['phase'] == 'error' and 'GetDirectory' in (got['error'] or '') and got['says'] == NO_STORAGE_WORDS, got
     attempt('Page shell: Chora in a Firefox private window says the same plain words of the refusal', chora_private)
@@ -11423,7 +11430,7 @@ def trace_workflow_checks(pw, url, tmp):
         t = track(); r['begun'] = t
         return (s.get('canary') == 'enforced' and asked_now == ['will-identify', 'will-publish', 'will-mint'] and not unplanned['follow'] and 'base address' in unplanned['verdict']
                 and unplanned['help'].startswith('Needed: every place you trace is given its address under it')
-                and planned == ['trace', 'check', 'lookup', 'review', 'apply', 'again', 'compare', 'out'] and len(before) == 1 and 'cap is 5,000 requests a day per token' in before[0]
+                and planned == ['trace', 'check', 'lookup', 'review', 'apply', 'again', 'compare', 'out'] and len(before) == 2 and 'cap is 5,000 requests a day per token' in before[0] and 'needs an account with the World Historical Gazetteer' in before[1]
                 and list(t['steps']) == planned and t['steps']['trace'] == 'current' and t['status'] != 'pending' and 'Not started' not in t['message']
                 and page.input_value('#base') == TRACE_BASE and t['done']), {
             'asked': asked_now, 'unplanned': unplanned, 'planned': planned, 'before': before, 'tracker': t, 'Options base': page.input_value('#base')}
