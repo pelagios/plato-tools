@@ -94,7 +94,7 @@ the commit of PLATO the tools are checked against is pinned in `package.json`.
   table, coordinates, universe and value; the Data Cube check adds P-1 to
   P-4 and IC-19) on the page and the command line (plan #34 item 11, PLATO
   #14); the figures reader, by which a table of figures, long or wide, is
-  read as PLATO figures through Hermes's mapping with four more roles and
+  read as PLATO figures through Hermes's mapping with five more roles and
   the table's description, `--columns` printing the mapping with it.
 - **Places from a text**: the engine's pure parts for finding
   place names in a text with a language model, with the prices checked
@@ -119,7 +119,12 @@ the commit of PLATO the tools are checked against is pinned in `package.json`.
 
 ### Changed
 
-- The vendored PLATO is 0.9.0-alpha.2 (commit 8494756): five succession
+- The example files' README points at Chora on the main page (`#chora`, not the removed
+  `chora.html`) and says Chora opens IIIF maps; the zip is built reproducibly from
+  `examples/try-files/` by `scripts/build-try-zip.py`. The status line reads "Experimental, under
+  development; one workflow, Map your data, is in beta testing", and the README names the browsers
+  tested.
+- The vendored PLATO is 0.9.0-alpha.2 (commit e10406d): five succession
   relation types (`SucceededBy`, `MergedInto`, `AbsorbedBy`, `SplitInto`,
   `TransferredTo`) accepted by the table definitions, relation types and
   certainty levels also SKOS concepts, free-text ranges `rdfs:Literal`. Before

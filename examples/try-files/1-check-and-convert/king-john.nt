@@ -1,0 +1,1001 @@
+<https://whgazetteer.org/example/king-john/> <http://purl.org/dc/terms/title> "King John's itinerary, June and July 1215" .
+<https://whgazetteer.org/example/king-john/> <http://purl.org/dc/terms/description> "King John's movements from 1 June to 17 July 1215, as T. D. Hardy traced them (1835): a worked example of PLATO's itinerary pattern. Locations and identities from Wikidata." .
+<https://whgazetteer.org/example/king-john/> <http://purl.org/dc/terms/creator> <https://orcid.org/0000-0003-3060-0181> .
+<https://whgazetteer.org/example/king-john/> <http://purl.org/dc/terms/license> <https://creativecommons.org/licenses/by/4.0/> .
+<https://whgazetteer.org/example/king-john/> <https://w3id.org/plato#gazetteer_status> "draft" .
+<https://whgazetteer.org/example/king-john/> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Gazetteer> .
+<https://whgazetteer.org/example/king-john/> <http://www.w3.org/ns/dcat#keyword> "itineraries" .
+<https://whgazetteer.org/example/king-john/> <http://www.w3.org/ns/dcat#keyword> "King John" .
+<https://whgazetteer.org/example/king-john/> <http://www.w3.org/ns/dcat#keyword> "Magna Carta" .
+<https://whgazetteer.org/example/king-john/> <http://purl.org/dc/terms/spatial> <http://www.wikidata.org/entity/Q21> .
+<https://whgazetteer.org/example/king-john/> <http://purl.org/dc/terms/temporal> _:r1b0 .
+_:r1b0 <http://www.w3.org/ns/dcat#startDate> "1215-06-01" .
+_:r1b0 <http://www.w3.org/ns/dcat#endDate> "1215-07-17" .
+<https://whgazetteer.org/example/king-john/> <http://rdfs.org/ns/void#uriSpace> "https://whgazetteer.org/example/king-john/" .
+<https://whgazetteer.org/example/king-john/> <https://w3id.org/plato#contains_entity> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+<https://whgazetteer.org/example/king-john/place/itinerary-1215> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+<https://whgazetteer.org/example/king-john/place/itinerary-1215> <http://www.w3.org/2000/01/rdf-schema#label> "King John's itinerary, 1 June to 17 July 1215" .
+<https://whgazetteer.org/example/king-john/place/itinerary-1215> <https://w3id.org/plato#entity_identifier> "itinerary-1215" .
+_:r2b0 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r2b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r2b0 <https://w3id.org/plato#attests_timespan> _:r2b1 .
+_:r2b1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r2b1 <https://w3id.org/plato#source_label> "1215" .
+_:r2b1 <https://w3id.org/plato#start_earliest> "1215-06-01"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r2b1 <https://w3id.org/plato#end_latest> "1215-07-17"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r2b0 <https://w3id.org/plato#has_citation> _:r2b2 .
+_:r2b2 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r2b2 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+<https://whgazetteer.org/example/king-john/source/hardy-1835> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Authority> .
+<https://whgazetteer.org/example/king-john/source/hardy-1835> <https://w3id.org/plato#authority_title> "A Description of the Patent Rolls in the Tower of London; to which is added an Itinerary of King John" .
+<https://whgazetteer.org/example/king-john/source/hardy-1835> <https://w3id.org/plato#bibliographic_string> "T. D. Hardy, A Description of the Patent Rolls in the Tower of London; to which is added an Itinerary of King John, with prefatory observations (London: Record Commission, 1835)" .
+<https://whgazetteer.org/example/king-john/source/hardy-1835> <https://w3id.org/plato#authority_uri> "https://archive.org/details/descriptionofpat00hard"^^<http://www.w3.org/2001/XMLSchema#anyURI> .
+<https://whgazetteer.org/example/king-john/source/hardy-1835> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Source> .
+<https://whgazetteer.org/example/king-john/source/hardy-1835> <https://w3id.org/plato#source_timespan> _:r2b3 .
+_:r2b3 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r2b3 <https://w3id.org/plato#source_label> "1835" .
+_:r2b3 <https://w3id.org/plato#start_earliest> "1835"^^<http://www.w3.org/2001/XMLSchema#gYear> .
+_:r2b3 <https://w3id.org/plato#end_latest> "1835"^^<http://www.w3.org/2001/XMLSchema#gYear> .
+<https://whgazetteer.org/example/king-john/source/hardy-1835> <https://w3id.org/plato#derived_from> <https://whgazetteer.org/example/king-john/source/chancery-rolls> .
+<https://whgazetteer.org/example/king-john/source/chancery-rolls> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Source> .
+<https://whgazetteer.org/example/king-john/source/chancery-rolls> <https://w3id.org/plato#authority_title> "Enrolled royal letters of 1215" .
+<https://whgazetteer.org/example/king-john/source/chancery-rolls> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Authority> .
+<https://whgazetteer.org/example/king-john/source/chancery-rolls> <https://w3id.org/plato#bibliographic_string> "The attestations of King John's letters of 1215, enrolled on the Chancery rolls, from which Hardy traced the King's movements" .
+<https://whgazetteer.org/example/king-john/source/chancery-rolls> <https://w3id.org/plato#source_timespan> _:r2b4 .
+_:r2b4 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r2b4 <https://w3id.org/plato#source_label> "1215" .
+_:r2b4 <https://w3id.org/plato#start_earliest> "1215"^^<http://www.w3.org/2001/XMLSchema#gYear> .
+_:r2b4 <https://w3id.org/plato#end_latest> "1215"^^<http://www.w3.org/2001/XMLSchema#gYear> .
+<https://whgazetteer.org/example/king-john/source/hardy-1835> <http://purl.org/dc/terms/license> <https://creativecommons.org/publicdomain/mark/1.0/> .
+_:r2b2 <https://w3id.org/plato#locator> "pp. 108-109" .
+_:r2b2 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r2b0 <https://w3id.org/plato#notes> "Dated to the span Hardy's pages cover, which is the evidence for the type. It is not the journey's overall span entered as a fact: a platform works that out from the stops." .
+_:r2b0 <https://w3id.org/plato#attests_type> _:r2b5 .
+_:r2b5 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Type> .
+_:r2b5 <https://w3id.org/plato#type_identifier> "https://w3id.org/plato#TypeItinerary"^^<http://www.w3.org/2001/XMLSchema#anyURI> .
+_:r2b5 <https://w3id.org/plato#type_label> "itinerary" .
+<https://whgazetteer.org/example/king-john/place/itinerary-1215> <https://w3id.org/plato#ccodes> "GB" .
+<https://whgazetteer.org/example/king-john/> <https://w3id.org/plato#contains_entity> <https://whgazetteer.org/example/king-john/place/windsor> .
+<https://whgazetteer.org/example/king-john/place/windsor> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+<https://whgazetteer.org/example/king-john/place/windsor> <http://www.w3.org/2000/01/rdf-schema#label> "Windsor" .
+<https://whgazetteer.org/example/king-john/place/windsor> <https://w3id.org/plato#entity_identifier> "windsor" .
+_:r3b0 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/windsor> .
+_:r3b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r3b0 <https://w3id.org/plato#attests_timespan> _:r3b1 .
+_:r3b1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r3b1 <https://w3id.org/plato#source_label> "undated" .
+_:r3b0 <https://w3id.org/plato#has_citation> _:r3b2 .
+_:r3b2 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r3b2 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/wikidata> .
+<https://whgazetteer.org/example/king-john/source/wikidata> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Authority> .
+<https://whgazetteer.org/example/king-john/source/wikidata> <https://w3id.org/plato#authority_title> "Wikidata" .
+<https://whgazetteer.org/example/king-john/source/wikidata> <https://w3id.org/plato#bibliographic_string> "Wikidata, https://www.wikidata.org/ (consulted 29 September 2026)" .
+<https://whgazetteer.org/example/king-john/source/wikidata> <https://w3id.org/plato#authority_uri> "https://www.wikidata.org/"^^<http://www.w3.org/2001/XMLSchema#anyURI> .
+<https://whgazetteer.org/example/king-john/source/wikidata> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Source> .
+<https://whgazetteer.org/example/king-john/source/wikidata> <https://w3id.org/plato#source_timespan> _:r3b3 .
+_:r3b3 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r3b3 <https://w3id.org/plato#source_label> "2026" .
+_:r3b3 <https://w3id.org/plato#start_earliest> "2026"^^<http://www.w3.org/2001/XMLSchema#gYear> .
+_:r3b3 <https://w3id.org/plato#end_latest> "2026"^^<http://www.w3.org/2001/XMLSchema#gYear> .
+<https://whgazetteer.org/example/king-john/source/wikidata> <http://purl.org/dc/terms/license> <https://creativecommons.org/publicdomain/zero/1.0/> .
+_:r3b2 <https://w3id.org/plato#locator> "Q464955" .
+_:r3b2 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsDataSource> .
+_:r3b0 <https://w3id.org/plato#attests_geometry> _:r3b4 .
+_:r3b4 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Geometry> .
+_:r3b4 <https://w3id.org/plato#repr_point> "POINT(-0.6 51.48333)"^^<http://www.opengis.net/ont/geosparql#wktLiteral> .
+_:r3b4 <https://w3id.org/plato#geo_json> "{\"coordinates\":[-0.6,51.48333],\"type\":\"Point\"}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .
+_:r3b4 <https://w3id.org/plato#geometry_role> <https://w3id.org/plato#RepresentativePoint> .
+_:r3b5 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/windsor> .
+_:r3b5 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r3b5 <https://w3id.org/plato#attests_timespan> _:r3b6 .
+_:r3b6 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r3b6 <https://w3id.org/plato#source_label> "from the 1st to the 3d of June 1215" .
+_:r3b6 <https://w3id.org/plato#start_earliest> "1215-06-01"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r3b6 <https://w3id.org/plato#end_latest> "1215-06-03"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r3b5 <https://w3id.org/plato#has_citation> _:r3b7 .
+_:r3b7 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r3b7 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r3b7 <https://w3id.org/plato#locator> "p. 108" .
+_:r3b7 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r3b5 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r3b5 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+<https://w3id.org/plato#MemberOf> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#RelationType> .
+_:r3b5 <https://w3id.org/plato#sequence> "1"^^<http://www.w3.org/2001/XMLSchema#integer> .
+_:r3b8 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/windsor> .
+_:r3b8 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r3b8 <https://w3id.org/plato#attests_timespan> _:r3b9 .
+_:r3b9 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r3b9 <https://w3id.org/plato#source_label> "until the 15th" .
+_:r3b9 <https://w3id.org/plato#start_earliest> "1215-06-09"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r3b9 <https://w3id.org/plato#end_latest> "1215-06-15"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r3b8 <https://w3id.org/plato#has_citation> _:r3b10 .
+_:r3b10 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r3b10 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r3b10 <https://w3id.org/plato#locator> "p. 108" .
+_:r3b10 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r3b8 <https://w3id.org/plato#notes> "\"whence he returned to Windsor, and continued there until the 15th\"." .
+_:r3b8 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r3b8 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r3b8 <https://w3id.org/plato#sequence> "6"^^<http://www.w3.org/2001/XMLSchema#integer> .
+_:r3b11 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/windsor> .
+_:r3b11 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r3b11 <https://w3id.org/plato#attests_timespan> _:r3b12 .
+_:r3b12 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r3b12 <https://w3id.org/plato#source_label> "until the 18th of June" .
+_:r3b12 <https://w3id.org/plato#start_earliest> "1215-06-15"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r3b12 <https://w3id.org/plato#end_latest> "1215-06-18"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r3b11 <https://w3id.org/plato#has_citation> _:r3b13 .
+_:r3b13 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r3b13 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r3b13 <https://w3id.org/plato#locator> "p. 108" .
+_:r3b13 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r3b11 <https://w3id.org/plato#notes> "\"The King then returned to Windsor, and remained there until the 18th of June\"." .
+_:r3b11 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r3b11 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r3b11 <https://w3id.org/plato#sequence> "8"^^<http://www.w3.org/2001/XMLSchema#integer> .
+_:r3b14 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/windsor> .
+_:r3b14 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r3b14 <https://w3id.org/plato#attests_timespan> _:r3b15 .
+_:r3b15 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r3b15 <https://w3id.org/plato#source_label> "did not finally leave Windsor and its vicinity before the 26th" .
+_:r3b15 <https://w3id.org/plato#start_earliest> "1215-06-18"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r3b15 <https://w3id.org/plato#end_latest> "1215-06-26"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r3b14 <https://w3id.org/plato#has_citation> _:r3b16 .
+_:r3b16 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r3b16 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r3b16 <https://w3id.org/plato#locator> "p. 108" .
+_:r3b16 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r3b14 <https://w3id.org/plato#notes> "From the 18th to the 23rd he was \"every day both at Windsor and at Runnemead\"; see the Runnymede row without a sequence." .
+_:r3b14 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r3b14 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r3b14 <https://w3id.org/plato#sequence> "9"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<https://whgazetteer.org/example/king-john/place/windsor> <https://w3id.org/plato#ccodes> "GB" .
+_:r3b17 <https://w3id.org/plato#identity_subject> <https://whgazetteer.org/example/king-john/place/windsor> .
+_:r3b17 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#IdentityRelation> .
+_:r3b17 <https://w3id.org/plato#identity_object> <http://www.wikidata.org/entity/Q464955> .
+<http://www.wikidata.org/entity/Q464955> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+_:r3b17 <https://w3id.org/plato#identity_type> "exactMatch" .
+_:r3b17 <https://w3id.org/plato#identity_basis> "The place Hardy names" .
+_:r3b17 <https://w3id.org/plato#identity_sourced_by> <https://whgazetteer.org/example/king-john/source/wikidata> .
+<https://whgazetteer.org/example/king-john/> <https://w3id.org/plato#contains_entity> <https://whgazetteer.org/example/king-john/place/odiham> .
+<https://whgazetteer.org/example/king-john/place/odiham> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+<https://whgazetteer.org/example/king-john/place/odiham> <http://www.w3.org/2000/01/rdf-schema#label> "Odiham" .
+<https://whgazetteer.org/example/king-john/place/odiham> <https://w3id.org/plato#entity_identifier> "odiham" .
+_:r4b0 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/odiham> .
+_:r4b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r4b0 <https://w3id.org/plato#attests_timespan> _:r4b1 .
+_:r4b1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r4b1 <https://w3id.org/plato#source_label> "undated" .
+_:r4b0 <https://w3id.org/plato#has_citation> _:r4b2 .
+_:r4b2 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r4b2 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/wikidata> .
+_:r4b2 <https://w3id.org/plato#locator> "Q928816" .
+_:r4b2 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsDataSource> .
+_:r4b0 <https://w3id.org/plato#attests_geometry> _:r4b3 .
+_:r4b3 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Geometry> .
+_:r4b3 <https://w3id.org/plato#repr_point> "POINT(-0.94777 51.24566)"^^<http://www.opengis.net/ont/geosparql#wktLiteral> .
+_:r4b3 <https://w3id.org/plato#geo_json> "{\"coordinates\":[-0.94777,51.24566],\"type\":\"Point\"}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .
+_:r4b3 <https://w3id.org/plato#geometry_role> <https://w3id.org/plato#RepresentativePoint> .
+_:r4b4 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/odiham> .
+_:r4b4 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r4b4 <https://w3id.org/plato#attests_timespan> _:r4b5 .
+_:r4b5 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r4b5 <https://w3id.org/plato#source_label> "undated" .
+_:r4b5 <https://w3id.org/plato#start_earliest> "1215-06-03"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r4b5 <https://w3id.org/plato#end_latest> "1215-06-08"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r4b4 <https://w3id.org/plato#has_citation> _:r4b6 .
+_:r4b6 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r4b6 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r4b6 <https://w3id.org/plato#locator> "p. 108" .
+_:r4b6 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r4b4 <https://w3id.org/plato#notes> "\"from which place he can be traced, by his attestations, to Odiham\". Hardy gives no date for this stop; from and to are those of the stops either side of it." .
+_:r4b4 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r4b4 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r4b4 <https://w3id.org/plato#sequence> "2"^^<http://www.w3.org/2001/XMLSchema#integer> .
+_:r4b7 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/odiham> .
+_:r4b7 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r4b7 <https://w3id.org/plato#attests_timespan> _:r4b8 .
+_:r4b8 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r4b8 <https://w3id.org/plato#source_label> "the 9th" .
+_:r4b8 <https://w3id.org/plato#start_earliest> "1215-06-09"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r4b8 <https://w3id.org/plato#end_latest> "1215-06-09"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r4b7 <https://w3id.org/plato#has_citation> _:r4b9 .
+_:r4b9 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r4b9 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r4b9 <https://w3id.org/plato#locator> "p. 108" .
+_:r4b9 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r4b7 <https://w3id.org/plato#notes> "\"he was again at Odiham on the 9th\"." .
+_:r4b7 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r4b7 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r4b7 <https://w3id.org/plato#sequence> "5"^^<http://www.w3.org/2001/XMLSchema#integer> .
+_:r4b10 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/odiham> .
+_:r4b10 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r4b10 <https://w3id.org/plato#attests_timespan> _:r4b11 .
+_:r4b11 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r4b11 <https://w3id.org/plato#source_label> "undated" .
+_:r4b11 <https://w3id.org/plato#start_earliest> "1215-06-26"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r4b11 <https://w3id.org/plato#end_latest> "1215-06-30"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r4b10 <https://w3id.org/plato#has_citation> _:r4b12 .
+_:r4b12 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r4b12 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r4b12 <https://w3id.org/plato#locator> "p. 108" .
+_:r4b12 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r4b10 <https://w3id.org/plato#notes> "\"John then proceeded through Odiham to Winchester\". Hardy gives no date for this stop; from and to are those of the stops either side of it." .
+_:r4b10 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r4b10 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r4b10 <https://w3id.org/plato#sequence> "10"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<https://whgazetteer.org/example/king-john/place/odiham> <https://w3id.org/plato#ccodes> "GB" .
+_:r4b13 <https://w3id.org/plato#identity_subject> <https://whgazetteer.org/example/king-john/place/odiham> .
+_:r4b13 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#IdentityRelation> .
+_:r4b13 <https://w3id.org/plato#identity_object> <http://www.wikidata.org/entity/Q928816> .
+<http://www.wikidata.org/entity/Q928816> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+_:r4b13 <https://w3id.org/plato#identity_type> "exactMatch" .
+_:r4b13 <https://w3id.org/plato#identity_basis> "The place Hardy names" .
+_:r4b13 <https://w3id.org/plato#identity_sourced_by> <https://whgazetteer.org/example/king-john/source/wikidata> .
+<https://whgazetteer.org/example/king-john/> <https://w3id.org/plato#contains_entity> <https://whgazetteer.org/example/king-john/place/winchester> .
+<https://whgazetteer.org/example/king-john/place/winchester> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+<https://whgazetteer.org/example/king-john/place/winchester> <http://www.w3.org/2000/01/rdf-schema#label> "Winchester" .
+<https://whgazetteer.org/example/king-john/place/winchester> <https://w3id.org/plato#entity_identifier> "winchester" .
+_:r5b0 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/winchester> .
+_:r5b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r5b0 <https://w3id.org/plato#attests_timespan> _:r5b1 .
+_:r5b1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r5b1 <https://w3id.org/plato#source_label> "undated" .
+_:r5b0 <https://w3id.org/plato#has_citation> _:r5b2 .
+_:r5b2 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r5b2 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/wikidata> .
+_:r5b2 <https://w3id.org/plato#locator> "Q172157" .
+_:r5b2 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsDataSource> .
+_:r5b0 <https://w3id.org/plato#attests_geometry> _:r5b3 .
+_:r5b3 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Geometry> .
+_:r5b3 <https://w3id.org/plato#repr_point> "POINT(-1.30861 51.06333)"^^<http://www.opengis.net/ont/geosparql#wktLiteral> .
+_:r5b3 <https://w3id.org/plato#geo_json> "{\"coordinates\":[-1.30861,51.06333],\"type\":\"Point\"}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .
+_:r5b3 <https://w3id.org/plato#geometry_role> <https://w3id.org/plato#RepresentativePoint> .
+_:r5b4 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/winchester> .
+_:r5b4 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r5b4 <https://w3id.org/plato#attests_timespan> _:r5b5 .
+_:r5b5 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r5b5 <https://w3id.org/plato#source_label> "until the 8th" .
+_:r5b5 <https://w3id.org/plato#start_earliest> "1215-06-03"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r5b5 <https://w3id.org/plato#end_latest> "1215-06-08"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r5b4 <https://w3id.org/plato#has_citation> _:r5b6 .
+_:r5b6 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r5b6 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r5b6 <https://w3id.org/plato#locator> "p. 108" .
+_:r5b6 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r5b4 <https://w3id.org/plato#notes> "\"where he remained until the 8th\"." .
+_:r5b4 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r5b4 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r5b4 <https://w3id.org/plato#sequence> "3"^^<http://www.w3.org/2001/XMLSchema#integer> .
+_:r5b7 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/winchester> .
+_:r5b7 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r5b7 <https://w3id.org/plato#attests_timespan> _:r5b8 .
+_:r5b8 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r5b8 <https://w3id.org/plato#source_label> "until the end of June" .
+_:r5b8 <https://w3id.org/plato#start_earliest> "1215-06-26"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r5b8 <https://w3id.org/plato#end_latest> "1215-06-30"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r5b7 <https://w3id.org/plato#has_citation> _:r5b9 .
+_:r5b9 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r5b9 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r5b9 <https://w3id.org/plato#locator> "pp. 108-109" .
+_:r5b9 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r5b7 <https://w3id.org/plato#notes> "\"and continued in that city until the end of June\"." .
+_:r5b7 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r5b7 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r5b7 <https://w3id.org/plato#sequence> "11"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<https://whgazetteer.org/example/king-john/place/winchester> <https://w3id.org/plato#ccodes> "GB" .
+_:r5b10 <https://w3id.org/plato#identity_subject> <https://whgazetteer.org/example/king-john/place/winchester> .
+_:r5b10 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#IdentityRelation> .
+_:r5b10 <https://w3id.org/plato#identity_object> <http://www.wikidata.org/entity/Q172157> .
+<http://www.wikidata.org/entity/Q172157> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+_:r5b10 <https://w3id.org/plato#identity_type> "exactMatch" .
+_:r5b10 <https://w3id.org/plato#identity_basis> "The place Hardy names" .
+_:r5b10 <https://w3id.org/plato#identity_sourced_by> <https://whgazetteer.org/example/king-john/source/wikidata> .
+<https://whgazetteer.org/example/king-john/> <https://w3id.org/plato#contains_entity> <https://whgazetteer.org/example/king-john/place/merton> .
+<https://whgazetteer.org/example/king-john/place/merton> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+<https://whgazetteer.org/example/king-john/place/merton> <http://www.w3.org/2000/01/rdf-schema#label> "Merton" .
+<https://whgazetteer.org/example/king-john/place/merton> <https://w3id.org/plato#entity_identifier> "merton" .
+_:r6b0 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/merton> .
+_:r6b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r6b0 <https://w3id.org/plato#attests_timespan> _:r6b1 .
+_:r6b1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r6b1 <https://w3id.org/plato#source_label> "undated" .
+_:r6b1 <https://w3id.org/plato#start_earliest> "1215-06-08"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r6b1 <https://w3id.org/plato#end_latest> "1215-06-09"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r6b0 <https://w3id.org/plato#has_citation> _:r6b2 .
+_:r6b2 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r6b2 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r6b2 <https://w3id.org/plato#locator> "p. 108" .
+_:r6b2 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r6b0 <https://w3id.org/plato#notes> "\"From Winchester he went to Merton\". Hardy does not say which Merton, so it is not located here. Hardy gives no date for this stop; from and to are those of the stops either side of it." .
+_:r6b0 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r6b0 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r6b0 <https://w3id.org/plato#sequence> "4"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<https://whgazetteer.org/example/king-john/place/merton> <https://w3id.org/plato#ccodes> "GB" .
+<https://whgazetteer.org/example/king-john/> <https://w3id.org/plato#contains_entity> <https://whgazetteer.org/example/king-john/place/runnymede> .
+<https://whgazetteer.org/example/king-john/place/runnymede> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+<https://whgazetteer.org/example/king-john/place/runnymede> <http://www.w3.org/2000/01/rdf-schema#label> "Runnymede" .
+<https://whgazetteer.org/example/king-john/place/runnymede> <https://w3id.org/plato#entity_identifier> "runnymede" .
+_:r7b0 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/runnymede> .
+_:r7b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r7b0 <https://w3id.org/plato#attests_timespan> _:r7b1 .
+_:r7b1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r7b1 <https://w3id.org/plato#source_label> "1835" .
+_:r7b1 <https://w3id.org/plato#start_earliest> "1835"^^<http://www.w3.org/2001/XMLSchema#gYear> .
+_:r7b1 <https://w3id.org/plato#end_latest> "1835"^^<http://www.w3.org/2001/XMLSchema#gYear> .
+_:r7b0 <https://w3id.org/plato#has_citation> _:r7b2 .
+_:r7b2 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r7b2 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r7b2 <https://w3id.org/plato#locator> "p. 108" .
+_:r7b2 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r7b0 <https://w3id.org/plato#notes> "Hardy's spelling." .
+_:r7b0 <https://w3id.org/plato#attests_name> _:r7b3 .
+_:r7b3 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Name> .
+_:r7b3 <https://w3id.org/plato#toponym> "Runnemead" .
+_:r7b3 <https://w3id.org/plato#language> "en" .
+_:r7b3 <https://w3id.org/plato#script> "Latn" .
+_:r7b0 <https://w3id.org/plato#form_status> <https://w3id.org/plato#Attested> .
+_:r7b4 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/runnymede> .
+_:r7b4 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r7b4 <https://w3id.org/plato#attests_timespan> _:r7b5 .
+_:r7b5 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r7b5 <https://w3id.org/plato#source_label> "undated" .
+_:r7b4 <https://w3id.org/plato#has_citation> _:r7b6 .
+_:r7b6 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r7b6 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/wikidata> .
+_:r7b6 <https://w3id.org/plato#locator> "Q1483542" .
+_:r7b6 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsDataSource> .
+_:r7b4 <https://w3id.org/plato#attests_geometry> _:r7b7 .
+_:r7b7 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Geometry> .
+_:r7b7 <https://w3id.org/plato#repr_point> "POINT(-0.56537 51.44451)"^^<http://www.opengis.net/ont/geosparql#wktLiteral> .
+_:r7b7 <https://w3id.org/plato#geo_json> "{\"coordinates\":[-0.56537,51.44451],\"type\":\"Point\"}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .
+_:r7b7 <https://w3id.org/plato#geometry_role> <https://w3id.org/plato#RepresentativePoint> .
+_:r7b8 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/runnymede> .
+_:r7b8 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r7b8 <https://w3id.org/plato#attests_timespan> _:r7b9 .
+_:r7b9 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r7b9 <https://w3id.org/plato#source_label> "the 15th" .
+_:r7b9 <https://w3id.org/plato#start_earliest> "1215-06-15"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r7b9 <https://w3id.org/plato#end_latest> "1215-06-15"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r7b8 <https://w3id.org/plato#has_citation> _:r7b10 .
+_:r7b10 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r7b10 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r7b10 <https://w3id.org/plato#locator> "p. 108" .
+_:r7b10 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r7b8 <https://w3id.org/plato#notes> "\"on that day he met the barons at Runnemead by appointment, and there sealed the great charter\"." .
+_:r7b8 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r7b8 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r7b8 <https://w3id.org/plato#sequence> "7"^^<http://www.w3.org/2001/XMLSchema#integer> .
+_:r7b11 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/runnymede> .
+_:r7b11 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r7b11 <https://w3id.org/plato#attests_timespan> _:r7b12 .
+_:r7b12 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r7b12 <https://w3id.org/plato#source_label> "from which time until the 23d" .
+_:r7b12 <https://w3id.org/plato#start_earliest> "1215-06-18"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r7b12 <https://w3id.org/plato#end_latest> "1215-06-23"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r7b11 <https://w3id.org/plato#has_citation> _:r7b13 .
+_:r7b13 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r7b13 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r7b13 <https://w3id.org/plato#locator> "p. 108" .
+_:r7b13 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r7b11 <https://w3id.org/plato#notes> "\"every day both at Windsor and at Runnemead\": no sequence, because the source puts neither before the other; the timespans say when." .
+_:r7b11 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r7b11 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+<https://whgazetteer.org/example/king-john/place/runnymede> <https://w3id.org/plato#ccodes> "GB" .
+_:r7b14 <https://w3id.org/plato#identity_subject> <https://whgazetteer.org/example/king-john/place/runnymede> .
+_:r7b14 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#IdentityRelation> .
+_:r7b14 <https://w3id.org/plato#identity_object> <http://www.wikidata.org/entity/Q1483542> .
+<http://www.wikidata.org/entity/Q1483542> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+_:r7b14 <https://w3id.org/plato#identity_type> "exactMatch" .
+_:r7b14 <https://w3id.org/plato#identity_basis> "The place Hardy names" .
+_:r7b14 <https://w3id.org/plato#identity_sourced_by> <https://whgazetteer.org/example/king-john/source/wikidata> .
+<https://whgazetteer.org/example/king-john/> <https://w3id.org/plato#contains_entity> <https://whgazetteer.org/example/king-john/place/marlborough> .
+<https://whgazetteer.org/example/king-john/place/marlborough> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+<https://whgazetteer.org/example/king-john/place/marlborough> <http://www.w3.org/2000/01/rdf-schema#label> "Marlborough" .
+<https://whgazetteer.org/example/king-john/place/marlborough> <https://w3id.org/plato#entity_identifier> "marlborough" .
+_:r8b0 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/marlborough> .
+_:r8b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r8b0 <https://w3id.org/plato#attests_timespan> _:r8b1 .
+_:r8b1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r8b1 <https://w3id.org/plato#source_label> "undated" .
+_:r8b0 <https://w3id.org/plato#has_citation> _:r8b2 .
+_:r8b2 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r8b2 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/wikidata> .
+_:r8b2 <https://w3id.org/plato#locator> "Q539528" .
+_:r8b2 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsDataSource> .
+_:r8b0 <https://w3id.org/plato#attests_geometry> _:r8b3 .
+_:r8b3 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Geometry> .
+_:r8b3 <https://w3id.org/plato#repr_point> "POINT(-1.7274 51.4212)"^^<http://www.opengis.net/ont/geosparql#wktLiteral> .
+_:r8b3 <https://w3id.org/plato#geo_json> "{\"coordinates\":[-1.7274,51.4212],\"type\":\"Point\"}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .
+_:r8b3 <https://w3id.org/plato#geometry_role> <https://w3id.org/plato#RepresentativePoint> .
+_:r8b4 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/marlborough> .
+_:r8b4 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r8b4 <https://w3id.org/plato#attests_timespan> _:r8b5 .
+_:r8b5 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r8b5 <https://w3id.org/plato#source_label> "the first four days of July" .
+_:r8b5 <https://w3id.org/plato#start_earliest> "1215-07-01"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r8b5 <https://w3id.org/plato#end_latest> "1215-07-04"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r8b5 <https://w3id.org/plato#duration> "P4D"^^<http://www.w3.org/2001/XMLSchema#duration> .
+_:r8b4 <https://w3id.org/plato#has_citation> _:r8b6 .
+_:r8b6 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r8b6 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r8b6 <https://w3id.org/plato#locator> "p. 109" .
+_:r8b6 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r8b4 <https://w3id.org/plato#notes> "\"The first four days of July he passed at Marlborough\": a length the source states, with its dates." .
+_:r8b4 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r8b4 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r8b4 <https://w3id.org/plato#sequence> "12"^^<http://www.w3.org/2001/XMLSchema#integer> .
+_:r8b7 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/marlborough> .
+_:r8b7 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r8b7 <https://w3id.org/plato#attests_timespan> _:r8b8 .
+_:r8b8 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r8b8 <https://w3id.org/plato#source_label> "the following day" .
+_:r8b8 <https://w3id.org/plato#start_earliest> "1215-07-08"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r8b8 <https://w3id.org/plato#end_latest> "1215-07-08"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r8b7 <https://w3id.org/plato#has_citation> _:r8b9 .
+_:r8b9 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r8b9 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r8b9 <https://w3id.org/plato#locator> "p. 109" .
+_:r8b9 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r8b7 <https://w3id.org/plato#notes> "\"and returned to Marlborough on the following day\"." .
+_:r8b7 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r8b7 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r8b7 <https://w3id.org/plato#sequence> "17"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<https://whgazetteer.org/example/king-john/place/marlborough> <https://w3id.org/plato#ccodes> "GB" .
+_:r8b10 <https://w3id.org/plato#identity_subject> <https://whgazetteer.org/example/king-john/place/marlborough> .
+_:r8b10 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#IdentityRelation> .
+_:r8b10 <https://w3id.org/plato#identity_object> <http://www.wikidata.org/entity/Q539528> .
+<http://www.wikidata.org/entity/Q539528> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+_:r8b10 <https://w3id.org/plato#identity_type> "exactMatch" .
+_:r8b10 <https://w3id.org/plato#identity_basis> "The place Hardy names" .
+_:r8b10 <https://w3id.org/plato#identity_sourced_by> <https://whgazetteer.org/example/king-john/source/wikidata> .
+<https://whgazetteer.org/example/king-john/> <https://w3id.org/plato#contains_entity> <https://whgazetteer.org/example/king-john/place/devizes> .
+<https://whgazetteer.org/example/king-john/place/devizes> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+<https://whgazetteer.org/example/king-john/place/devizes> <http://www.w3.org/2000/01/rdf-schema#label> "Devizes" .
+<https://whgazetteer.org/example/king-john/place/devizes> <https://w3id.org/plato#entity_identifier> "devizes" .
+_:r9b0 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/devizes> .
+_:r9b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r9b0 <https://w3id.org/plato#attests_timespan> _:r9b1 .
+_:r9b1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r9b1 <https://w3id.org/plato#source_label> "undated" .
+_:r9b0 <https://w3id.org/plato#has_citation> _:r9b2 .
+_:r9b2 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r9b2 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/wikidata> .
+_:r9b2 <https://w3id.org/plato#locator> "Q1026699" .
+_:r9b2 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsDataSource> .
+_:r9b0 <https://w3id.org/plato#attests_geometry> _:r9b3 .
+_:r9b3 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Geometry> .
+_:r9b3 <https://w3id.org/plato#repr_point> "POINT(-1.99583 51.35278)"^^<http://www.opengis.net/ont/geosparql#wktLiteral> .
+_:r9b3 <https://w3id.org/plato#geo_json> "{\"coordinates\":[-1.99583,51.35278],\"type\":\"Point\"}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .
+_:r9b3 <https://w3id.org/plato#geometry_role> <https://w3id.org/plato#RepresentativePoint> .
+_:r9b4 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/devizes> .
+_:r9b4 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r9b4 <https://w3id.org/plato#attests_timespan> _:r9b5 .
+_:r9b5 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r9b5 <https://w3id.org/plato#source_label> "undated" .
+_:r9b5 <https://w3id.org/plato#start_earliest> "1215-07-04"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r9b5 <https://w3id.org/plato#end_latest> "1215-07-07"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r9b4 <https://w3id.org/plato#has_citation> _:r9b6 .
+_:r9b6 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r9b6 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r9b6 <https://w3id.org/plato#locator> "p. 109" .
+_:r9b6 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r9b4 <https://w3id.org/plato#notes> "\"from which place he went to Devizes, Bradenstoke, and Calne\". Hardy gives no date for this stop; from and to are those of the stops either side of it." .
+_:r9b4 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r9b4 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r9b4 <https://w3id.org/plato#sequence> "13"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<https://whgazetteer.org/example/king-john/place/devizes> <https://w3id.org/plato#ccodes> "GB" .
+_:r9b7 <https://w3id.org/plato#identity_subject> <https://whgazetteer.org/example/king-john/place/devizes> .
+_:r9b7 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#IdentityRelation> .
+_:r9b7 <https://w3id.org/plato#identity_object> <http://www.wikidata.org/entity/Q1026699> .
+<http://www.wikidata.org/entity/Q1026699> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+_:r9b7 <https://w3id.org/plato#identity_type> "exactMatch" .
+_:r9b7 <https://w3id.org/plato#identity_basis> "The place Hardy names" .
+_:r9b7 <https://w3id.org/plato#identity_sourced_by> <https://whgazetteer.org/example/king-john/source/wikidata> .
+<https://whgazetteer.org/example/king-john/> <https://w3id.org/plato#contains_entity> <https://whgazetteer.org/example/king-john/place/bradenstoke> .
+<https://whgazetteer.org/example/king-john/place/bradenstoke> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+<https://whgazetteer.org/example/king-john/place/bradenstoke> <http://www.w3.org/2000/01/rdf-schema#label> "Bradenstoke" .
+<https://whgazetteer.org/example/king-john/place/bradenstoke> <https://w3id.org/plato#entity_identifier> "bradenstoke" .
+_:r10b0 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/bradenstoke> .
+_:r10b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r10b0 <https://w3id.org/plato#attests_timespan> _:r10b1 .
+_:r10b1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r10b1 <https://w3id.org/plato#source_label> "undated" .
+_:r10b0 <https://w3id.org/plato#has_citation> _:r10b2 .
+_:r10b2 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r10b2 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/wikidata> .
+_:r10b2 <https://w3id.org/plato#locator> "Q4954492" .
+_:r10b2 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsDataSource> .
+_:r10b0 <https://w3id.org/plato#attests_geometry> _:r10b3 .
+_:r10b3 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Geometry> .
+_:r10b3 <https://w3id.org/plato#repr_point> "POINT(-2 51.51)"^^<http://www.opengis.net/ont/geosparql#wktLiteral> .
+_:r10b3 <https://w3id.org/plato#geo_json> "{\"coordinates\":[-2,51.51],\"type\":\"Point\"}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .
+_:r10b3 <https://w3id.org/plato#geometry_role> <https://w3id.org/plato#RepresentativePoint> .
+_:r10b4 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/bradenstoke> .
+_:r10b4 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r10b4 <https://w3id.org/plato#attests_timespan> _:r10b5 .
+_:r10b5 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r10b5 <https://w3id.org/plato#source_label> "undated" .
+_:r10b5 <https://w3id.org/plato#start_earliest> "1215-07-04"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r10b5 <https://w3id.org/plato#end_latest> "1215-07-07"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r10b4 <https://w3id.org/plato#has_citation> _:r10b6 .
+_:r10b6 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r10b6 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r10b6 <https://w3id.org/plato#locator> "p. 109" .
+_:r10b6 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r10b4 <https://w3id.org/plato#notes> "Hardy gives no date for this stop; from and to are those of the stops either side of it." .
+_:r10b4 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r10b4 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r10b4 <https://w3id.org/plato#sequence> "14"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<https://whgazetteer.org/example/king-john/place/bradenstoke> <https://w3id.org/plato#ccodes> "GB" .
+_:r10b7 <https://w3id.org/plato#identity_subject> <https://whgazetteer.org/example/king-john/place/bradenstoke> .
+_:r10b7 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#IdentityRelation> .
+_:r10b7 <https://w3id.org/plato#identity_object> <http://www.wikidata.org/entity/Q4954492> .
+<http://www.wikidata.org/entity/Q4954492> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+_:r10b7 <https://w3id.org/plato#identity_type> "exactMatch" .
+_:r10b7 <https://w3id.org/plato#identity_basis> "The place Hardy names" .
+_:r10b7 <https://w3id.org/plato#identity_sourced_by> <https://whgazetteer.org/example/king-john/source/wikidata> .
+<https://whgazetteer.org/example/king-john/> <https://w3id.org/plato#contains_entity> <https://whgazetteer.org/example/king-john/place/calne> .
+<https://whgazetteer.org/example/king-john/place/calne> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+<https://whgazetteer.org/example/king-john/place/calne> <http://www.w3.org/2000/01/rdf-schema#label> "Calne" .
+<https://whgazetteer.org/example/king-john/place/calne> <https://w3id.org/plato#entity_identifier> "calne" .
+_:r11b0 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/calne> .
+_:r11b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r11b0 <https://w3id.org/plato#attests_timespan> _:r11b1 .
+_:r11b1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r11b1 <https://w3id.org/plato#source_label> "undated" .
+_:r11b0 <https://w3id.org/plato#has_citation> _:r11b2 .
+_:r11b2 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r11b2 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/wikidata> .
+_:r11b2 <https://w3id.org/plato#locator> "Q1235307" .
+_:r11b2 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsDataSource> .
+_:r11b0 <https://w3id.org/plato#attests_geometry> _:r11b3 .
+_:r11b3 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Geometry> .
+_:r11b3 <https://w3id.org/plato#repr_point> "POINT(-2.00427 51.4353)"^^<http://www.opengis.net/ont/geosparql#wktLiteral> .
+_:r11b3 <https://w3id.org/plato#geo_json> "{\"coordinates\":[-2.00427,51.4353],\"type\":\"Point\"}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .
+_:r11b3 <https://w3id.org/plato#geometry_role> <https://w3id.org/plato#RepresentativePoint> .
+_:r11b4 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/calne> .
+_:r11b4 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r11b4 <https://w3id.org/plato#attests_timespan> _:r11b5 .
+_:r11b5 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r11b5 <https://w3id.org/plato#source_label> "undated" .
+_:r11b5 <https://w3id.org/plato#start_earliest> "1215-07-04"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r11b5 <https://w3id.org/plato#end_latest> "1215-07-07"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r11b4 <https://w3id.org/plato#has_citation> _:r11b6 .
+_:r11b6 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r11b6 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r11b6 <https://w3id.org/plato#locator> "p. 109" .
+_:r11b6 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r11b4 <https://w3id.org/plato#notes> "Hardy gives no date for this stop; from and to are those of the stops either side of it." .
+_:r11b4 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r11b4 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r11b4 <https://w3id.org/plato#sequence> "15"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<https://whgazetteer.org/example/king-john/place/calne> <https://w3id.org/plato#ccodes> "GB" .
+_:r11b7 <https://w3id.org/plato#identity_subject> <https://whgazetteer.org/example/king-john/place/calne> .
+_:r11b7 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#IdentityRelation> .
+_:r11b7 <https://w3id.org/plato#identity_object> <http://www.wikidata.org/entity/Q1235307> .
+<http://www.wikidata.org/entity/Q1235307> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+_:r11b7 <https://w3id.org/plato#identity_type> "exactMatch" .
+_:r11b7 <https://w3id.org/plato#identity_basis> "The place Hardy names" .
+_:r11b7 <https://w3id.org/plato#identity_sourced_by> <https://whgazetteer.org/example/king-john/source/wikidata> .
+<https://whgazetteer.org/example/king-john/> <https://w3id.org/plato#contains_entity> <https://whgazetteer.org/example/king-john/place/cirencester> .
+<https://whgazetteer.org/example/king-john/place/cirencester> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+<https://whgazetteer.org/example/king-john/place/cirencester> <http://www.w3.org/2000/01/rdf-schema#label> "Cirencester" .
+<https://whgazetteer.org/example/king-john/place/cirencester> <https://w3id.org/plato#entity_identifier> "cirencester" .
+_:r12b0 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/cirencester> .
+_:r12b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r12b0 <https://w3id.org/plato#attests_timespan> _:r12b1 .
+_:r12b1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r12b1 <https://w3id.org/plato#source_label> "undated" .
+_:r12b0 <https://w3id.org/plato#has_citation> _:r12b2 .
+_:r12b2 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r12b2 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/wikidata> .
+_:r12b2 <https://w3id.org/plato#locator> "Q852772" .
+_:r12b2 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsDataSource> .
+_:r12b0 <https://w3id.org/plato#attests_geometry> _:r12b3 .
+_:r12b3 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Geometry> .
+_:r12b3 <https://w3id.org/plato#repr_point> "POINT(-1.968 51.719)"^^<http://www.opengis.net/ont/geosparql#wktLiteral> .
+_:r12b3 <https://w3id.org/plato#geo_json> "{\"coordinates\":[-1.968,51.719],\"type\":\"Point\"}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .
+_:r12b3 <https://w3id.org/plato#geometry_role> <https://w3id.org/plato#RepresentativePoint> .
+_:r12b4 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/cirencester> .
+_:r12b4 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r12b4 <https://w3id.org/plato#attests_timespan> _:r12b5 .
+_:r12b5 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r12b5 <https://w3id.org/plato#source_label> "the 7th" .
+_:r12b5 <https://w3id.org/plato#start_earliest> "1215-07-07"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r12b5 <https://w3id.org/plato#end_latest> "1215-07-07"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r12b4 <https://w3id.org/plato#has_citation> _:r12b6 .
+_:r12b6 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r12b6 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r12b6 <https://w3id.org/plato#locator> "p. 109" .
+_:r12b6 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r12b4 <https://w3id.org/plato#notes> "\"reached Cirencester on the 7th\"." .
+_:r12b4 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r12b4 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r12b4 <https://w3id.org/plato#sequence> "16"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<https://whgazetteer.org/example/king-john/place/cirencester> <https://w3id.org/plato#ccodes> "GB" .
+_:r12b7 <https://w3id.org/plato#identity_subject> <https://whgazetteer.org/example/king-john/place/cirencester> .
+_:r12b7 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#IdentityRelation> .
+_:r12b7 <https://w3id.org/plato#identity_object> <http://www.wikidata.org/entity/Q852772> .
+<http://www.wikidata.org/entity/Q852772> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+_:r12b7 <https://w3id.org/plato#identity_type> "exactMatch" .
+_:r12b7 <https://w3id.org/plato#identity_basis> "The place Hardy names" .
+_:r12b7 <https://w3id.org/plato#identity_sourced_by> <https://whgazetteer.org/example/king-john/source/wikidata> .
+<https://whgazetteer.org/example/king-john/> <https://w3id.org/plato#contains_entity> <https://whgazetteer.org/example/king-john/place/ludgershall> .
+<https://whgazetteer.org/example/king-john/place/ludgershall> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+<https://whgazetteer.org/example/king-john/place/ludgershall> <http://www.w3.org/2000/01/rdf-schema#label> "Ludgershall" .
+<https://whgazetteer.org/example/king-john/place/ludgershall> <https://w3id.org/plato#entity_identifier> "ludgershall" .
+_:r13b0 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/ludgershall> .
+_:r13b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r13b0 <https://w3id.org/plato#attests_timespan> _:r13b1 .
+_:r13b1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r13b1 <https://w3id.org/plato#source_label> "undated" .
+_:r13b0 <https://w3id.org/plato#has_citation> _:r13b2 .
+_:r13b2 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r13b2 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/wikidata> .
+_:r13b2 <https://w3id.org/plato#locator> "Q643318" .
+_:r13b2 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsDataSource> .
+_:r13b0 <https://w3id.org/plato#attests_geometry> _:r13b3 .
+_:r13b3 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Geometry> .
+_:r13b3 <https://w3id.org/plato#repr_point> "POINT(-1.6209 51.2566)"^^<http://www.opengis.net/ont/geosparql#wktLiteral> .
+_:r13b3 <https://w3id.org/plato#geo_json> "{\"coordinates\":[-1.6209,51.2566],\"type\":\"Point\"}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .
+_:r13b3 <https://w3id.org/plato#geometry_role> <https://w3id.org/plato#RepresentativePoint> .
+_:r13b4 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/ludgershall> .
+_:r13b4 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r13b4 <https://w3id.org/plato#attests_timespan> _:r13b5 .
+_:r13b5 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r13b5 <https://w3id.org/plato#source_label> "undated" .
+_:r13b5 <https://w3id.org/plato#start_earliest> "1215-07-08"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r13b5 <https://w3id.org/plato#end_latest> "1215-07-15"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r13b4 <https://w3id.org/plato#has_citation> _:r13b6 .
+_:r13b6 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r13b6 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r13b6 <https://w3id.org/plato#locator> "p. 109" .
+_:r13b6 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r13b4 <https://w3id.org/plato#notes> "\"He afterwards went to Ludgershall, and through Clarendon into Dorsetshire, as far as Corfe-Castle\". Hardy gives no date for this stop; from and to are those of the stops either side of it." .
+_:r13b4 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r13b4 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r13b4 <https://w3id.org/plato#sequence> "18"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<https://whgazetteer.org/example/king-john/place/ludgershall> <https://w3id.org/plato#ccodes> "GB" .
+_:r13b7 <https://w3id.org/plato#identity_subject> <https://whgazetteer.org/example/king-john/place/ludgershall> .
+_:r13b7 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#IdentityRelation> .
+_:r13b7 <https://w3id.org/plato#identity_object> <http://www.wikidata.org/entity/Q643318> .
+<http://www.wikidata.org/entity/Q643318> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+_:r13b7 <https://w3id.org/plato#identity_type> "exactMatch" .
+_:r13b7 <https://w3id.org/plato#identity_basis> "The place Hardy names" .
+_:r13b7 <https://w3id.org/plato#identity_sourced_by> <https://whgazetteer.org/example/king-john/source/wikidata> .
+<https://whgazetteer.org/example/king-john/> <https://w3id.org/plato#contains_entity> <https://whgazetteer.org/example/king-john/place/clarendon> .
+<https://whgazetteer.org/example/king-john/place/clarendon> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+<https://whgazetteer.org/example/king-john/place/clarendon> <http://www.w3.org/2000/01/rdf-schema#label> "Clarendon" .
+<https://whgazetteer.org/example/king-john/place/clarendon> <https://w3id.org/plato#entity_identifier> "clarendon" .
+_:r14b0 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/clarendon> .
+_:r14b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r14b0 <https://w3id.org/plato#attests_timespan> _:r14b1 .
+_:r14b1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r14b1 <https://w3id.org/plato#source_label> "undated" .
+_:r14b0 <https://w3id.org/plato#has_citation> _:r14b2 .
+_:r14b2 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r14b2 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/wikidata> .
+_:r14b2 <https://w3id.org/plato#locator> "Q404530" .
+_:r14b2 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsDataSource> .
+_:r14b0 <https://w3id.org/plato#attests_geometry> _:r14b3 .
+_:r14b3 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Geometry> .
+_:r14b3 <https://w3id.org/plato#repr_point> "POINT(-1.74167 51.07083)"^^<http://www.opengis.net/ont/geosparql#wktLiteral> .
+_:r14b3 <https://w3id.org/plato#geo_json> "{\"coordinates\":[-1.74167,51.07083],\"type\":\"Point\"}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .
+_:r14b3 <https://w3id.org/plato#geometry_role> <https://w3id.org/plato#RepresentativePoint> .
+_:r14b4 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/clarendon> .
+_:r14b4 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r14b4 <https://w3id.org/plato#attests_timespan> _:r14b5 .
+_:r14b5 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r14b5 <https://w3id.org/plato#source_label> "undated" .
+_:r14b5 <https://w3id.org/plato#start_earliest> "1215-07-08"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r14b5 <https://w3id.org/plato#end_latest> "1215-07-15"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r14b4 <https://w3id.org/plato#has_citation> _:r14b6 .
+_:r14b6 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r14b6 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r14b6 <https://w3id.org/plato#locator> "p. 109" .
+_:r14b6 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r14b4 <https://w3id.org/plato#notes> "Hardy gives no date for this stop; from and to are those of the stops either side of it." .
+_:r14b4 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r14b4 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r14b4 <https://w3id.org/plato#sequence> "19"^^<http://www.w3.org/2001/XMLSchema#integer> .
+_:r14b7 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/clarendon> .
+_:r14b7 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r14b7 <https://w3id.org/plato#attests_timespan> _:r14b8 .
+_:r14b8 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r14b8 <https://w3id.org/plato#source_label> "the 15th of July" .
+_:r14b8 <https://w3id.org/plato#start_earliest> "1215-07-15"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r14b8 <https://w3id.org/plato#end_latest> "1215-07-15"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r14b7 <https://w3id.org/plato#has_citation> _:r14b9 .
+_:r14b9 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r14b9 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r14b9 <https://w3id.org/plato#locator> "p. 109" .
+_:r14b9 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r14b7 <https://w3id.org/plato#notes> "\"but returned to Clarendon on the 15th of July\"." .
+_:r14b7 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r14b7 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r14b7 <https://w3id.org/plato#sequence> "21"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<https://whgazetteer.org/example/king-john/place/clarendon> <https://w3id.org/plato#ccodes> "GB" .
+_:r14b10 <https://w3id.org/plato#identity_subject> <https://whgazetteer.org/example/king-john/place/clarendon> .
+_:r14b10 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#IdentityRelation> .
+_:r14b10 <https://w3id.org/plato#identity_object> <http://www.wikidata.org/entity/Q404530> .
+<http://www.wikidata.org/entity/Q404530> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+_:r14b10 <https://w3id.org/plato#identity_type> "closeMatch" .
+_:r14b10 <https://w3id.org/plato#identity_basis> "Hardy writes \"Clarendon\"; the royal palace there" .
+_:r14b10 <https://w3id.org/plato#identity_sourced_by> <https://whgazetteer.org/example/king-john/source/wikidata> .
+<https://whgazetteer.org/example/king-john/> <https://w3id.org/plato#contains_entity> <https://whgazetteer.org/example/king-john/place/corfe> .
+<https://whgazetteer.org/example/king-john/place/corfe> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+<https://whgazetteer.org/example/king-john/place/corfe> <http://www.w3.org/2000/01/rdf-schema#label> "Corfe Castle" .
+<https://whgazetteer.org/example/king-john/place/corfe> <https://w3id.org/plato#entity_identifier> "corfe" .
+_:r15b0 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/corfe> .
+_:r15b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r15b0 <https://w3id.org/plato#attests_timespan> _:r15b1 .
+_:r15b1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r15b1 <https://w3id.org/plato#source_label> "1835" .
+_:r15b1 <https://w3id.org/plato#start_earliest> "1835"^^<http://www.w3.org/2001/XMLSchema#gYear> .
+_:r15b1 <https://w3id.org/plato#end_latest> "1835"^^<http://www.w3.org/2001/XMLSchema#gYear> .
+_:r15b0 <https://w3id.org/plato#has_citation> _:r15b2 .
+_:r15b2 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r15b2 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r15b2 <https://w3id.org/plato#locator> "p. 109" .
+_:r15b2 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r15b0 <https://w3id.org/plato#notes> "Hardy's spelling." .
+_:r15b0 <https://w3id.org/plato#attests_name> _:r15b3 .
+_:r15b3 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Name> .
+_:r15b3 <https://w3id.org/plato#toponym> "Corfe-Castle" .
+_:r15b3 <https://w3id.org/plato#language> "en" .
+_:r15b3 <https://w3id.org/plato#script> "Latn" .
+_:r15b0 <https://w3id.org/plato#form_status> <https://w3id.org/plato#Attested> .
+_:r15b4 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/corfe> .
+_:r15b4 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r15b4 <https://w3id.org/plato#attests_timespan> _:r15b5 .
+_:r15b5 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r15b5 <https://w3id.org/plato#source_label> "undated" .
+_:r15b4 <https://w3id.org/plato#has_citation> _:r15b6 .
+_:r15b6 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r15b6 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/wikidata> .
+_:r15b6 <https://w3id.org/plato#locator> "Q1236511" .
+_:r15b6 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsDataSource> .
+_:r15b4 <https://w3id.org/plato#attests_geometry> _:r15b7 .
+_:r15b7 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Geometry> .
+_:r15b7 <https://w3id.org/plato#repr_point> "POINT(-2.0589 50.6399)"^^<http://www.opengis.net/ont/geosparql#wktLiteral> .
+_:r15b7 <https://w3id.org/plato#geo_json> "{\"coordinates\":[-2.0589,50.6399],\"type\":\"Point\"}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .
+_:r15b7 <https://w3id.org/plato#geometry_role> <https://w3id.org/plato#RepresentativePoint> .
+_:r15b8 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/corfe> .
+_:r15b8 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r15b8 <https://w3id.org/plato#attests_timespan> _:r15b9 .
+_:r15b9 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r15b9 <https://w3id.org/plato#source_label> "undated" .
+_:r15b9 <https://w3id.org/plato#start_earliest> "1215-07-08"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r15b9 <https://w3id.org/plato#end_latest> "1215-07-15"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r15b8 <https://w3id.org/plato#has_citation> _:r15b10 .
+_:r15b10 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r15b10 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r15b10 <https://w3id.org/plato#locator> "p. 109" .
+_:r15b10 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r15b8 <https://w3id.org/plato#notes> "\"as far as Corfe-Castle\". Hardy gives no date for this stop; from and to are those of the stops either side of it." .
+_:r15b8 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r15b8 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r15b8 <https://w3id.org/plato#sequence> "20"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<https://whgazetteer.org/example/king-john/place/corfe> <https://w3id.org/plato#ccodes> "GB" .
+_:r15b11 <https://w3id.org/plato#identity_subject> <https://whgazetteer.org/example/king-john/place/corfe> .
+_:r15b11 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#IdentityRelation> .
+_:r15b11 <https://w3id.org/plato#identity_object> <http://www.wikidata.org/entity/Q1236511> .
+<http://www.wikidata.org/entity/Q1236511> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+_:r15b11 <https://w3id.org/plato#identity_type> "closeMatch" .
+_:r15b11 <https://w3id.org/plato#identity_basis> "Hardy writes \"Corfe-Castle\"; the royal castle, not the village" .
+_:r15b11 <https://w3id.org/plato#identity_sourced_by> <https://whgazetteer.org/example/king-john/source/wikidata> .
+<https://whgazetteer.org/example/king-john/> <https://w3id.org/plato#contains_entity> <https://whgazetteer.org/example/king-john/place/newbury> .
+<https://whgazetteer.org/example/king-john/place/newbury> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+<https://whgazetteer.org/example/king-john/place/newbury> <http://www.w3.org/2000/01/rdf-schema#label> "Newbury" .
+<https://whgazetteer.org/example/king-john/place/newbury> <https://w3id.org/plato#entity_identifier> "newbury" .
+_:r16b0 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/newbury> .
+_:r16b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r16b0 <https://w3id.org/plato#attests_timespan> _:r16b1 .
+_:r16b1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r16b1 <https://w3id.org/plato#source_label> "undated" .
+_:r16b0 <https://w3id.org/plato#has_citation> _:r16b2 .
+_:r16b2 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r16b2 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/wikidata> .
+_:r16b2 <https://w3id.org/plato#locator> "Q655874" .
+_:r16b2 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsDataSource> .
+_:r16b0 <https://w3id.org/plato#attests_geometry> _:r16b3 .
+_:r16b3 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Geometry> .
+_:r16b3 <https://w3id.org/plato#repr_point> "POINT(-1.3235 51.4009)"^^<http://www.opengis.net/ont/geosparql#wktLiteral> .
+_:r16b3 <https://w3id.org/plato#geo_json> "{\"coordinates\":[-1.3235,51.4009],\"type\":\"Point\"}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .
+_:r16b3 <https://w3id.org/plato#geometry_role> <https://w3id.org/plato#RepresentativePoint> .
+_:r16b4 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/newbury> .
+_:r16b4 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r16b4 <https://w3id.org/plato#attests_timespan> _:r16b5 .
+_:r16b5 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r16b5 <https://w3id.org/plato#source_label> "undated" .
+_:r16b5 <https://w3id.org/plato#start_earliest> "1215-07-15"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r16b5 <https://w3id.org/plato#end_latest> "1215-07-17"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r16b4 <https://w3id.org/plato#has_citation> _:r16b6 .
+_:r16b6 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r16b6 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r16b6 <https://w3id.org/plato#locator> "p. 109" .
+_:r16b6 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r16b4 <https://w3id.org/plato#notes> "\"from which place he proceeded, through Newbury and Abingdon, to Woodstock\". A letter of the same day is witnessed \"between Newbury and Abingdon, on the 15th of July\" (p. 109, note 1). Hardy gives no date for this stop; from and to are those of the stops either side of it." .
+_:r16b4 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r16b4 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r16b4 <https://w3id.org/plato#sequence> "22"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<https://whgazetteer.org/example/king-john/place/newbury> <https://w3id.org/plato#ccodes> "GB" .
+_:r16b7 <https://w3id.org/plato#identity_subject> <https://whgazetteer.org/example/king-john/place/newbury> .
+_:r16b7 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#IdentityRelation> .
+_:r16b7 <https://w3id.org/plato#identity_object> <http://www.wikidata.org/entity/Q655874> .
+<http://www.wikidata.org/entity/Q655874> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+_:r16b7 <https://w3id.org/plato#identity_type> "exactMatch" .
+_:r16b7 <https://w3id.org/plato#identity_basis> "The place Hardy names" .
+_:r16b7 <https://w3id.org/plato#identity_sourced_by> <https://whgazetteer.org/example/king-john/source/wikidata> .
+<https://whgazetteer.org/example/king-john/> <https://w3id.org/plato#contains_entity> <https://whgazetteer.org/example/king-john/place/abingdon> .
+<https://whgazetteer.org/example/king-john/place/abingdon> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+<https://whgazetteer.org/example/king-john/place/abingdon> <http://www.w3.org/2000/01/rdf-schema#label> "Abingdon" .
+<https://whgazetteer.org/example/king-john/place/abingdon> <https://w3id.org/plato#entity_identifier> "abingdon" .
+_:r17b0 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/abingdon> .
+_:r17b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r17b0 <https://w3id.org/plato#attests_timespan> _:r17b1 .
+_:r17b1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r17b1 <https://w3id.org/plato#source_label> "undated" .
+_:r17b0 <https://w3id.org/plato#has_citation> _:r17b2 .
+_:r17b2 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r17b2 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/wikidata> .
+_:r17b2 <https://w3id.org/plato#locator> "Q321381" .
+_:r17b2 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsDataSource> .
+_:r17b0 <https://w3id.org/plato#attests_geometry> _:r17b3 .
+_:r17b3 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Geometry> .
+_:r17b3 <https://w3id.org/plato#repr_point> "POINT(-1.27833 51.67167)"^^<http://www.opengis.net/ont/geosparql#wktLiteral> .
+_:r17b3 <https://w3id.org/plato#geo_json> "{\"coordinates\":[-1.27833,51.67167],\"type\":\"Point\"}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .
+_:r17b3 <https://w3id.org/plato#geometry_role> <https://w3id.org/plato#RepresentativePoint> .
+_:r17b4 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/abingdon> .
+_:r17b4 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r17b4 <https://w3id.org/plato#attests_timespan> _:r17b5 .
+_:r17b5 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r17b5 <https://w3id.org/plato#source_label> "undated" .
+_:r17b5 <https://w3id.org/plato#start_earliest> "1215-07-15"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r17b5 <https://w3id.org/plato#end_latest> "1215-07-17"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r17b4 <https://w3id.org/plato#has_citation> _:r17b6 .
+_:r17b6 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r17b6 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r17b6 <https://w3id.org/plato#locator> "p. 109" .
+_:r17b6 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r17b4 <https://w3id.org/plato#notes> "Hardy gives no date for this stop; from and to are those of the stops either side of it." .
+_:r17b4 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r17b4 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r17b4 <https://w3id.org/plato#sequence> "23"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<https://whgazetteer.org/example/king-john/place/abingdon> <https://w3id.org/plato#ccodes> "GB" .
+_:r17b7 <https://w3id.org/plato#identity_subject> <https://whgazetteer.org/example/king-john/place/abingdon> .
+_:r17b7 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#IdentityRelation> .
+_:r17b7 <https://w3id.org/plato#identity_object> <http://www.wikidata.org/entity/Q321381> .
+<http://www.wikidata.org/entity/Q321381> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+_:r17b7 <https://w3id.org/plato#identity_type> "exactMatch" .
+_:r17b7 <https://w3id.org/plato#identity_basis> "The place Hardy names" .
+_:r17b7 <https://w3id.org/plato#identity_sourced_by> <https://whgazetteer.org/example/king-john/source/wikidata> .
+<https://whgazetteer.org/example/king-john/> <https://w3id.org/plato#contains_entity> <https://whgazetteer.org/example/king-john/place/woodstock> .
+<https://whgazetteer.org/example/king-john/place/woodstock> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+<https://whgazetteer.org/example/king-john/place/woodstock> <http://www.w3.org/2000/01/rdf-schema#label> "Woodstock" .
+<https://whgazetteer.org/example/king-john/place/woodstock> <https://w3id.org/plato#entity_identifier> "woodstock" .
+_:r18b0 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/woodstock> .
+_:r18b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r18b0 <https://w3id.org/plato#attests_timespan> _:r18b1 .
+_:r18b1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r18b1 <https://w3id.org/plato#source_label> "undated" .
+_:r18b0 <https://w3id.org/plato#has_citation> _:r18b2 .
+_:r18b2 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r18b2 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/wikidata> .
+_:r18b2 <https://w3id.org/plato#locator> "Q752111" .
+_:r18b2 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsDataSource> .
+_:r18b0 <https://w3id.org/plato#attests_geometry> _:r18b3 .
+_:r18b3 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Geometry> .
+_:r18b3 <https://w3id.org/plato#repr_point> "POINT(-1.354 51.845)"^^<http://www.opengis.net/ont/geosparql#wktLiteral> .
+_:r18b3 <https://w3id.org/plato#geo_json> "{\"coordinates\":[-1.354,51.845],\"type\":\"Point\"}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .
+_:r18b3 <https://w3id.org/plato#geometry_role> <https://w3id.org/plato#RepresentativePoint> .
+_:r18b4 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/woodstock> .
+_:r18b4 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r18b4 <https://w3id.org/plato#attests_timespan> _:r18b5 .
+_:r18b5 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r18b5 <https://w3id.org/plato#source_label> "undated" .
+_:r18b5 <https://w3id.org/plato#start_earliest> "1215-07-15"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r18b5 <https://w3id.org/plato#end_latest> "1215-07-17"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r18b4 <https://w3id.org/plato#has_citation> _:r18b6 .
+_:r18b6 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r18b6 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r18b6 <https://w3id.org/plato#locator> "p. 109" .
+_:r18b6 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r18b4 <https://w3id.org/plato#notes> "Hardy gives no date for this stop; from and to are those of the stops either side of it." .
+_:r18b4 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r18b4 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r18b4 <https://w3id.org/plato#sequence> "24"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<https://whgazetteer.org/example/king-john/place/woodstock> <https://w3id.org/plato#ccodes> "GB" .
+_:r18b7 <https://w3id.org/plato#identity_subject> <https://whgazetteer.org/example/king-john/place/woodstock> .
+_:r18b7 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#IdentityRelation> .
+_:r18b7 <https://w3id.org/plato#identity_object> <http://www.wikidata.org/entity/Q752111> .
+<http://www.wikidata.org/entity/Q752111> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+_:r18b7 <https://w3id.org/plato#identity_type> "exactMatch" .
+_:r18b7 <https://w3id.org/plato#identity_basis> "The place Hardy names" .
+_:r18b7 <https://w3id.org/plato#identity_sourced_by> <https://whgazetteer.org/example/king-john/source/wikidata> .
+<https://whgazetteer.org/example/king-john/> <https://w3id.org/plato#contains_entity> <https://whgazetteer.org/example/king-john/place/oxford> .
+<https://whgazetteer.org/example/king-john/place/oxford> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+<https://whgazetteer.org/example/king-john/place/oxford> <http://www.w3.org/2000/01/rdf-schema#label> "Oxford" .
+<https://whgazetteer.org/example/king-john/place/oxford> <https://w3id.org/plato#entity_identifier> "oxford" .
+_:r19b0 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/oxford> .
+_:r19b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r19b0 <https://w3id.org/plato#attests_timespan> _:r19b1 .
+_:r19b1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r19b1 <https://w3id.org/plato#source_label> "undated" .
+_:r19b0 <https://w3id.org/plato#has_citation> _:r19b2 .
+_:r19b2 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r19b2 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/wikidata> .
+_:r19b2 <https://w3id.org/plato#locator> "Q34217" .
+_:r19b2 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsDataSource> .
+_:r19b0 <https://w3id.org/plato#attests_geometry> _:r19b3 .
+_:r19b3 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Geometry> .
+_:r19b3 <https://w3id.org/plato#repr_point> "POINT(-1.25778 51.75194)"^^<http://www.opengis.net/ont/geosparql#wktLiteral> .
+_:r19b3 <https://w3id.org/plato#geo_json> "{\"coordinates\":[-1.25778,51.75194],\"type\":\"Point\"}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .
+_:r19b3 <https://w3id.org/plato#geometry_role> <https://w3id.org/plato#RepresentativePoint> .
+_:r19b4 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/oxford> .
+_:r19b4 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r19b4 <https://w3id.org/plato#attests_timespan> _:r19b5 .
+_:r19b5 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r19b5 <https://w3id.org/plato#source_label> "the 17th of that month" .
+_:r19b5 <https://w3id.org/plato#start_earliest> "1215-07-17"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r19b4 <https://w3id.org/plato#has_citation> _:r19b6 .
+_:r19b6 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r19b6 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r19b6 <https://w3id.org/plato#locator> "p. 109" .
+_:r19b6 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r19b4 <https://w3id.org/plato#notes> "\"and thence to Oxford, where he arrived on the 17th of that month\". Only his arrival is given, so to is left empty." .
+_:r19b4 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r19b4 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+_:r19b4 <https://w3id.org/plato#sequence> "25"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<https://whgazetteer.org/example/king-john/place/oxford> <https://w3id.org/plato#ccodes> "GB" .
+_:r19b7 <https://w3id.org/plato#identity_subject> <https://whgazetteer.org/example/king-john/place/oxford> .
+_:r19b7 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#IdentityRelation> .
+_:r19b7 <https://w3id.org/plato#identity_object> <http://www.wikidata.org/entity/Q34217> .
+<http://www.wikidata.org/entity/Q34217> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+_:r19b7 <https://w3id.org/plato#identity_type> "exactMatch" .
+_:r19b7 <https://w3id.org/plato#identity_basis> "The place Hardy names" .
+_:r19b7 <https://w3id.org/plato#identity_sourced_by> <https://whgazetteer.org/example/king-john/source/wikidata> .
+<https://whgazetteer.org/example/king-john/> <https://w3id.org/plato#contains_entity> <https://whgazetteer.org/example/king-john/place/isle-of-wight> .
+<https://whgazetteer.org/example/king-john/place/isle-of-wight> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+<https://whgazetteer.org/example/king-john/place/isle-of-wight> <http://www.w3.org/2000/01/rdf-schema#label> "Isle of Wight" .
+<https://whgazetteer.org/example/king-john/place/isle-of-wight> <https://w3id.org/plato#entity_identifier> "isle-of-wight" .
+_:r20b0 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/isle-of-wight> .
+_:r20b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r20b0 <https://w3id.org/plato#attests_timespan> _:r20b1 .
+_:r20b1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r20b1 <https://w3id.org/plato#source_label> "undated" .
+_:r20b0 <https://w3id.org/plato#has_citation> _:r20b2 .
+_:r20b2 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r20b2 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/wikidata> .
+_:r20b2 <https://w3id.org/plato#locator> "Q9679" .
+_:r20b2 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsDataSource> .
+_:r20b0 <https://w3id.org/plato#attests_geometry> _:r20b3 .
+_:r20b3 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Geometry> .
+_:r20b3 <https://w3id.org/plato#repr_point> "POINT(-1.3 50.7)"^^<http://www.opengis.net/ont/geosparql#wktLiteral> .
+_:r20b3 <https://w3id.org/plato#geo_json> "{\"coordinates\":[-1.3,50.7],\"type\":\"Point\"}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> .
+_:r20b3 <https://w3id.org/plato#geometry_role> <https://w3id.org/plato#RepresentativePoint> .
+_:r20b4 <https://w3id.org/plato#attests_about> <https://whgazetteer.org/example/king-john/place/isle-of-wight> .
+_:r20b4 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Attestation> .
+_:r20b4 <https://w3id.org/plato#attests_timespan> _:r20b5 .
+_:r20b5 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Timespan> .
+_:r20b5 <https://w3id.org/plato#source_label> "then" .
+_:r20b5 <https://w3id.org/plato#start_earliest> "1215-06-15"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r20b5 <https://w3id.org/plato#end_latest> "1215-07-17"^^<http://www.w3.org/2001/XMLSchema#date> .
+_:r20b4 <https://w3id.org/plato#has_citation> _:r20b6 .
+_:r20b6 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#Citation> .
+_:r20b6 <https://w3id.org/plato#cites> <https://whgazetteer.org/example/king-john/source/hardy-1835> .
+_:r20b6 <https://w3id.org/plato#locator> "pp. 109-110" .
+_:r20b6 <https://w3id.org/plato#citation_function> <http://purl.org/spar/cito/citesAsEvidence> .
+_:r20b4 <https://w3id.org/plato#negated> "true"^^<http://www.w3.org/2001/XMLSchema#boolean> .
+_:r20b4 <https://w3id.org/plato#notes> "\"The statement of historians that John went to the Isle of Wight immediately after signing Magna Carta is thus clearly shown to be erroneous, as it is unquestionable that the King did not then visit the Isle of Wight\"." .
+_:r20b4 <https://w3id.org/plato#relates_to> <https://whgazetteer.org/example/king-john/place/itinerary-1215> .
+_:r20b4 <https://w3id.org/plato#has_relation_type> <https://w3id.org/plato#MemberOf> .
+<https://whgazetteer.org/example/king-john/place/isle-of-wight> <https://w3id.org/plato#ccodes> "GB" .
+_:r20b7 <https://w3id.org/plato#identity_subject> <https://whgazetteer.org/example/king-john/place/isle-of-wight> .
+_:r20b7 <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#IdentityRelation> .
+_:r20b7 <https://w3id.org/plato#identity_object> <http://www.wikidata.org/entity/Q9679> .
+<http://www.wikidata.org/entity/Q9679> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/plato#SpatialEntity> .
+_:r20b7 <https://w3id.org/plato#identity_type> "exactMatch" .
+_:r20b7 <https://w3id.org/plato#identity_basis> "The place Hardy names" .
+_:r20b7 <https://w3id.org/plato#identity_sourced_by> <https://whgazetteer.org/example/king-john/source/wikidata> .

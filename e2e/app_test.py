@@ -2778,8 +2778,8 @@ def main():
             side = 'left'
             try: side = 'right' if page.eval_on_selector('.dev-badge', 'e => e.getBoundingClientRect().right > innerWidth - 60') else 'left'
             except Exception: pass
-            tooltip_checks(page, 'tooltips', ('#toolbox .tool-link[data-tool="convert"] .why', 'μετάφρασις'), ('.dev-badge', 'is experimental'),
-                           ('.dev-badge', 'is experimental', side))
+            tooltip_checks(page, 'tooltips', ('#toolbox .tool-link[data-tool="convert"] .why', 'μετάφρασις'), ('.dev-badge', 'Experimental, under development'),
+                           ('.dev-badge', 'Experimental, under development', side))
             no_titles(page, 'tooltips', ['μέθοδος', 'ἔλεγχος', 'μετάφρασις', 'ἀριθμός', 'μνήμη', 'Ἑρμῆς', 'ἀγορά', 'χώρα', 'κρίσις', 'περιπλέω', 'checked against PLATO at the commit'])
             tooltip_upkeep(page, 'tooltips')
             page.set_viewport_size({'width': 1280, 'height': 720})

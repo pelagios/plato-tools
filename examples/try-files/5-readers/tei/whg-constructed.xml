@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Constructed for the tests of src/engine/hermes/tei.js: not a real edition. -->
+<TEI xmlns="http://www.tei-c.org/ns/1.0" xml:lang="fr">
+  <teiHeader>
+    <fileDesc>
+      <titleStmt><title>World Historical Gazetteer Addresses</title></titleStmt>
+      <publicationStmt><idno type="URI">https://example.org/editions/whg</idno></publicationStmt>
+      <sourceDesc><p>Born digital.</p></sourceDesc>
+    </fileDesc>
+  </teiHeader>
+  <text>
+    <body>
+      <p n="1">
+        <placeName ref="place:gn:2988507">Paris</placeName>,
+        <placeName ref="https://whgazetteer.org/entity/place:gn:2995469/api">Marseille</placeName>,
+        <placeName ref="https://whgazetteer.org/places/12345999/portal/">Lyon</placeName>,
+        <placeName ref="https://whgazetteer.org/places/6421/portal/">Toulouse</placeName>,
+        <placeName ref="https://dev.whgazetteer.org/places/12400000/portal/">Nice</placeName>,
+        <placeName ref="#bordeaux">Bordeaux</placeName>,
+        <placeName ref="#nantes">Nantes</placeName>,
+        <placeName ref="https://sws.geonames.org/3031582/" cert="low" type="modern" resp="#ed">Bourges</placeName>,
+        <placeName ref="https://sws.geonames.org/3014728/" cert="low">Grenoble</placeName>,
+        <rs type="place" ref="https://sws.geonames.org/3037656/">Amiens</rs>.
+      </p>
+    </body>
+    <back>
+      <listPlace>
+        <place xml:id="bordeaux" type="city">
+          <idno>place:gn:3031582</idno>
+          <desc>A port on the Garonne.</desc>
+          <note>Checked against the gazetteer.</note>
+        </place>
+        <place xml:id="nantes">
+          <idno>https://dev.whgazetteer.org/places/12400001/portal/</idno>
+        </place>
+      </listPlace>
+    </back>
+  </text>
+</TEI>

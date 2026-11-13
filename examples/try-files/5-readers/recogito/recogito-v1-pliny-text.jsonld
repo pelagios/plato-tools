@@ -1,0 +1,2185 @@
+[ {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/db7cebda-cb21-4942-8080-24074e78189e",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/570718",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:48:39+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:48:39+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 21.88662, 36.6969 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 1083,
+      "end" : 1092
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Theganusa"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/40df84e1-8f03-42c9-9ac3-c517f410ec12",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/658490",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:55:40+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:55:40+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 36.15704, 36.85367 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 205,
+      "end" : 210
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Issus"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/0780c750-71d9-4223-8426-c4cdd9df3d4a",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://sws.geonames.org/299817",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:56:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:56:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 34.89277, 36.91766 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 241,
+      "end" : 247
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Tarsus"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/eaa297b1-5123-48b5-960d-0bcff38c9a1d",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/981544",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:56:41+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:56:41+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Polygon",
+      "coordinates" : [ [ [ 30.571664581681, 38.401032506919 ], [ 30.683833740459, 38.427358075118 ], [ 30.86458722001, 38.425849102089 ], [ 30.993221763588, 38.397474456148 ], [ 31.155440191142, 38.334658261044 ], [ 31.351477062704, 38.264310903377 ], [ 31.547761112312, 38.220624965568 ], [ 31.668003814907, 38.225302181003 ], [ 31.744564921018, 38.273208923632 ], [ 31.857615451136, 38.32371455215 ], [ 32.037786964183, 38.372643075121 ], [ 32.251750421861, 38.420421697134 ], [ 32.44148482298, 38.415618728687 ], [ 32.639516985333, 38.348662237952 ], [ 32.802407688218, 38.25599472448 ], [ 32.907017442361, 38.120988900099 ], [ 32.923432328032, 38.006313071646 ], [ 32.884500077789, 37.893430930658 ], [ 32.828456542522, 37.790979828289 ], [ 32.669123300973, 37.74772822887 ], [ 32.496719783618, 37.675770853974 ], [ 32.240397240572, 37.605609700072 ], [ 32.032842114308, 37.533696127297 ], [ 31.900124508397, 37.526953638756 ], [ 31.754245928139, 37.481911196415 ], [ 31.620077701593, 37.417266872348 ], [ 31.535185163391, 37.428759995968 ], [ 31.35723195091, 37.418077242642 ], [ 31.111694783347, 37.407896261966 ], [ 30.857592257919, 37.38364516966 ], [ 30.443717824416, 37.433817654034 ], [ 30.25772261156, 37.468269022967 ], [ 30.105441583757, 37.529310544832 ], [ 30.029189652703, 37.576617734086 ], [ 29.978252266526, 37.698160443005 ], [ 29.978211651044, 37.806241839086 ], [ 30.020831189857, 37.921124916228 ], [ 30.132032438283, 38.042725142599 ], [ 30.295183780993, 38.177623833757 ], [ 30.441867547892, 38.305612454257 ], [ 30.571664581681, 38.401032506919 ] ] ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 257,
+      "end" : 264
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Pisidia"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/4ac9d45c-2e7a-4398-bf23-6a0c57452b74",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/628957",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:55:44+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:55:44+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 35.75, 38.25 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 226,
+      "end" : 233
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Cilicia"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/a9631a2b-2c83-4175-a294-df4a0a390813",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/648792",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:55:11+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:55:11+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 35.14519, 37.83546 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 189,
+      "end" : 195
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Taurus"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/24cd1586-7fd2-4fa3-b0d1-d5c22bfece44",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/658376",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:55:17+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:55:17+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 36.333333, 36.75 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 197,
+      "end" : 203
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Amanus"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/508708f4-a7f1-488c-a072-34326070a4ba",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://sws.geonames.org/5805687",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:05:46+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:05:46+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ -122.9007, 47.03787 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 452,
+      "end" : 459
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Olympia"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/a1100e82-c9a3-4360-b992-5269815fb9de",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/638965",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:00:51+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:00:51+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 29.25, 36.75 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 629,
+      "end" : 634
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Lycia"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/b201a190-8f0b-4a5b-829c-8cda9495fa58",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/570221",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:45:38+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:45:38+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 21.25, 37.75 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 910,
+      "end" : 914
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Elis"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/fb6fc7aa-5196-4b27-8ecb-d18f9ba74f20",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://geo-kima.org/place/1087",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:45:43+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:45:43+00:00",
+    "purpose" : "georeferencing"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 918,
+      "end" : 927
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Epidaurus"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/79d1a4bc-bb5d-40b4-abf8-45f5b9d079ff",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/631184",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:45:55+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:45:55+00:00",
+    "purpose" : "georeferencing"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 965,
+      "end" : 970
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Argos"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/f962dee7-c46a-4992-a012-503cb4d21bb1",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/903080",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:54:01+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:54:01+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 46.5, 34.5 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 160,
+      "end" : 165
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Media"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/8b991899-9b25-49c0-93f6-7e8b188c01f3",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://sws.geonames.org/301238",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:56:56+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:56:56+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 31.38889, 36.76667 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 266,
+      "end" : 270
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Side"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/1610c855-3985-4bbb-89d3-7a64b429eb0e",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/991344",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:06:54+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:06:54+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "MultiPolygon",
+      "coordinates" : [ [ [ [ 8.419690349638, 38.930536236465 ], [ 8.395556156378, 38.924788010866 ], [ 8.391622932913, 38.929900210121 ], [ 8.388845222205, 38.933509934201 ], [ 8.375453572621, 38.950905847486 ], [ 8.358852708419, 38.993320884115 ], [ 8.324777118868, 39.021264798319 ], [ 8.31114068389, 39.064402732967 ], [ 8.3355735067, 39.077967265399 ], [ 8.379508012735, 39.075548226548 ], [ 8.422257336809, 39.067674794768 ], [ 8.438959949047, 39.05875859035 ], [ 8.455256118049, 39.008530231496 ], [ 8.452099464907, 38.974298142469 ], [ 8.448290964745, 38.950215015318 ], [ 8.419690349638, 38.930536236465 ] ] ], [ [ [ 8.253500156549, 39.081555633503 ], [ 8.248622337045, 39.080387458216 ], [ 8.219093476734, 39.096519593493 ], [ 8.199780691983, 39.120258309072 ], [ 8.241434499937, 39.14055879224 ], [ 8.289617950966, 39.144343117455 ], [ 8.315689304628, 39.145408416652 ], [ 8.31890573784, 39.120393040436 ], [ 8.289594689216, 39.091441021154 ], [ 8.287926037973, 39.089791728498 ], [ 8.271179102463, 39.085787020211 ], [ 8.253500156549, 39.081555633503 ] ] ], [ [ [ 9.736046548802, 40.879518264613 ], [ 9.731154327535, 40.878459388152 ], [ 9.723091137131, 40.899910272937 ], [ 9.741514277935, 40.932248554607 ], [ 9.77474054536, 40.934270197032 ], [ 9.781461653154, 40.925411784513 ], [ 9.768570164784, 40.893123167501 ], [ 9.765700392422, 40.885930440904 ], [ 9.736046548802, 40.879518264613 ] ] ], [ [ [ 8.316089795224, 41.010191263738 ], [ 8.275659905066, 41.008581379864 ], [ 8.250158349935, 41.020805304043 ], [ 8.246081517395, 41.056172607212 ], [ 8.283450567422, 41.090796748883 ], [ 8.305894507689, 41.111565876601 ], [ 8.335074536138, 41.115730106156 ], [ 8.376279593007, 41.107103474506 ], [ 8.388193559094, 41.060591242631 ], [ 8.363128872532, 41.054797069974 ], [ 8.341902018391, 41.039512039632 ], [ 8.32421167623, 41.019420961884 ], [ 8.321146242229, 41.015937820153 ], [ 8.316089795224, 41.010191263738 ] ] ], [ [ [ 9.4972146583, 41.199098254061 ], [ 9.481508562388, 41.177598245087 ], [ 9.467069284133, 41.1796093861 ], [ 9.465566972561, 41.185783965682 ], [ 9.461101832207, 41.204128245905 ], [ 9.463268324609, 41.225260652086 ], [ 9.485787717629, 41.237921079309 ], [ 9.516941548609, 41.236961613256 ], [ 9.512933014945, 41.220596979649 ], [ 9.4972146583, 41.199098254061 ] ] ], [ [ [ 9.433448234427, 41.231658800171 ], [ 9.420822584221, 41.228897411433 ], [ 9.416248105475, 41.240811562124 ], [ 9.417483429188, 41.264330107003 ], [ 9.441422029295, 41.264396206556 ], [ 9.440591545344, 41.248717211958 ], [ 9.433448234427, 41.231658800171 ] ] ], [ [ [ 9.418533827966, 41.145751380622 ], [ 9.435789263922, 41.118544853992 ], [ 9.46281511211, 41.119295425946 ], [ 9.494324144679, 41.126180053951 ], [ 9.510020591889, 41.147674925808 ], [ 9.540694440983, 41.13887129105 ], [ 9.564621856536, 41.120850921052 ], [ 9.574157847378, 41.086797989613 ], [ 9.561602405097, 41.066002882221 ], [ 9.567078833148, 41.033653032714 ], [ 9.611171270822, 41.025187540023 ], [ 9.655263630764, 40.99865223538 ], [ 9.656177520199, 40.978219939297 ], [ 9.616202757698, 40.966957443959 ], [ 9.558768801931, 40.938970509958 ], [ 9.575890864699, 40.91175471351 ], [ 9.63558667139, 40.90670397856 ], [ 9.676426935175, 40.897528677895 ], [ 9.688994547583, 40.864167223971 ], [ 9.708721092381, 40.847826695952 ], [ 9.719452952392, 40.783152897492 ], [ 9.735101694634, 40.750476119396 ], [ 9.784606403367, 40.645301980111 ], [ 9.790000676428, 40.612740124227 ], [ 9.80154816905, 40.581773173094 ], [ 9.819328255015, 40.552160278681 ], [ 9.820980159513, 40.49332245679 ], [ 9.810662075724, 40.457630785832 ], [ 9.782096063048, 40.407680622814 ], [ 9.717140810621, 40.347206676336 ], [ 9.673180977273, 40.293843813536 ], [ 9.658099784137, 40.280244811814 ], [ 9.661689146038, 40.216700982151 ], [ 9.693603074298, 40.185109104086 ], [ 9.712638863632, 40.142981543937 ], [ 9.725434341498, 40.063496879492 ], [ 9.717465824966, 40.030896693488 ], [ 9.703767882274, 40.00475133734 ], [ 9.703756134877, 39.914779540895 ], [ 9.69749525086, 39.868683177319 ], [ 9.696173987478, 39.827276492437 ], [ 9.679898933132, 39.790285049497 ], [ 9.671995401231, 39.757708519324 ], [ 9.675092903758, 39.704443016836 ], [ 9.661493871466, 39.678318002309 ], [ 9.670318130821, 39.582675420969 ], [ 9.647122084067, 39.54672179182 ], [ 9.649770661297, 39.521632347844 ], [ 9.641027025573, 39.50942200324 ], [ 9.645909462085, 39.433489435769 ], [ 9.626679231274, 39.431782369084 ], [ 9.621462956977, 39.410086057658 ], [ 9.595768034318, 39.363293176825 ], [ 9.608127410613, 39.276225853934 ], [ 9.566391927129, 39.228412458216 ], [ 9.553833401369, 39.1999420745 ], [ 9.569599556238, 39.15729150131 ], [ 9.566221470317, 39.11292658644 ], [ 9.524997700408, 39.090851746987 ], [ 9.495830075153, 39.107384639409 ], [ 9.437607439471, 39.104533031604 ], [ 9.400171177939, 39.116611775202 ], [ 9.360846022303, 39.151357987941 ], [ 9.312347525395, 39.1840225642 ], [ 9.271790470167, 39.195363205596 ], [ 9.216160767017, 39.185272558353 ], [ 9.168414143849, 39.171807081726 ], [ 9.103712313775, 39.159566695944 ], [ 9.061190828118, 39.149805553461 ], [ 9.028345651055, 39.131967407188 ], [ 9.01663417453, 39.093280783656 ], [ 9.030294957141, 39.039885659117 ], [ 9.041934855889, 39.00916270413 ], [ 9.024527653831, 38.976883352875 ], [ 8.989327431119, 38.948193850798 ], [ 8.963232426224, 38.92159591796 ], [ 8.920912530109, 38.911778825081 ], [ 8.870123809826, 38.88968647507 ], [ 8.823294961229, 38.865913162404 ], [ 8.790427198547, 38.891653991724 ], [ 8.774425806854, 38.890482172428 ], [ 8.75329190496, 38.885533734249 ], [ 8.726726121644, 38.89473622758 ], [ 8.716762857624, 38.894970588073 ], [ 8.716127841218, 38.894575619524 ], [ 8.615358853668, 38.876255339792 ], [ 8.591661354029, 38.937568496458 ], [ 8.562860878884, 38.969377579162 ], [ 8.54850195522, 39.014901084341 ], [ 8.518720992565, 39.049063490847 ], [ 8.45799202747, 39.08620255418 ], [ 8.398620716845, 39.13653497654 ], [ 8.379207483279, 39.186054608084 ], [ 8.378374108983, 39.221951374304 ], [ 8.39641350637, 39.252017072262 ], [ 8.397957210781, 39.298797876176 ], [ 8.383382095918, 39.344345079147 ], [ 8.375120310862, 39.399138155671 ], [ 8.395329325095, 39.432302049386 ], [ 8.428532491036, 39.491748061536 ], [ 8.448409077228, 39.542878073758 ], [ 8.468712619484, 39.576041413223 ], [ 8.452927138525, 39.616196980817 ], [ 8.443896472783, 39.647624917587 ], [ 8.432854649936, 39.709564193142 ], [ 8.444957878689, 39.738228040413 ], [ 8.477159152119, 39.732880474724 ], [ 8.504267739188, 39.697938768372 ], [ 8.523275863957, 39.692069759992 ], [ 8.52929963639, 39.719287762584 ], [ 8.518161442939, 39.747652554642 ], [ 8.538579990152, 39.780822222448 ], [ 8.539325928586, 39.813005330754 ], [ 8.530401243182, 39.903869244245 ], [ 8.49876483866, 39.899060992818 ], [ 8.46340034375, 39.903699744468 ], [ 8.440978056621, 39.901028654339 ], [ 8.421100115695, 39.883448717518 ], [ 8.391717170263, 39.915301591492 ], [ 8.386970142975, 39.986544042425 ], [ 8.391183464577, 40.052151222293 ], [ 8.426239846348, 40.065534277743 ], [ 8.459979238239, 40.09926952658 ], [ 8.467890156894, 40.121793740205 ], [ 8.448600408972, 40.212943354103 ], [ 8.471964379364, 40.239074646098 ], [ 8.49750234762, 40.2682882736 ], [ 8.487177515851, 40.294329561571 ], [ 8.443765326414, 40.310084710297 ], [ 8.407720173657, 40.332720019827 ], [ 8.375943589565, 40.361522488988 ], [ 8.365458971715, 40.447063820887 ], [ 8.355986912831, 40.470737182541 ], [ 8.340814864909, 40.50861603265 ], [ 8.332271513383, 40.529923675679 ], [ 8.308453743292, 40.555433876655 ], [ 8.286023675104, 40.560548742504 ], [ 8.273608543934, 40.557643333591 ], [ 8.233989002136, 40.571674312985 ], [ 8.220857547743, 40.578957322425 ], [ 8.189820412273, 40.571669293212 ], [ 8.175261850208, 40.565655328924 ], [ 8.155381244998, 40.581191173132 ], [ 8.139082995188, 40.621416478892 ], [ 8.149314114632, 40.654929922995 ], [ 8.152837680331, 40.705014089919 ], [ 8.135539497038, 40.747620438874 ], [ 8.189105808467, 40.884657871918 ], [ 8.198942192499, 40.902518948755 ], [ 8.197476393113, 40.956645162013 ], [ 8.227769159332, 40.96630818024 ], [ 8.26142187075, 40.950808510669 ], [ 8.258520039063, 40.924201352251 ], [ 8.277942553108, 40.884647940929 ], [ 8.318223914854, 40.852546881825 ], [ 8.361402987691, 40.847028180337 ], [ 8.412034348744, 40.848399404006 ], [ 8.456412105175, 40.788726289857 ], [ 8.512285623328, 40.793857084442 ], [ 8.570924261054, 40.817710403876 ], [ 8.617764299311, 40.828460684964 ], [ 8.642066540229, 40.870265039051 ], [ 8.691764643006, 40.899738062853 ], [ 8.744956582184, 40.911855992828 ], [ 8.802239073519, 40.922280264224 ], [ 8.827289228295, 40.927958029236 ], [ 8.837666482475, 40.953590434482 ], [ 8.840240980294, 40.99039303343 ], [ 8.891422231688, 41.025233566202 ], [ 8.991416151477, 41.083923354519 ], [ 9.124581219645, 41.136927836403 ], [ 9.150508040701, 41.15820172616 ], [ 9.154500706687, 41.183131358248 ], [ 9.146361103257, 41.230451119701 ], [ 9.168086680566, 41.271468544292 ], [ 9.2154282724, 41.2819403486 ], [ 9.244913387877, 41.267767990333 ], [ 9.27675551385, 41.238602595708 ], [ 9.332079131583, 41.201683250953 ], [ 9.393633115509, 41.166118858984 ], [ 9.418533827966, 41.145751380622 ] ] ], [ [ [ 9.32172968097, 41.264006441596 ], [ 9.309102232539, 41.261230214127 ], [ 9.303749338646, 41.267066133918 ], [ 9.302252067743, 41.26869825536 ], [ 9.297265631448, 41.274132978688 ], [ 9.305292957292, 41.288821300906 ], [ 9.326604133049, 41.27799865596 ], [ 9.32172968097, 41.264006441596 ] ] ] ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 549,
+      "end" : 557
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Sardinia"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/c828e01e-0adf-4d69-9f4e-d18a5783c169",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/462270",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:06:23+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:06:23+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 15.0878345, 37.5024825 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 497,
+      "end" : 503
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Catina"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/f26108b1-5d89-4104-a62e-5709c1ea36bd",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://dare.ht.lu.se/places/43582",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:13:26+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:13:26+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 23.19975, 36.43603 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 1450,
+      "end" : 1455
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Malea"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/5e4c5c0f-1569-4a6a-9384-b54614739fe1",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/50004",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:42:57+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:42:57+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 77.5, 22.5 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 51,
+      "end" : 56
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "India"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/6580269f-c96a-4601-b9df-712b80a7500f",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/570181",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:45:27+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:45:27+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 22.25, 38.25 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 843,
+      "end" : 858
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Corinthian Gulf"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/11c4d333-95c4-4bf9-bd38-f467f37ca782",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://geo-kima.org/place/12658",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:46:23+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:46:23+00:00",
+    "purpose" : "georeferencing"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 1075,
+      "end" : 1082
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Laconia"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/11958438-5362-4c33-b40b-989f33799e8d",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/570737",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:48:21+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:48:21+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 22.39224, 36.46799 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 1050,
+      "end" : 1058
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Thyrides"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/e018caa4-0ee0-4a55-a1d4-1b6908443710",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/639166",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:57:31+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:57:31+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 29.31836, 36.355934 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 312,
+      "end" : 319
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Xanthus"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/80a73e98-7307-47dc-8c90-3b12c7e6f642",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://dare.ht.lu.se/places/24795",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:56:26+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:56:26+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 34.542041268367, 36.745016874176 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 235,
+      "end" : 239
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Soli"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/fe53b8b4-8e69-451e-8698-0f8a71132b1a",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/589884",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:01:48+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:01:48+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 23.5896, 35.2319 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 1343,
+      "end" : 1354
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Criumetopon"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/705a5bfe-e7e3-4e11-85a8-c49f4541f303",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/570577",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:06:05+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:06:05+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 22.312752688462, 37.252897776923 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 473,
+      "end" : 485
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Peloponnesus"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/18ee3e8e-e42b-460b-b66d-a7caadf11e46",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/570480",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:05:59+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:05:59+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 21.75, 37.25 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 461,
+      "end" : 469
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Messenia"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/90e26e58-abd6-463a-ad03-032f37db7e2a",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://sws.geonames.org/265500",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:44:45+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:44:45+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 22.08194, 38.24861 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 829,
+      "end" : 835
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Aegium"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/c476e2f5-0e37-41b9-971e-b654ece07b84",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/373778",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:46:57+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:46:57+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 21.856169, 32.818736 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 1409,
+      "end" : 1415
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Cyrene"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/31fdc782-a643-4356-9230-b93ddb05a293",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/570400",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:46:29+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:46:29+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 22.97822, 36.26229 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 1106,
+      "end" : 1113
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Cythera"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/4952e618-7c6a-44e6-87cc-d20c1d78fe49",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/903004",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:51:05+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:51:05+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 52.1696, 35.27617 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 122,
+      "end" : 135
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Caspian Gates"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/e116dec9-927b-42c2-86b2-0aa0d5caf496",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/59834",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:49:39+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:49:39+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 77.5, 32.5 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 93,
+      "end" : 99
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Imaiis"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/f537f491-2d84-4906-b711-99356742e1e6",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/981516",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:56:37+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:56:37+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Polygon",
+      "coordinates" : [ [ [ 32.411118401843, 35.052520791182 ], [ 32.414082079534, 35.052440168403 ], [ 32.46773542887, 35.076939941781 ], [ 32.498315238259, 35.136707767946 ], [ 32.549425950723, 35.181455652034 ], [ 32.623957484184, 35.196613323399 ], [ 32.808674281698, 35.158906742561 ], [ 32.855008113683, 35.171869424466 ], [ 32.895452449341, 35.208109847314 ], [ 32.952188352404, 35.359396547916 ], [ 33.030273532793, 35.368335562982 ], [ 33.089569323147, 35.354733736087 ], [ 33.334162470595, 35.311214868252 ], [ 33.51883934424, 35.333010937448 ], [ 33.562283322686, 35.351522323014 ], [ 33.623364335939, 35.369298723306 ], [ 33.705081460461, 35.377502652183 ], [ 33.840217501576, 35.446989129993 ], [ 33.914260179027, 35.443766032513 ], [ 34.036269044345, 35.470152531883 ], [ 34.107052463055, 35.521912968095 ], [ 34.195621673004, 35.572799342681 ], [ 34.245075115646, 35.570459426115 ], [ 34.295357410366, 35.579635632569 ], [ 34.307625847844, 35.602213048473 ], [ 34.40730948241, 35.655280530678 ], [ 34.453286325944, 35.652999006075 ], [ 34.534165883169, 35.689494457365 ], [ 34.554069371026, 35.671094982315 ], [ 34.537276530214, 35.637180408281 ], [ 34.503490766292, 35.61281826956 ], [ 34.480113325378, 35.585028591408 ], [ 34.445949577389, 35.554879531519 ], [ 34.358248853779, 35.518670355592 ], [ 34.332077753256, 35.499679758443 ], [ 34.316503513161, 35.480171006948 ], [ 34.266301745013, 35.471010553466 ], [ 34.23997569682, 35.449112316589 ], [ 34.101048106681, 35.383278337333 ], [ 34.069335279402, 35.332664420562 ], [ 33.954111387934, 35.138380864193 ], [ 33.998213318204, 35.06128012144 ], [ 34.035387250323, 35.039373467345 ], [ 34.0785550335, 35.002733990403 ], [ 34.087090564028, 34.973458442432 ], [ 34.030739469055, 34.970265854788 ], [ 33.950290335918, 34.973891602716 ], [ 33.914745771273, 34.966807300749 ], [ 33.881775648455, 34.945159891138 ], [ 33.829509830835, 34.950323575009 ], [ 33.770602125613, 34.961513614645 ], [ 33.711138149666, 34.964025912256 ], [ 33.660934268834, 34.945907380099 ], [ 33.650606799986, 34.833777299197 ], [ 33.627925610846, 34.805859534407 ], [ 33.589029844572, 34.798793081027 ], [ 33.542996847905, 34.789111964104 ], [ 33.522066966608, 34.789948683029 ], [ 33.492822416778, 34.768034528224 ], [ 33.421275726066, 34.739111099153 ], [ 33.361535285879, 34.732754427836 ], [ 33.316223639496, 34.734467587861 ], [ 33.279955410934, 34.709872700699 ], [ 33.199813372863, 34.712813582547 ], [ 33.130118355435, 34.715311804144 ], [ 33.083487052772, 34.691008381753 ], [ 33.022819799441, 34.66428405414 ], [ 33.001066637636, 34.647734858351 ], [ 32.995883249457, 34.61361990309 ], [ 32.966915889429, 34.591549487987 ], [ 32.921699800042, 34.593059371453 ], [ 32.90152212299, 34.608131032909 ], [ 32.84870844673, 34.670364111127 ], [ 32.803162556029, 34.666058823121 ], [ 32.701772308533, 34.660576035429 ], [ 32.61159611608, 34.671934993933 ], [ 32.584099149947, 34.681388976197 ], [ 32.545896566988, 34.685380566195 ], [ 32.497832004233, 34.704043638053 ], [ 32.456828238621, 34.725367126246 ], [ 32.435864021793, 34.732528298268 ], [ 32.401728452181, 34.744174876525 ], [ 32.397710820619, 34.745781402514 ], [ 32.370790582196, 34.756539340102 ], [ 32.362019419155, 34.800012603603 ], [ 32.363716691208, 34.843213827411 ], [ 32.297031988082, 34.928601925628 ], [ 32.29551544204, 34.980565669141 ], [ 32.272311935117, 35.01578624065 ], [ 32.252912045768, 35.059566546132 ], [ 32.264520125157, 35.088132317881 ], [ 32.296313663382, 35.093087956513 ], [ 32.327104869625, 35.072081530217 ], [ 32.368505741226, 35.053669044119 ], [ 32.411118401843, 35.052520791182 ] ] ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 249,
+      "end" : 255
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Cyprus"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/d810c9b5-4ebe-4c0d-9bbb-1c988c27a3ff",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/599575",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:59:48+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:59:48+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 27.37404, 36.686188 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 357,
+      "end" : 363
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Cnidos"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/7291eab3-45c4-4f30-a501-e1e82c25ac21",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://sws.geonames.org/2151682",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:59:07+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:59:07+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 151.0881, -33.82663 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 329,
+      "end" : 335
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Rhodes"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/26d1c2f3-577a-4cf8-b6fa-c286151a5916",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/982262",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:57:02+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:57:02+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 32.5, 37.5 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 285,
+      "end" : 293
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Lycaonia"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/190ecdc0-7f44-489d-ab58-745a03ad0ed9",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/560353",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:00:24+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:00:24+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 25.139512376923, 37.041546415385 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 404,
+      "end" : 412
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Cyclades"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/5eda1a85-9a00-4626-bae6-3afd21a9305b",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/599587",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:00:18+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:00:18+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 25.268194, 37.397274 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 379,
+      "end" : 384
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Delos"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/e1336761-bf1e-4535-9279-10299d346923",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/570577",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:03:19+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:03:19+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 22.312752688462, 37.252897776923 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 771,
+      "end" : 783
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Peloponnesus"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/dcb24711-fa96-4b0c-95e6-88f6deb8fe47",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/570577",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:03:19+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:03:19+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 22.312752688462, 37.252897776923 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 1463,
+      "end" : 1475
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Peloponnesus"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/334a1f7e-9048-40c3-951b-3e26dfe316de",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://sws.geonames.org/5805687",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:45:50+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:45:50+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ -122.9007, 47.03787 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 954,
+      "end" : 961
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Olympia"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/81741029-21d3-4bb7-bcbe-61b5394f72e5",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://dare.ht.lu.se/places/44590",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:05:39+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:05:39+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 25.66041, 35.29113 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 1435,
+      "end" : 1443
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Cadistus"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/8534dc83-6cf0-4e68-aa93-2c12c6bc4f55",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://sws.geonames.org/2177746",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:46:00+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:46:00+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 151.03333, -33.61667 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 980,
+      "end" : 987
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Arcadia"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/60feb930-f468-48be-896b-14f58f8bb276",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/570123",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:46:13+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:46:13+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 22.25, 36.75 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 1016,
+      "end" : 1029
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Asinaean Gulf"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/72aa4f77-17f2-4c16-a83b-ecb1ed65891d",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/991402",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:54:56+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:54:56+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Polygon",
+      "coordinates" : [ [ [ 32.922494470764, 38.012876132967 ], [ 33.037112217949, 38.120484584673 ], [ 33.163466788276, 38.291834481028 ], [ 33.281476999657, 38.509693911349 ], [ 33.489727144848, 38.835403262933 ], [ 33.628526390044, 38.9691026173 ], [ 33.908087002213, 39.236055848816 ], [ 34.208667533247, 39.427277115298 ], [ 34.446304848797, 39.555684586323 ], [ 34.688107575494, 39.720582935612 ], [ 34.942536069702, 39.875052705372 ], [ 35.143343238195, 39.957424591177 ], [ 35.232717015468, 39.87805004146 ], [ 35.380069393054, 39.776696396891 ], [ 35.732268529287, 39.681488512755 ], [ 35.995564440109, 39.665099236418 ], [ 36.428183520846, 39.655182877256 ], [ 36.80201128513, 39.656859154215 ], [ 37.045587776819, 39.676220757142 ], [ 37.334616138178, 39.579543098455 ], [ 37.580009606707, 39.522762756041 ], [ 37.934532055448, 39.474795836428 ], [ 38.239585831104, 39.420483660667 ], [ 38.376033131332, 39.416300278409 ], [ 38.398604628391, 39.351894935615 ], [ 38.459255306938, 39.32771595358 ], [ 38.506367925529, 39.267303086332 ], [ 38.551991390382, 39.250663168593 ], [ 38.611530556702, 39.220242493575 ], [ 38.66216082397, 39.184371567636 ], [ 38.710514601241, 39.186107050209 ], [ 38.734514509723, 39.133965581343 ], [ 38.757519197294, 39.07568052922 ], [ 38.795275988714, 39.009768765022 ], [ 38.782414567019, 38.926827321671 ], [ 38.785771451769, 38.845492778887 ], [ 38.73988527921, 38.806210682294 ], [ 38.732333962987, 38.757086631804 ], [ 38.658944949704, 38.745283923399 ], [ 38.621992860112, 38.711364342678 ], [ 38.555598283846, 38.692612899167 ], [ 38.500747958382, 38.697660709387 ], [ 38.437692951677, 38.647405313451 ], [ 38.41386754713, 38.593567839693 ], [ 38.394289810465, 38.514470539865 ], [ 38.447700025375, 38.447404563175 ], [ 38.571601565738, 38.429766199539 ], [ 38.602795976163, 38.426864521084 ], [ 38.658667323455, 38.378097174078 ], [ 38.736566148379, 38.370751512867 ], [ 38.791327095721, 38.315783025283 ], [ 38.851669511875, 38.297565345394 ], [ 38.890711721634, 38.244045220526 ], [ 38.969447874956, 38.192868267611 ], [ 39.01991798349, 38.16305490311 ], [ 39.059669174274, 38.165365424882 ], [ 39.089708844506, 38.106427389775 ], [ 39.081951931234, 38.057451041684 ], [ 39.121590418059, 38.00999962982 ], [ 39.183465520296, 38.00382531624 ], [ 39.214398097167, 38.000722641815 ], [ 39.206549720507, 37.951775285424 ], [ 39.125309240326, 37.891370645275 ], [ 39.072308476381, 37.84275551863 ], [ 38.957096996704, 37.792202831406 ], [ 38.602753996787, 37.838663214815 ], [ 38.517296950292, 37.849653928237 ], [ 38.25746688127, 37.873441298991 ], [ 37.97604051213, 37.882904896395 ], [ 37.667590401987, 37.901487625443 ], [ 37.385944481976, 37.909147753198 ], [ 37.064686730125, 37.911279992019 ], [ 36.778429149306, 37.878855450536 ], [ 36.552107404941, 37.856729961948 ], [ 36.286540580554, 37.829051249123 ], [ 36.009994356161, 37.785937350417 ], [ 35.732345989508, 37.726693687015 ], [ 35.447801707451, 37.690159439427 ], [ 35.150587320581, 37.615017997341 ], [ 34.833008476057, 37.516992788466 ], [ 34.575277517962, 37.430347198153 ], [ 34.564291307453, 37.426876167462 ], [ 34.239963814904, 37.323644175383 ], [ 33.965881679795, 37.251535368087 ], [ 33.710143638058, 37.15489636574 ], [ 33.523439348256, 37.077961638532 ], [ 33.357740559181, 37.19157619123 ], [ 33.233286047644, 37.306937100521 ], [ 33.202666019561, 37.335231622111 ], [ 33.047629047876, 37.49402560649 ], [ 32.922610024595, 37.690075598769 ], [ 32.828456542522, 37.790979828289 ], [ 32.884500077789, 37.893430930658 ], [ 32.923432328031, 38.006313071646 ], [ 32.922494470764, 38.012876132967 ] ] ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 177,
+      "end" : 187
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Cappadocia"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/7373da56-3776-4958-9672-329316cf19eb",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/629004",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:54:52+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:54:52+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 36.25, 38.25 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 167,
+      "end" : 175
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Cataonia"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/0c9d37f7-4d6b-4162-9088-86cd14ac1c2d",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://geo-kima.org/place/1253",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:59:20+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:59:20+00:00",
+    "purpose" : "georeferencing"
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 342,
+      "end" : 355
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Halicarnassus"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/13ad31a7-556c-4217-9752-b5e8fab887a9",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/857264",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:57:09+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:57:09+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 39.648355, 40.543937 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 295,
+      "end" : 301
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Patara"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/055282c2-818d-4b3d-9c51-9358a4510e7c",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/638796",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:57:36+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:57:36+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 28.621536, 36.825909 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 321,
+      "end" : 327
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Caunus"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/36f2d113-3401-411a-ac11-ccf7cd19360a",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/599581",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:59:14+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T16:59:14+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 27.17, 36.844 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 337,
+      "end" : 340
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Cos"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/336899c0-3f43-4214-9966-66f28fa7fcf5",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/373872",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:04:54+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:04:54+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 21.631788, 32.919182 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 1383,
+      "end" : 1389
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Phycus"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/c8420a02-e3c9-4b2c-83dc-586f0cfb14ec",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://sws.geonames.org/749780",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:01:09+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:01:09+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 26.41271, 40.15552 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 712,
+      "end" : 723
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Dardanelles"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/14aa1963-a086-4247-b51a-153796609d29",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/256063",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:06:59+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:06:59+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ -5.410359, 36.183163 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 559,
+      "end" : 566
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Carteia"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/f9a93fdf-bda4-4b60-8253-24da7827ebc5",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://dare.ht.lu.se/places/43582",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:13:26+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:13:26+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 23.19975, 36.43603 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 808,
+      "end" : 813
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Malea"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/3463aa4c-b8ba-4e00-acaf-f8c05af52883",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/895916364",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:06:18+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:06:18+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ 15.2590759, 37.0750458 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 487,
+      "end" : 495
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Syracuse"
+    } ]
+  }
+}, {
+  "@context" : "http://www.w3.org/ns/anno.jsonld",
+  "id" : "https://recogito.pelagios.org/annotation/6a64a07e-56e2-417a-bf77-bb8e4fd9bcd6",
+  "type" : "Annotation",
+  "generator" : {
+    "id" : "https://recogito.pelagios.org/",
+    "type" : "Software",
+    "name" : "Recogito",
+    "homepage" : "https://recogito.pelagios.org/"
+  },
+  "generated" : "2024-12-08T09:35:55+00:00",
+  "body" : [ {
+    "type" : "SpecificResource",
+    "value" : "http://pleiades.stoa.org/places/256177",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:07:04+00:00",
+    "purpose" : "identifying"
+  }, {
+    "type" : "Feature",
+    "creator" : "https://recogito.pelagios.org/lauren",
+    "modified" : "2024-06-01T17:07:04+00:00",
+    "purpose" : "georeferencing",
+    "geometry" : {
+      "type" : "Point",
+      "coordinates" : [ -6.294444, 36.528381 ]
+    }
+  } ],
+  "target" : {
+    "source" : "https://recogito.pelagios.org/part/a3cf546f-d296-4b36-8863-e9830c7ce241",
+    "type" : "Text",
+    "label" : "PlinyCapeMalea.txt",
+    "selector" : [ {
+      "type" : "TextPositionSelector",
+      "start" : 572,
+      "end" : 577
+    }, {
+      "type" : "TextQuoteSelector",
+      "exact" : "Gades"
+    } ]
+  }
+} ]

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-model href="http://www.tei-c.org/release/xml/tei/custom/schema/relaxng/tei_all.rng" type="application/xml"?>
+<!-- Constructed for the tests of src/engine/hermes/tei.js: not a real edition. -->
+<TEI xmlns="http://www.tei-c.org/ns/1.0" xml:lang="en">
+  <teiHeader>
+    <fileDesc>
+      <titleStmt>
+        <title type="sub">A test edition</title>
+        <title type="main">A Journey through Achaia</title>
+        <author>Pausanias</author>
+        <editor>A. N. Editor</editor>
+      </titleStmt>
+      <publicationStmt>
+        <publisher>Example Press</publisher>
+        <date when="2026-09-30">2026</date>
+        <idno type="DOI">10.5281/zenodo.0000000</idno>
+        <availability>
+          <licence target="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</licence>
+        </availability>
+      </publicationStmt>
+      <sourceDesc>
+        <bibl>Pausanias, <title>Description of Greece</title>, book 2 (Teubner, 1903)</bibl>
+      </sourceDesc>
+    </fileDesc>
+  </teiHeader>
+  <text>
+    <body>
+      <div type="book" n="2">
+        <div type="chapter" n="1">
+          <pb n="12"/>
+          <p>
+            <milestone unit="section" n="1"/>The land of <placeName ref="https://pleiades.stoa.org/places/570182" key="corinth">Corinth<note>The city, not the gulf.</note></placeName>
+            is a part of the Argive land.
+            <milestone unit="section" n="2"/>Near it lies
+            <placeName ref="https://pleiades.stoa.org/places/570536 https://sws.geonames.org/257880/">Kenchreai</placeName>,
+            and on the other side <placeName xml:id="lech">Lechaeum</placeName>.
+          </p>
+        </div>
+        <div type="chapter" n="2">
+          <pb n="13"/>
+          <p>The road runs on to <placeName ref="https://pleiades.stoa.org/places/570700"><settlement>Sikyon</settlement></placeName>,
+            <note>Some editors read <placeName ref="https://pleiades.stoa.org/places/570642">Phlious</placeName> here.</note>
+            and from there to <placeName xml:id="arg" ref="https://pleiades.stoa.org/places/570106">Argos</placeName>.</p>
+        </div>
+      </div>
+    </body>
+  </text>
+</TEI>

@@ -1,0 +1,328 @@
+[
+  {
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "id": "https://recogito.pelagios.org/annotation/7d0e2c10-0001-4000-8000-000000000001",
+    "type": "Annotation",
+    "generator": {
+      "id": "https://recogito.pelagios.org/",
+      "type": "Software",
+      "name": "Recogito",
+      "homepage": "https://recogito.pelagios.org/"
+    },
+    "generated": "2026-09-30T08:00:00+00:00",
+    "body": [
+      {
+        "type": "SpecificResource",
+        "value": "http://pleiades.stoa.org/places/570536",
+        "note": "Corinth, not Kenchreai",
+        "creator": "https://recogito.pelagios.org/annotator",
+        "modified": "2026-09-29T14:02:11+00:00",
+        "purpose": "identifying"
+      },
+      {
+        "type": "Feature",
+        "creator": "https://recogito.pelagios.org/annotator",
+        "modified": "2026-09-29T14:02:11+00:00",
+        "purpose": "georeferencing",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            22.88,
+            37.906
+          ]
+        }
+      },
+      {
+        "type": "TextualBody",
+        "value": "The harbour town is meant here.",
+        "creator": "https://recogito.pelagios.org/annotator",
+        "modified": "2026-09-29T14:02:11+00:00",
+        "purpose": "commenting"
+      },
+      {
+        "type": "TextualBody",
+        "id": "http://vocab.getty.edu/aat/300008347",
+        "value": "inhabited places",
+        "creator": "https://recogito.pelagios.org/annotator",
+        "modified": "2026-09-29T14:02:11+00:00",
+        "purpose": "tagging"
+      },
+      {
+        "type": "TextualBody",
+        "value": "to check",
+        "creator": "https://recogito.pelagios.org/annotator",
+        "modified": "2026-09-29T14:02:11+00:00",
+        "purpose": "tagging"
+      }
+    ],
+    "target": {
+      "source": "https://recogito.pelagios.org/part/0b8f3c2e-5d41-4c6a-9e0f-1a2b3c4d5e6f",
+      "type": "Text",
+      "label": "strabo-geography-book8.txt",
+      "selector": [
+        {
+          "type": "TextPositionSelector",
+          "start": 10412,
+          "end": 10421
+        },
+        {
+          "type": "TextQuoteSelector",
+          "exact": "Corinthus"
+        }
+      ]
+    }
+  },
+  {
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "id": "https://recogito.pelagios.org/annotation/7d0e2c10-0001-4000-8000-000000000002",
+    "type": "Annotation",
+    "generator": {
+      "id": "https://recogito.pelagios.org/",
+      "type": "Software",
+      "name": "Recogito",
+      "homepage": "https://recogito.pelagios.org/"
+    },
+    "generated": "2026-09-30T08:00:00+00:00",
+    "body": [
+      {
+        "type": "SpecificResource",
+        "value": "http://pleiades.stoa.org/places/570728",
+        "modified": "2026-09-28T09:00:00+00:00",
+        "purpose": "identifying"
+      },
+      {
+        "type": "Feature",
+        "modified": "2026-09-28T09:00:00+00:00",
+        "purpose": "georeferencing",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            22.97,
+            37.88
+          ]
+        }
+      }
+    ],
+    "target": {
+      "source": "https://recogito.pelagios.org/part/0b8f3c2e-5d41-4c6a-9e0f-1a2b3c4d5e6f",
+      "type": "Text",
+      "label": "strabo-geography-book8.txt",
+      "selector": [
+        {
+          "type": "TextPositionSelector",
+          "start": 10530,
+          "end": 10538
+        },
+        {
+          "type": "TextQuoteSelector",
+          "exact": "Lechaeum"
+        }
+      ]
+    }
+  },
+  {
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "id": "https://recogito.pelagios.org/annotation/7d0e2c10-0001-4000-8000-000000000003",
+    "type": "Annotation",
+    "generator": {
+      "id": "https://recogito.pelagios.org/",
+      "type": "Software",
+      "name": "Recogito",
+      "homepage": "https://recogito.pelagios.org/"
+    },
+    "generated": "2026-09-30T08:00:00+00:00",
+    "body": [
+      {
+        "type": "SpecificResource",
+        "value": "PLACE",
+        "creator": "https://recogito.pelagios.org/annotator",
+        "modified": "2026-09-29T14:02:11+00:00",
+        "purpose": "identifying"
+      }
+    ],
+    "target": {
+      "source": "https://recogito.pelagios.org/part/0b8f3c2e-5d41-4c6a-9e0f-1a2b3c4d5e6f",
+      "type": "Text",
+      "label": "strabo-geography-book8.txt",
+      "selector": [
+        {
+          "type": "TextPositionSelector",
+          "start": 10601,
+          "end": 10607
+        },
+        {
+          "type": "TextQuoteSelector",
+          "exact": "Olmiae"
+        }
+      ]
+    }
+  },
+  {
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "id": "https://recogito.pelagios.org/annotation/7d0e2c10-0001-4000-8000-000000000004",
+    "type": "Annotation",
+    "generator": {
+      "id": "https://recogito.pelagios.org/",
+      "type": "Software",
+      "name": "Recogito",
+      "homepage": "https://recogito.pelagios.org/"
+    },
+    "generated": "2026-09-30T08:00:00+00:00",
+    "body": [
+      {
+        "type": "SpecificResource",
+        "value": "PERSON",
+        "creator": "https://recogito.pelagios.org/annotator",
+        "modified": "2026-09-29T14:02:11+00:00",
+        "purpose": "identifying"
+      }
+    ],
+    "target": {
+      "source": "https://recogito.pelagios.org/part/0b8f3c2e-5d41-4c6a-9e0f-1a2b3c4d5e6f",
+      "type": "Text",
+      "label": "strabo-geography-book8.txt",
+      "selector": [
+        {
+          "type": "TextPositionSelector",
+          "start": 10702,
+          "end": 10711
+        },
+        {
+          "type": "TextQuoteSelector",
+          "exact": "Periander"
+        }
+      ]
+    }
+  },
+  {
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "id": "https://recogito.pelagios.org/annotation/7d0e2c10-0001-4000-8000-000000000005",
+    "type": "Annotation",
+    "generator": {
+      "id": "https://recogito.pelagios.org/",
+      "type": "Software",
+      "name": "Recogito",
+      "homepage": "https://recogito.pelagios.org/"
+    },
+    "generated": "2026-09-30T08:00:00+00:00",
+    "body": [
+      {
+        "type": "SpecificResource",
+        "value": "EVENT",
+        "creator": "https://recogito.pelagios.org/annotator",
+        "modified": "2026-09-29T14:02:11+00:00"
+      }
+    ],
+    "target": {
+      "source": "https://recogito.pelagios.org/part/0b8f3c2e-5d41-4c6a-9e0f-1a2b3c4d5e6f",
+      "type": "Text",
+      "label": "strabo-geography-book8.txt",
+      "selector": [
+        {
+          "type": "TextPositionSelector",
+          "start": 10801,
+          "end": 10819
+        },
+        {
+          "type": "TextQuoteSelector",
+          "exact": "the Isthmian Games"
+        }
+      ]
+    }
+  },
+  {
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "id": "https://recogito.pelagios.org/annotation/7d0e2c10-0001-4000-8000-000000000006",
+    "type": "Annotation",
+    "generator": {
+      "id": "https://recogito.pelagios.org/",
+      "type": "Software",
+      "name": "Recogito",
+      "homepage": "https://recogito.pelagios.org/"
+    },
+    "generated": "2026-09-30T08:00:00+00:00",
+    "body": [
+      {
+        "type": "TextualBody",
+        "value": "Sicyon",
+        "creator": "https://recogito.pelagios.org/annotator",
+        "modified": "2026-09-29T14:02:11+00:00",
+        "purpose": "transcribing"
+      },
+      {
+        "type": "SpecificResource",
+        "value": "http://pleiades.stoa.org/places/570670",
+        "creator": "https://recogito.pelagios.org/annotator",
+        "modified": "2026-09-29T14:02:11+00:00",
+        "purpose": "identifying"
+      },
+      {
+        "type": "Feature",
+        "creator": "https://recogito.pelagios.org/annotator",
+        "modified": "2026-09-29T14:02:11+00:00",
+        "purpose": "georeferencing",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            22.718,
+            37.985
+          ]
+        }
+      }
+    ],
+    "target": {
+      "source": "https://recogito.pelagios.org/part/1c9e7d2a-3b4f-4a5e-8d6c-7f8091a2b3c4",
+      "type": "Image",
+      "label": "Peloponnesus map",
+      "selector": [
+        {
+          "type": "SvgSelector",
+          "value": "<svg><polygon points=\"1024,880 1100,880 1100,940 1024,940\"/></svg>"
+        }
+      ]
+    }
+  },
+  {
+    "@context": "http://www.w3.org/ns/anno.jsonld",
+    "id": "https://recogito.pelagios.org/annotation/7d0e2c10-0001-4000-8000-000000000007",
+    "type": "Annotation",
+    "generator": {
+      "id": "https://recogito.pelagios.org/",
+      "type": "Software",
+      "name": "Recogito",
+      "homepage": "https://recogito.pelagios.org/"
+    },
+    "generated": "2026-09-30T08:00:00+00:00",
+    "body": [
+      {
+        "type": "SpecificResource",
+        "value": "http://pleiades.stoa.org/places/570406",
+        "creator": "https://recogito.pelagios.org/annotator",
+        "modified": "2026-09-29T14:02:11+00:00",
+        "purpose": "identifying"
+      }
+    ],
+    "target": {
+      "source": "https://recogito.pelagios.org/part/2d0f8e3b-4c50-4b6f-9e7d-8091a2b3c4d5",
+      "type": "Text",
+      "label": "pausanias-2.xml",
+      "selector": [
+        {
+          "type": "TextQuoteSelector",
+          "exact": "Argos"
+        },
+        {
+          "type": "RangeSelector",
+          "startSelector": {
+            "type": "XPathSelector",
+            "value": "/TEI[1]/text[1]/body[1]/div[2]/p[4]"
+          },
+          "endSelector": {
+            "type": "XPathSelector",
+            "value": "/TEI[1]/text[1]/body[1]/div[2]/p[5]"
+          }
+        }
+      ]
+    }
+  }
+]

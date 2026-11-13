@@ -28,5 +28,5 @@ test('the badges carry the version and the concept DOI from CITATION.cff, and th
   const readme = readFileSync(root('README.md'), 'utf8');
   for (const f of ['doi', 'status', 'version']) assert.ok(readme.includes(`](badges/${f}.svg)`), f);
   assert.ok(readme.includes(`(https://doi.org/${doi})`));
-  assert.match(readme, /<a id="status"><\/a>\*\*Status: experimental — under development; not yet in beta testing\.\*\*/);
+  assert.match(readme, /<a id="status"><\/a>\*\*Status: Experimental, under development; one workflow, Map your data, is in beta testing\.\*\*/);
 });

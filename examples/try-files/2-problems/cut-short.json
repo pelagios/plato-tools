@@ -1,0 +1,601 @@
+{
+  "$schema": "https://w3id.org/plato/schemas/place-centric.schema.json",
+  "profile": "place-centric",
+  "gazetteer": {
+    "@id": "https://whgazetteer.org/example/king-john/",
+    "title": "King John's itinerary, June and July 1215",
+    "description": "King John's movements from 1 June to 17 July 1215, as T. D. Hardy traced them (1835): a worked example of PLATO's itinerary pattern. Locations and identities from Wikidata.",
+    "creator": [
+      {
+        "@id": "https://orcid.org/0000-0003-3060-0181"
+      }
+    ],
+    "licence": "https://creativecommons.org/licenses/by/4.0/",
+    "status": "draft",
+    "keywords": [
+      "itineraries",
+      "King John",
+      "Magna Carta"
+    ],
+    "spatial": [
+      "http://www.wikidata.org/entity/Q21"
+    ],
+    "temporal": {
+      "startDate": "1215-06-01",
+      "endDate": "1215-07-17"
+    },
+    "uriSpace": "https://whgazetteer.org/example/king-john/"
+  },
+  "spatialEntities": [
+    {
+      "@id": "https://whgazetteer.org/example/king-john/place/itinerary-1215",
+      "label": "King John's itinerary, 1 June to 17 July 1215",
+      "entityIdentifier": "itinerary-1215",
+      "attestations": [
+        {
+          "timespans": [
+            {
+              "sourceLabel": "1215",
+              "startEarliest": "1215-06-01",
+              "endLatest": "1215-07-17"
+            }
+          ],
+          "citations": [
+            {
+              "source": {
+                "@id": "https://whgazetteer.org/example/king-john/source/hardy-1835",
+                "title": "A Description of the Patent Rolls in the Tower of London; to which is added an Itinerary of King John",
+                "citation": "T. D. Hardy, A Description of the Patent Rolls in the Tower of London; to which is added an Itinerary of King John, with prefatory observations (London: Record Commission, 1835)",
+                "uri": "https://archive.org/details/descriptionofpat00hard",
+                "authorityType": "source",
+                "timespan": {
+                  "sourceLabel": "1835",
+                  "startEarliest": "1835",
+                  "endLatest": "1835"
+                },
+                "derivedFrom": {
+                  "@id": "https://whgazetteer.org/example/king-john/source/chancery-rolls",
+                  "title": "Enrolled royal letters of 1215",
+                  "citation": "The attestations of King John's letters of 1215, enrolled on the Chancery rolls, from which Hardy traced the King's movements",
+                  "authorityType": "source",
+                  "timespan": {
+                    "sourceLabel": "1215",
+                    "startEarliest": "1215",
+                    "endLatest": "1215"
+                  }
+                },
+                "licence": "https://creativecommons.org/publicdomain/mark/1.0/"
+              },
+              "locator": "pp. 108-109",
+              "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+            }
+          ],
+          "notes": "Dated to the span Hardy's pages cover, which is the evidence for the type. It is not the journey's overall span entered as a fact: a platform works that out from the stops.",
+          "types": [
+            {
+              "identifier": "https://w3id.org/plato#TypeItinerary",
+              "label": "itinerary"
+            }
+          ]
+        }
+      ],
+      "ccodes": [
+        "GB"
+      ]
+    },
+    {
+      "@id": "https://whgazetteer.org/example/king-john/place/windsor",
+      "label": "Windsor",
+      "entityIdentifier": "windsor",
+      "attestations": [
+        {
+          "timespans": [
+            {
+              "sourceLabel": "undated"
+            }
+          ],
+          "citations": [
+            {
+              "source": {
+                "@id": "https://whgazetteer.org/example/king-john/source/wikidata",
+                "title": "Wikidata",
+                "citation": "Wikidata, https://www.wikidata.org/ (consulted 29 September 2026)",
+                "uri": "https://www.wikidata.org/",
+                "authorityType": "source",
+                "timespan": {
+                  "sourceLabel": "2026",
+                  "startEarliest": "2026",
+                  "endLatest": "2026"
+                },
+                "licence": "https://creativecommons.org/publicdomain/zero/1.0/"
+              },
+              "locator": "Q464955",
+              "citationFunction": "http://purl.org/spar/cito/citesAsDataSource"
+            }
+          ],
+          "geometries": [
+            {
+              "reprPoint": [
+                -0.6,
+                51.48333
+              ],
+              "geojson": {
+                "type": "Point",
+                "coordinates": [
+                  -0.6,
+                  51.48333
+                ]
+              },
+              "role": "https://w3id.org/plato#RepresentativePoint"
+            }
+          ]
+        },
+        {
+          "timespans": [
+            {
+              "sourceLabel": "from the 1st to the 3d of June 1215",
+              "startEarliest": "1215-06-01",
+              "endLatest": "1215-06-03"
+            }
+          ],
+          "citations": [
+            {
+              "source": "https://whgazetteer.org/example/king-john/source/hardy-1835",
+              "locator": "p. 108",
+              "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+            }
+          ],
+          "relations": [
+            {
+              "relatesTo": "https://whgazetteer.org/example/king-john/place/itinerary-1215",
+              "relationType": "https://w3id.org/plato#MemberOf"
+            }
+          ],
+          "sequence": 1
+        },
+        {
+          "timespans": [
+            {
+              "sourceLabel": "until the 15th",
+              "startEarliest": "1215-06-09",
+              "endLatest": "1215-06-15"
+            }
+          ],
+          "citations": [
+            {
+              "source": "https://whgazetteer.org/example/king-john/source/hardy-1835",
+              "locator": "p. 108",
+              "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+            }
+          ],
+          "notes": "\"whence he returned to Windsor, and continued there until the 15th\".",
+          "relations": [
+            {
+              "relatesTo": "https://whgazetteer.org/example/king-john/place/itinerary-1215",
+              "relationType": "https://w3id.org/plato#MemberOf"
+            }
+          ],
+          "sequence": 6
+        },
+        {
+          "timespans": [
+            {
+              "sourceLabel": "until the 18th of June",
+              "startEarliest": "1215-06-15",
+              "endLatest": "1215-06-18"
+            }
+          ],
+          "citations": [
+            {
+              "source": "https://whgazetteer.org/example/king-john/source/hardy-1835",
+              "locator": "p. 108",
+              "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+            }
+          ],
+          "notes": "\"The King then returned to Windsor, and remained there until the 18th of June\".",
+          "relations": [
+            {
+              "relatesTo": "https://whgazetteer.org/example/king-john/place/itinerary-1215",
+              "relationType": "https://w3id.org/plato#MemberOf"
+            }
+          ],
+          "sequence": 8
+        },
+        {
+          "timespans": [
+            {
+              "sourceLabel": "did not finally leave Windsor and its vicinity before the 26th",
+              "startEarliest": "1215-06-18",
+              "endLatest": "1215-06-26"
+            }
+          ],
+          "citations": [
+            {
+              "source": "https://whgazetteer.org/example/king-john/source/hardy-1835",
+              "locator": "p. 108",
+              "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+            }
+          ],
+          "notes": "From the 18th to the 23rd he was \"every day both at Windsor and at Runnemead\"; see the Runnymede row without a sequence.",
+          "relations": [
+            {
+              "relatesTo": "https://whgazetteer.org/example/king-john/place/itinerary-1215",
+              "relationType": "https://w3id.org/plato#MemberOf"
+            }
+          ],
+          "sequence": 9
+        }
+      ],
+      "ccodes": [
+        "GB"
+      ],
+      "identityRelations": [
+        {
+          "subject": "https://whgazetteer.org/example/king-john/place/windsor",
+          "object": "http://www.wikidata.org/entity/Q464955",
+          "identityType": "exactMatch",
+          "basis": "The place Hardy names",
+          "source": {
+            "@id": "https://whgazetteer.org/example/king-john/source/wikidata",
+            "title": "Wikidata"
+          }
+        }
+      ]
+    },
+    {
+      "@id": "https://whgazetteer.org/example/king-john/place/odiham",
+      "label": "Odiham",
+      "entityIdentifier": "odiham",
+      "attestations": [
+        {
+          "timespans": [
+            {
+              "sourceLabel": "undated"
+            }
+          ],
+          "citations": [
+            {
+              "source": "https://whgazetteer.org/example/king-john/source/wikidata",
+              "locator": "Q928816",
+              "citationFunction": "http://purl.org/spar/cito/citesAsDataSource"
+            }
+          ],
+          "geometries": [
+            {
+              "reprPoint": [
+                -0.94777,
+                51.24566
+              ],
+              "geojson": {
+                "type": "Point",
+                "coordinates": [
+                  -0.94777,
+                  51.24566
+                ]
+              },
+              "role": "https://w3id.org/plato#RepresentativePoint"
+            }
+          ]
+        },
+        {
+          "timespans": [
+            {
+              "sourceLabel": "undated",
+              "startEarliest": "1215-06-03",
+              "endLatest": "1215-06-08"
+            }
+          ],
+          "citations": [
+            {
+              "source": "https://whgazetteer.org/example/king-john/source/hardy-1835",
+              "locator": "p. 108",
+              "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+            }
+          ],
+          "notes": "\"from which place he can be traced, by his attestations, to Odiham\". Hardy gives no date for this stop; from and to are those of the stops either side of it.",
+          "relations": [
+            {
+              "relatesTo": "https://whgazetteer.org/example/king-john/place/itinerary-1215",
+              "relationType": "https://w3id.org/plato#MemberOf"
+            }
+          ],
+          "sequence": 2
+        },
+        {
+          "timespans": [
+            {
+              "sourceLabel": "the 9th",
+              "startEarliest": "1215-06-09",
+              "endLatest": "1215-06-09"
+            }
+          ],
+          "citations": [
+            {
+              "source": "https://whgazetteer.org/example/king-john/source/hardy-1835",
+              "locator": "p. 108",
+              "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+            }
+          ],
+          "notes": "\"he was again at Odiham on the 9th\".",
+          "relations": [
+            {
+              "relatesTo": "https://whgazetteer.org/example/king-john/place/itinerary-1215",
+              "relationType": "https://w3id.org/plato#MemberOf"
+            }
+          ],
+          "sequence": 5
+        },
+        {
+          "timespans": [
+            {
+              "sourceLabel": "undated",
+              "startEarliest": "1215-06-26",
+              "endLatest": "1215-06-30"
+            }
+          ],
+          "citations": [
+            {
+              "source": "https://whgazetteer.org/example/king-john/source/hardy-1835",
+              "locator": "p. 108",
+              "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+            }
+          ],
+          "notes": "\"John then proceeded through Odiham to Winchester\". Hardy gives no date for this stop; from and to are those of the stops either side of it.",
+          "relations": [
+            {
+              "relatesTo": "https://whgazetteer.org/example/king-john/place/itinerary-1215",
+              "relationType": "https://w3id.org/plato#MemberOf"
+            }
+          ],
+          "sequence": 10
+        }
+      ],
+      "ccodes": [
+        "GB"
+      ],
+      "identityRelations": [
+        {
+          "subject": "https://whgazetteer.org/example/king-john/place/odiham",
+          "object": "http://www.wikidata.org/entity/Q928816",
+          "identityType": "exactMatch",
+          "basis": "The place Hardy names",
+          "source": {
+            "@id": "https://whgazetteer.org/example/king-john/source/wikidata",
+            "title": "Wikidata"
+          }
+        }
+      ]
+    },
+    {
+      "@id": "https://whgazetteer.org/example/king-john/place/winchester",
+      "label": "Winchester",
+      "entityIdentifier": "winchester",
+      "attestations": [
+        {
+          "timespans": [
+            {
+              "sourceLabel": "undated"
+            }
+          ],
+          "citations": [
+            {
+              "source": "https://whgazetteer.org/example/king-john/source/wikidata",
+              "locator": "Q172157",
+              "citationFunction": "http://purl.org/spar/cito/citesAsDataSource"
+            }
+          ],
+          "geometries": [
+            {
+              "reprPoint": [
+                -1.30861,
+                51.06333
+              ],
+              "geojson": {
+                "type": "Point",
+                "coordinates": [
+                  -1.30861,
+                  51.06333
+                ]
+              },
+              "role": "https://w3id.org/plato#RepresentativePoint"
+            }
+          ]
+        },
+        {
+          "timespans": [
+            {
+              "sourceLabel": "until the 8th",
+              "startEarliest": "1215-06-03",
+              "endLatest": "1215-06-08"
+            }
+          ],
+          "citations": [
+            {
+              "source": "https://whgazetteer.org/example/king-john/source/hardy-1835",
+              "locator": "p. 108",
+              "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+            }
+          ],
+          "notes": "\"where he remained until the 8th\".",
+          "relations": [
+            {
+              "relatesTo": "https://whgazetteer.org/example/king-john/place/itinerary-1215",
+              "relationType": "https://w3id.org/plato#MemberOf"
+            }
+          ],
+          "sequence": 3
+        },
+        {
+          "timespans": [
+            {
+              "sourceLabel": "until the end of June",
+              "startEarliest": "1215-06-26",
+              "endLatest": "1215-06-30"
+            }
+          ],
+          "citations": [
+            {
+              "source": "https://whgazetteer.org/example/king-john/source/hardy-1835",
+              "locator": "pp. 108-109",
+              "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+            }
+          ],
+          "notes": "\"and continued in that city until the end of June\".",
+          "relations": [
+            {
+              "relatesTo": "https://whgazetteer.org/example/king-john/place/itinerary-1215",
+              "relationType": "https://w3id.org/plato#MemberOf"
+            }
+          ],
+          "sequence": 11
+        }
+      ],
+      "ccodes": [
+        "GB"
+      ],
+      "identityRelations": [
+        {
+          "subject": "https://whgazetteer.org/example/king-john/place/winchester",
+          "object": "http://www.wikidata.org/entity/Q172157",
+          "identityType": "exactMatch",
+          "basis": "The place Hardy names",
+          "source": {
+            "@id": "https://whgazetteer.org/example/king-john/source/wikidata",
+            "title": "Wikidata"
+          }
+        }
+      ]
+    },
+    {
+      "@id": "https://whgazetteer.org/example/king-john/place/merton",
+      "label": "Merton",
+      "entityIdentifier": "merton",
+      "attestations": [
+        {
+          "timespans": [
+            {
+              "sourceLabel": "undated",
+              "startEarliest": "1215-06-08",
+              "endLatest": "1215-06-09"
+            }
+          ],
+          "citations": [
+            {
+              "source": "https://whgazetteer.org/example/king-john/source/hardy-1835",
+              "locator": "p. 108",
+              "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+            }
+          ],
+          "notes": "\"From Winchester he went to Merton\". Hardy does not say which Merton, so it is not located here. Hardy gives no date for this stop; from and to are those of the stops either side of it.",
+          "relations": [
+            {
+              "relatesTo": "https://whgazetteer.org/example/king-john/place/itinerary-1215",
+              "relationType": "https://w3id.org/plato#MemberOf"
+            }
+          ],
+          "sequence": 4
+        }
+      ],
+      "ccodes": [
+        "GB"
+      ]
+    },
+    {
+      "@id": "https://whgazetteer.org/example/king-john/place/runnymede",
+      "label": "Runnymede",
+      "entityIdentifier": "runnymede",
+      "attestations": [
+        {
+          "timespans": [
+            {
+              "sourceLabel": "1835",
+              "startEarliest": "1835",
+              "endLatest": "1835"
+            }
+          ],
+          "citations": [
+            {
+              "source": "https://whgazetteer.org/example/king-john/source/hardy-1835",
+              "locator": "p. 108",
+              "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+            }
+          ],
+          "notes": "Hardy's spelling.",
+          "names": [
+            {
+              "toponym": "Runnemead",
+              "language": "en",
+              "script": "Latn"
+            }
+          ],
+          "formStatus": "https://w3id.org/plato#Attested"
+        },
+        {
+          "timespans": [
+            {
+              "sourceLabel": "undated"
+            }
+          ],
+          "citations": [
+            {
+              "source": "https://whgazetteer.org/example/king-john/source/wikidata",
+              "locator": "Q1483542",
+              "citationFunction": "http://purl.org/spar/cito/citesAsDataSource"
+            }
+          ],
+          "geometries": [
+            {
+              "reprPoint": [
+                -0.56537,
+                51.44451
+              ],
+              "geojson": {
+                "type": "Point",
+                "coordinates": [
+                  -0.56537,
+                  51.44451
+                ]
+              },
+              "role": "https://w3id.org/plato#RepresentativePoint"
+            }
+          ]
+        },
+        {
+          "timespans": [
+            {
+              "sourceLabel": "the 15th",
+              "startEarliest": "1215-06-15",
+              "endLatest": "1215-06-15"
+            }
+          ],
+          "citations": [
+            {
+              "source": "https://whgazetteer.org/example/king-john/source/hardy-1835",
+              "locator": "p. 108",
+              "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+            }
+          ],
+          "notes": "\"on that day he met the barons at Runnemead by appointment, and there sealed the great charter\".",
+          "relations": [
+            {
+              "relatesTo": "https://whgazetteer.org/example/king-john/place/itinerary-1215",
+              "relationType": "https://w3id.org/plato#MemberOf"
+            }
+          ],
+          "sequence": 7
+        },
+        {
+          "timespans": [
+            {
+              "sourceLabel": "from which time until the 23d",
+              "startEarliest": "1215-06-18",
+              "endLatest": "1215-06-23"
+            }
+          ],
+          "citations": [
+            {
+              "source": "https://whgazetteer.org/example/king-john/source/hardy-1835",
+              "locator": "p. 108",
+              "citationFunction": "http://purl.org/spar/cito/citesAsEvidence"
+            }
+  

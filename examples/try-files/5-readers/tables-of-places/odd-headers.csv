@@ -1,0 +1,11 @@
+Place Name,LAT,Long,wikidata,Feature Type,Alt. names,Source,Remarks
+Roma,41.8933,12.4829,https://www.wikidata.org/wiki/Q220,city,Rome; Urbs,Itinerarium Antonini,the capital
+Athenae,37.9838,23.7275,https://www.wikidata.org/wiki/Q1524,city|polis,Athens,,
+Lutetia,48.8566,2.3522,https://www.wikidata.org/wiki/Q90,settlement,Paris,,
+Lutetia Parisiorum,48.85,2.35,https://www.wikidata.org/wiki/Q90,,,,a second row about the same place
+Londinium,51.5072,,https://www.wikidata.org/wiki/Q84,,,,longitude missing
+Eboracum,north,-1.08,https://www.wikidata.org/wiki/Q42462,,,,latitude not a number
+Thule,95,10,https://www.wikidata.org/wiki/Q208149,,,,latitude out of range
+Aquae Sulis,51.38,-2.36,,,,,no web address
+,10,10,,,,,no name and no web address
+

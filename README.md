@@ -9,7 +9,7 @@
 [![status: experimental](badges/status.svg)](#status)
 [![version](badges/version.svg)](CITATION.cff)
 
-<a id="status"></a>**Status: experimental — under development; not yet in beta testing.**
+<a id="status"></a>**Status: Experimental, under development; one workflow, Map your data, is in beta testing.**
 
 Tools for data about places in the formats of PLATO, the Place Attestation Ontology: check it,
 convert it, compare two versions of it, publish it. They run in your browser at
@@ -31,8 +31,12 @@ when converting, and what the version check reports. The rest of the [guide](htt
 itself. How the tools work, and how they are tested, is in [DEVELOPERS.md](DEVELOPERS.md).
 
 No data to hand? [Download example files](https://pelagios.org/plato-tools/try/plato-tools-try-files.zip)
-(zip, 344 KB) to try each tool with, and a README in it saying what each should show. The zip is
+(zip, 337 KB) to try each tool with, and a README in it saying what each should show. The zip is
 also in this repository, in [`public/try/`](public/try/).
+
+**Browsers.** Tested: current Chrome (Chromium) and Firefox, in an ordinary window. Not supported: a
+private or incognito window in Firefox, where the browser gives pages no private file storage and
+Check and Convert fail. <!-- SAFARI-LINE --> Safari: not yet checked. <!-- /SAFARI-LINE -->
 
 ## The toolbox
 
@@ -41,7 +45,7 @@ also in this repository, in [`public/try/`](public/try/).
 <tr><td nowrap><img src="public/icons/route.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Methodos</b>: workflows</td><td>Three questions choose a workflow, and a tracker beside the steps follows it through the tools step by step, choosing each step's tool and handing each step's file to the next. <i>Map your data</i> takes a table of place names from its columns to PLATO JSON: checked, converted, its regions (a parish, a county) identified level by level where the table gives them, the places looked up in the World Historical Gazetteer and reviewed, the decisions recorded with the region each place is in, places drawn or adopted in Chora and handed back, checked again and compared, and written out (a dataset already in the format chosen is offered to download as it is); <i>Publish a dataset</i> takes a PLATO dataset through Agora. The other six: <i>Places from an edition (TEI)</i> and <i>Places from Recogito</i> read the file into a PLATO dataset (Hermes) and then take Map your data's steps from the lookup on; <i>Match two datasets</i> finds the places of yours that may be the same as another dataset's, for review, and records the decisions in your dataset (compared with it) or in a file of their own; <i>Trace a historical map</i> begins in Chora, tracing places from a georeferenced map into a new dataset, looked up within the map's outline; <i>Make an open map</i> identifies and locates the places of a list or a dataset and makes a map of them in Chora for Wikipedia or Commons; <i>Release a new version</i> revises a new version against its published release (Mneme) so that nothing published is deleted or changed. Each but Make an open map can end with Agora's parts, if you say you will publish. Where addresses are minted, the interview asks for the base address, the same one as in Options. A workflow's project can also be kept in your World Historical Gazetteer workbench (when you allow it and give your token), opened from there, shared as a read-only link, and its history of saves listed, with any earlier version restored as a new save. Your place is kept in this browser (IndexedDB, and your file and the steps' files in its private storage, until you leave the workflow) and taken up again after a reload or a visit to Chora, with the file chosen again, or only for the tab when "keep working data" is off in Permissions; a step the tools cannot do yet is shown, skipped, and said why. First on the page, under "Guided workflows", and from the line "Not sure where to start?" beside the steps</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/tools.html#methodos">Following a workflow</a></td></tr>
 <tr><td nowrap><img src="public/icons/search-check.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Elenchos</b>: check</td><td>Finds every problem in a file, names it and says where it is</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/tools.html#checking">Checking</a></td></tr>
 <tr><td nowrap><img src="public/icons/arrow-right-left.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Metaphrasis</b>: convert</td><td>Writes a file in another format, and reports what that format cannot hold</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/tools.html#converting">Converting</a></td></tr>
-<tr><td nowrap><img src="public/icons/chart-column.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Arithmos</b>: statistical figures</td><td>Converts the figures a PLATO dataset holds to RDF Data Cube, and checks the result: Data Cube's integrity constraints, and the figures themselves (their universes, coordinates and values, and whether parts add up to their total). Reading figures out of a census table is not built yet</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/statistics.html">Statistical tables</a></td></tr>
+<tr><td nowrap><img src="public/icons/chart-column.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Arithmos</b>: statistical figures</td><td>Converts the figures a PLATO dataset holds to RDF Data Cube, and checks the result: Data Cube's integrity constraints, and the figures themselves (their universes, coordinates and values, and whether parts add up to their total). Figures can be read out of a census table with a description of its columns (Hermes)</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/statistics.html">Statistical tables</a></td></tr>
 <tr><td nowrap><img src="public/icons/history.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Mneme</b>: version check</td><td>Shows that a new version of a published dataset deleted and changed nothing</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/tools.html#comparing-two-versions">Comparing two versions</a></td></tr>
 <tr><td nowrap><img src="public/icons/scale.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Krisis</b>: match review</td><td>Suggests the places two datasets share, for you to accept or reject, and records each judgement as a PLATO attestation. It matches two files of your own, or looks places up in the World Historical Gazetteer and other reconciliation services, if you allow it in Permissions</td><td><a href="DEVELOPERS.md#match-review">Match review</a></td></tr>
 <tr><td nowrap><img src="public/icons/file-input.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Hermes</b>: readers</td><td>Brings other formats into PLATO: Recogito's annotations (with the regions marked on a georeferenced map placed as points, when the map's georeference is given), TEI editions, and any CSV or GeoJSON, its columns matched to PLATO; on the command line, a table of figures (a census, a return) described by its columns and read as Data Cube observations ([below](#tables-of-figures-a-census-a-return))</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/annotations.html">Annotations from Recogito</a></td></tr>
@@ -49,7 +53,7 @@ also in this repository, in [`public/try/`](public/try/).
 <tr><td nowrap><img src="public/icons/map-pinned.svg" alt="" width="26" height="26" align="absmiddle">&nbsp;<b>Chora</b>: place on the map</td><td>Shows a dataset's places on a map, and adds a point, line or area drawn there, or traced from a georeferenced historical map (IIIF, Allmaps), by hand or with assistance from its ink, citing the map. A map for Wikipedia or Commons can be made from its view (SVG and PNG, with the shaded relief where the site has it); Natural Earth's own modern names on it, if you ask for them, are in English only</td><td><a href="https://pelagios.org/place-attestation-ontology/guide/tools.html#chora">Placing on the map</a></td></tr>
 </table>
 
-Still to come, with the plan as a whole in [#1](https://github.com/pelagios/plato-tools/issues/1),
+Still to come, with the plan as a whole in [#34](https://github.com/pelagios/plato-tools/issues/34),
 and the issue for each where it has one:
 
 <table>
@@ -176,7 +180,7 @@ node bin/plato-tools.mjs preview --limit 5 my-places.csv                 # the f
 
 A CSV file (or a sheet of a workbook) of figures, with one header row, is read as PLATO statistical
 figures, each a `PropertyValue` that is also a Data Cube observation, when `--columns` describes it:
-the same JSON as for a table of places, with four more roles for a column (`period`, `dimension`,
+the same JSON as for a table of places, with five more roles for a column (`attribute`, `period`, `dimension`,
 `value`, `figure`), and the table's own description beside the columns. The tools never guess that
 a table is one; only a description given makes it so (there is no page for it yet).
 

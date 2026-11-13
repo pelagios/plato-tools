@@ -55,7 +55,7 @@ test('the pages give no element a title attribute, and their tooltips are there 
   // Chora's own controls are in what it puts into its root, in its module (src/chora/app.js).
   assert.deepEqual(tipsIn(readFileSync(new URL('../src/chora/app.js', import.meta.url), 'utf8')).slice(0, 1), ['Draw a point']);
   assert.match(index, /<a class="dev-badge" href="https:\/\/github.com\/pelagios\/plato-tools\/issues" data-tip-template="dev-tip">Experimental<\/a>/);
-  assert.match(index, /<template id="dev-tip">.*is experimental.*may change or break/);
+  assert.match(index, /<template id="dev-tip">.*Experimental, under development.*may change or break/);
   assert.match(index, /<script type="module" src=".\/src\/lib\/tooltip.js"><\/script>/);
 });
 

@@ -1,0 +1,10 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    { "type": "Feature", "id": "vindolanda", "properties": { "name": "Vindolanda", "type": "fort", "start": 85, "end": 370 },
+      "geometry": { "type": "Point", "coordinates": [-2.3606, 54.9911] } },
+    { "type": "Feature", "id": 2, "properties": { "name": "Coria", "type": "fort; town" },
+      "geometry": { "type": "Polygon", "coordinates": [[[-2.022, 54.972], [-2.016, 54.972], [-2.016, 54.975], [-2.022, 54.975], [-2.022, 54.972]]] } },
+    { "type": "Feature", "id": "magna", "properties": { "name": "Magna", "type": "fort" }, "geometry": { "type": "Point", "coordinates": [-2.5, 54.99] } }
+  ]
+}

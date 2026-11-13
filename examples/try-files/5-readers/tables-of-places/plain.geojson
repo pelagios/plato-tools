@@ -1,0 +1,15 @@
+{
+  "type": "FeatureCollection",
+  "name": "Some Roman forts",
+  "features": [
+    { "type": "Feature", "properties": { "NAME": "Vindolanda", "variants": ["Vindolana", "Vindolande"], "category": "fort", "garrison": "cohors IX Batavorum", "pop": 500 },
+      "geometry": { "type": "Point", "coordinates": [-2.3606, 54.9911] } },
+    { "type": "Feature", "properties": { "NAME": "Hadrian's Wall", "category": "frontier", "garrison": null },
+      "geometry": { "type": "LineString", "coordinates": [[-3.02, 54.90], [-2.36, 55.00], [-1.61, 54.99]] } },
+    { "type": "Feature", "bbox": [-2.02, 54.97, -2.01, 54.98], "surveyed_by": "a constructed example",
+      "properties": { "NAME": "Coria", "category": "fort" },
+      "geometry": { "type": "GeometryCollection", "geometries": [{ "type": "Point", "coordinates": [-2.019, 54.973] }] } },
+    { "type": "Feature", "properties": { "NAME": "Magna", "category": "fort" }, "geometry": null },
+    { "type": "Feature", "properties": { "category": "unnamed find-spot" }, "geometry": { "type": "Point", "coordinates": [-2.1, 54.9] } }
+  ]
+}
