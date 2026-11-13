@@ -23,7 +23,7 @@ import { PLATO_REPO } from './paths.js';
 import { file, textFile, go, outText } from './engine.js';
 
 const DIR = 'test/fixtures/generic/';
-const STAND_IN = 'https://example.org/my-dataset/';
+const STAND_IN = 'https://temporary.invalid/my-dataset/';
 const load = (f) => JSON.parse(readFileSync(`public/plato/${f}`, 'utf8'));
 const ajv = addPlatoFormats(new Ajv2020({ strict: false, allErrors: true, logger: strictFormatLogger }));
 ajv.addSchema(load('plato.schema.json'), 'https://w3id.org/plato/schemas/plato.schema.json');

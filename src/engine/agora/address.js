@@ -68,8 +68,61 @@ export function normaliseBase(base) {
   return base.endsWith('/') ? base : base + '/';
 }
 
+// ---- the stand-in base (Stephen, 13 November 2026: D2) ------------------------------------------------
+//
+// A table read with no base address has its places, and the regions it gives, minted under this base, so
+// that work can begin before the user has a web address of their own. It is temporary by its own words and
+// by its host: .invalid is reserved (RFC 2606) and can never be anyone's, so an address under it cannot be
+// mistaken for a real one, and none resolves. NOTHING UNDER IT IS EVER PUBLISHED: the real base is asked
+// for at publishing, minting rewrites every address under the stand-in to it (rewriteStandIn), and every
+// part of Agora refuses a dataset that still holds one (index.js). DEFAULT_TABLE_BASE in pipeline.js is
+// this address (a test holds the two together).
+export const STAND_IN_BASE = 'https://temporary.invalid/my-dataset/';
+// The stand-in before 13 November 2026, which datasets already made may hold: as temporary as the new one.
+export const OLD_STAND_IN_BASE = 'https://example.org/my-dataset/';
+const INVALID_HOST = /^https?:\/\/([^/?#\s]*\.)?invalid(:\d+)?([/?#]|$)/i;
+// Found anywhere in a text, for the guard: an address inside a longer string (a note quoting it) is still one.
+const STAND_IN_ANYWHERE = /https?:\/\/([A-Za-z0-9-]+\.)*invalid(:\d+)?(?=[/?#\s"'<>)]|$)|https:\/\/example\.org\/my-dataset\//i;
+/** Whether a web address is under a stand-in base: any host under .invalid, or the stand-in used before. */
+export const isStandIn = (iri) => typeof iri === 'string' && (INVALID_HOST.test(iri) || iri.startsWith(OLD_STAND_IN_BASE));
+/** Whether a text holds a stand-in address anywhere in it. */
+export const holdsStandIn = (text) => typeof text === 'string' && (text.includes('invalid') || text.includes('example.org/my-dataset/')) && STAND_IN_ANYWHERE.test(text);
+/**
+ * The first string anywhere in `value` (an object's values and its keys, an array's items, however deep)
+ * that holds a stand-in address, or null. What the guard asks of a gazetteer's description and of each record.
+ */
+export function standInIn(value) {
+  if (typeof value === 'string') return holdsStandIn(value) ? value : null;
+  if (!value || typeof value !== 'object') return null;
+  if (Array.isArray(value)) { for (const v of value) { const f = standInIn(v); if (f) return f; } return null; }
+  for (const k of Object.keys(value)) { const f = (holdsStandIn(k) ? k : null) || standInIn(value[k]); if (f) return f; }
+  return null;
+}
+/**
+ * `value` with every address under one of the stand-in bases `from` rewritten to be under `base` (a real
+ * base, with its closing '/'): every string, and every key, however deep; `count.n` is raised by one for each
+ * string changed. The rest of each address is kept as it is (place/<id>, a region's place/region-<hex>, an
+ * attestation's #a-<hash>, a candidate set's candidates/<name>#c-<hash>), so that everything that pointed
+ * at an address still points at it. Nothing else is touched.
+ */
+export function rewriteStandIn(value, base, from = [STAND_IN_BASE, OLD_STAND_IN_BASE], count = { n: 0 }) {
+  const text = (s) => {
+    let out = s;
+    for (const f of from) if (out.includes(f)) out = out.split(f).join(base);
+    if (out !== s) count.n++;
+    return out;
+  };
+  const walk = (v) => {
+    if (typeof v === 'string') return text(v);
+    if (!v || typeof v !== 'object') return v;
+    if (Array.isArray(v)) return v.map(walk);
+    return Object.fromEntries(Object.entries(v).map(([k, x]) => [text(k), walk(x)]));
+  };
+  return walk(value);
+}
+
 // What kind of host a base address is on decides how long its addresses can be trusted to last.
-const EXAMPLE_HOSTS = /(^|\.)(example\.(org|com|net)|whgazetteer\.org)$/;
+const EXAMPLE_HOSTS = /(^|\.)(example\.(org|com|net)|whgazetteer\.org|invalid)$/;
 /**
  * The kind of a base address:
  *  'w3id'      https://w3id.org/<name>/…, a permanent redirect service: its rules are generated here;

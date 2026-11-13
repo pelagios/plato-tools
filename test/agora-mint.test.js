@@ -383,3 +383,137 @@ test('a base given for the run is written into the copy, so the site and the w3i
   const same = await mint(json(doc(places())), { options: { base: X.slice(0, -1) } });
   assert.equal(item(same, 'base-written'), undefined);
 });
+
+// ---- the stand-in base: nothing temporary is ever published (Stephen, 13 November 2026) ------------------------
+// The dataset the Map your data review ended with (rich2: five places in five minted regions, nine identities each
+// promotedFrom a candidate of an exported set), as it was made under example.org/lancs/, moved here to the stand-in
+// base a table with no base address is read under, and to a real one as the control.
+const { STAND_IN_BASE, OLD_STAND_IN_BASE, holdsStandIn } = await import('../src/engine/agora/address.js');
+const { TEXT: AGORA_TEXT } = await import('../src/engine/agora/index.js');
+const RICH2 = readFileSync(new URL('./fixtures/myd/rich2.krisis-dataset.json', import.meta.url), 'utf8');
+const REAL = 'https://gazetteer.example.edu/lancs/';
+const rich2 = (base) => JSON.parse(RICH2.replaceAll('https://example.org/lancs/', base));
+/** What must survive a move of base untouched in number: the places, the regions among them, the identities and what they were promoted from, and every relation's target. */
+const tally = (text) => {
+  const recs = text.trimStart().startsWith('{"$schema"') && !text.includes('\n{') ? JSON.parse(text).spatialEntities : records(text);
+  const atts = recs.flatMap((r) => r.attestations || []);
+  const ids = atts.flatMap((a) => [].concat(a.identities || a.identityRelations || []).concat(a.subject ? [a] : []));
+  const all = JSON.stringify(recs);
+  return { places: recs.length, regions: recs.filter((r) => r['@id'].includes('/place/region-')).length, attestations: atts.length,
+    subjects: (all.match(/"subject":/g) || []).length, promotedFrom: (all.match(/"promotedFrom":/g) || []).length, relatesTo: (all.match(/"relatesTo":/g) || []).length, identities: ids.length };
+};
+async function part(name, d, options = {}) {
+  const e = env();
+  const input = await detect([json(d, 'rich2.json')]);
+  const r = await publish({ part: name, input, options: { name: 'rich2.json', ...options } }, e);
+  return { report: r.report, outputs: r.outputs, e, refused: r.report.items.find((i) => i.kind === 'stand-in-address') };
+}
+
+test('the guard: mint, report and site each refuse a dataset under the stand-in base, and one under a real base that still holds a temporary address; the same dataset under a real base is accepted', async () => {
+  const temporary = rich2(STAND_IN_BASE);
+  assert.ok(JSON.stringify(temporary).includes(STAND_IN_BASE + 'place/region-'), 'the fixture has regions under the stand-in');
+  // A region left behind: under a real base, one place still ContainedIn a region at its temporary address.
+  const behind = (stray) => {
+    const d = rich2(REAL);
+    const rel = d.spatialEntities.at(-1).attestations.find((a) => a.relations).relations[0];
+    rel.relatesTo = rel.relatesTo.replace(REAL, stray);
+    return d;
+  };
+  for (const name of ['mint', 'report', 'site']) {
+    // 1. The base itself is the stand-in: as the dataset's own base, and as the base given for the run.
+    for (const [why, d, options] of [['its own base', { ...temporary, gazetteer: { ...temporary.gazetteer, uriSpace: STAND_IN_BASE } }, {}], ['the base given', temporary, { base: STAND_IN_BASE }]]) {
+      const r = await part(name, d, options);
+      assert.equal(r.refused?.severity, 'error', `${name}, ${why}`);
+      assert.deepEqual(r.outputs, [], `${name}, ${why}: nothing is written`);
+      assert.ok(r.refused.examples[0].startsWith(STAND_IN_BASE), `${name}: the example is a temporary address`);
+      // In plain words: what they are, that nothing was written, and what to do.
+      assert.match(r.refused.message, /temporary web addresses|web addresses are temporary/);
+      assert.match(r.refused.message, /Nothing temporary is ever published, so nothing was written/);
+      assert.match(r.refused.message, /the web address your places will live under/);
+      assert.equal(r.refused.message, AGORA_TEXT[name === 'mint' ? 'stand-in-address-mint' : 'stand-in-address']);
+    }
+    // 2. A real base, and one address still temporary. The report and the site refuse it whatever it is under;
+    //    minting, which is where temporary addresses are moved, refuses the one it cannot move (another temporary host).
+    const stray = name === 'mint' ? 'https://elsewhere.invalid/x/' : STAND_IN_BASE;
+    const left = await part(name, behind(stray), { base: REAL });
+    assert.equal(left.refused?.severity, 'error', `${name}: a region left behind`);
+    assert.equal(left.refused.count, 1, name);
+    assert.ok(left.refused.examples[0].startsWith(stray + 'place/region-'), name);
+    assert.deepEqual(left.outputs, [], `${name}: nothing is written`);
+    // 3. The control: the same dataset under the real base is not refused, and is written.
+    const ok = await part(name, rich2(REAL), { base: REAL });
+    assert.equal(ok.refused, undefined, `${name}: a real base`);
+    assert.ok(!ok.report.items.some((i) => i.kind === 'stand-in-rewritten'), `${name}: nothing was moved`);
+    assert.equal(ok.outputs.length > 0, true, `${name}: written (${ok.report.items.filter((i) => i.severity === 'error').map((i) => i.kind)})`);
+  }
+  // The stand-in used before 13 November 2026 is as temporary.
+  const old = await part('site', rich2(OLD_STAND_IN_BASE), { base: OLD_STAND_IN_BASE });
+  assert.equal(old.refused?.severity, 'error');
+  // The w3id rules too, which a stand-in never had.
+  const w3id = await part('w3id', temporary, { base: STAND_IN_BASE, maintainers: ['someone'], repo: 'someone/lancs' });
+  assert.equal(w3id.refused?.severity, 'error'); assert.deepEqual(w3id.outputs, []);
+});
+
+test('the rewrite: minted with the real base, every address under the stand-in is moved to it, none is left anywhere in the copy, and nothing is lost on the way', async () => {
+  const before = tally(JSON.stringify(rich2(STAND_IN_BASE)));
+  assert.deepEqual([before.places, before.regions, before.subjects, before.promotedFrom, before.relatesTo], [10, 5, 9, 9, 9], 'the fixture, counted');
+  const e = env();
+  const r = await publish({ part: 'mint', input: await detect([json(rich2(STAND_IN_BASE), 'rich2.json')]), options: { name: 'rich2.json', base: REAL } }, e);
+  assert.equal(r.report.errors, 0, JSON.stringify(r.report.items.filter((i) => i.severity === 'error')));
+  assert.ok(!r.report.items.some((i) => i.kind === 'place-outside-base'), 'as it ended before: place-outside-base');
+  const text = outText(e, r.outputs[0].name);
+  // No stand-in survives, searched as text: the host, the base, and the guard's own test.
+  assert.equal(text.includes('.invalid'), false);
+  assert.equal(text.includes('temporary'), false);
+  assert.equal(holdsStandIn(text), false);
+  // And nothing is lost: an empty or shorter copy cannot pass.
+  const after = tally(text);
+  assert.deepEqual(after, before);
+  const head = JSON.parse(text.split('\n')[0]).gazetteer;
+  assert.equal(head.uriSpace, REAL); assert.equal(head['@id'], REAL);
+  assert.deepEqual(head.candidateSets.map((s) => s.startsWith(REAL + 'candidates/')), [true]);
+  const recs = records(text);
+  assert.ok(recs.every((p) => p['@id'].startsWith(REAL + 'place/')));
+  const atts = recs.flatMap((p) => p.attestations);
+  assert.ok(atts.every((a) => typeof a['@id'] === 'string' && a['@id'].startsWith(REAL + 'place/')), 'every attestation has its address, under the real base');
+  const targets = atts.flatMap((a) => (a.relations || []).map((x) => x.relatesTo));
+  assert.equal(targets.length, 9);
+  assert.ok(targets.every((t) => recs.some((p) => p['@id'] === t)), 'every relation still points at a place of the dataset');
+  assert.ok([...text.matchAll(/"promotedFrom":"([^"]+)"/g)].every((m) => m[1].startsWith(head.candidateSets[0] + '#c-')), 'each identity still names its candidate, in the set at its new address');
+  // It is exactly the copy minted from the same dataset made under the real base from the start.
+  const direct = env();
+  const d = await publish({ part: 'mint', input: await detect([json(rich2(REAL), 'rich2.json')]), options: { name: 'rich2.json', base: REAL } }, direct);
+  assert.equal(text, outText(direct, d.outputs[0].name));
+  // Said, with the count, so that the user knows the earlier files are not for publishing.
+  const said = r.report.items.find((i) => i.kind === 'stand-in-rewritten');
+  assert.equal(said?.severity, 'warning'); assert.deepEqual(said.examples, [REAL]);
+  assert.ok(said.count >= 10 + 9 + 9 + 9, `moved ${said.count}`);
+  // The copy is then taken by the report and the site, which refused the dataset before it.
+  for (const name of ['report', 'site']) {
+    const next = env();
+    const n = await publish({ part: name, input: await detect([textFile(text, r.outputs[0].name)]), options: {} }, next);
+    assert.ok(!n.report.items.some((i) => i.kind === 'stand-in-address'), name);
+    assert.equal(n.outputs.length > 0, true, `${name}: ${n.report.items.filter((i) => i.severity === 'error').map((i) => i.kind)}`);
+  }
+});
+
+test('a file written from a dataset still under the stand-in (LPF, RDF, tables) says, once, that it holds temporary addresses and is not for publishing; one under a real base says nothing', async () => {
+  for (const target of ['lpf', 'ntriples', 'tables', 'plato-jsonl']) {
+    const t = await go([json(rich2(STAND_IN_BASE), 'rich2.json')], 'convert', target);
+    const said = t.report.items.filter((i) => i.kind === 'stand-in-written');
+    assert.equal(said.length, 1, target);
+    assert.equal(said[0].severity, 'warning');
+    assert.equal(said[0].count, 10, `${target}: each of the ten places and regions holds one`);
+    assert.ok(said[0].examples[0].startsWith(STAND_IN_BASE), target);
+    assert.match(said[0].message, /temporary web addresses/);
+    assert.match(said[0].message, /not for publishing, nor for sending to a gazetteer/);
+    // The control: the same dataset under a real base, written the same way, with the same places.
+    const r = await go([json(rich2(REAL), 'rich2.json')], 'convert', target);
+    assert.ok(!r.report.items.some((i) => i.kind === 'stand-in-written'), target);
+    assert.equal(r.report.counts.places, t.report.counts.places);
+    assert.equal(r.report.counts.places, 10);
+  }
+  // A table read with no base says it in the reader's own words, and is not told twice.
+  const table = await go([textFile('id,name\n1,Mill\n', 'places.csv')], 'convert', 'lpf');
+  assert.deepEqual(table.report.items.filter((i) => /stand-in/.test(i.kind)).map((i) => i.kind), ['generic-stand-in-base']);
+});

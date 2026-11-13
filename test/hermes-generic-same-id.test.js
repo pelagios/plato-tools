@@ -15,7 +15,7 @@ import { GENERIC_KINDS } from '../src/engine/hermes/columns.js';
 import { file, textFile, go, outText } from './engine.js';
 
 const fx = (f) => file(`test/fixtures/generic/${f}`);
-const PLACE = (id) => `https://example.org/my-dataset/place/${id}`;
+const PLACE = (id) => `https://temporary.invalid/my-dataset/place/${id}`;
 const load = (f) => JSON.parse(readFileSync(`public/plato/${f}`, 'utf8'));
 const ajv = addPlatoFormats(new Ajv2020({ strict: false, allErrors: true, logger: strictFormatLogger }));
 ajv.addSchema(load('plato.schema.json'), 'https://w3id.org/plato/schemas/plato.schema.json');

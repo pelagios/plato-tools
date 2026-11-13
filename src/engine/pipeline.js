@@ -24,6 +24,7 @@ import { lineChunks, lines, jsonDocument, annotationItems, TABLE_SHEETS, DataErr
 import { csvRecords, textChunks, papaRecords, papaRow } from '../formats/csv.js';
 import { Report, LOSS_TEXT, droppedText, FORMAT_WORDS, WORKBOOK_TEXT, dateTimeWords, CANDIDATE_CHECK_TEXT, candidatesNotGivenText } from './report.js';
 import { RUN_TEXT } from './words.js';
+import { standInIn } from './agora/address.js';
 import { FigureCheck } from './figurecheck.js';
 import { checkCube } from './cubecheck.js';
 import { gzipped } from '../lib/gzip.js';
@@ -39,8 +40,10 @@ export const TARGETS = {
 };
 const TYPE = RDF + 'type';
 // The base address for the places and sources of spreadsheet tables when neither the conversion
-// (--base, the page's field) nor the about sheet's base_uri gives one: a stand-in, not a permanent one.
-export const DEFAULT_TABLE_BASE = 'https://example.org/my-dataset/';
+// (--base, the page's field) nor the about sheet's base_uri gives one: a stand-in, temporary by its own words
+// and on a host that can be nobody's (.invalid), and never published: STAND_IN_BASE in agora/address.js, which
+// says how it is guarded and replaced (a test holds the two together).
+export const DEFAULT_TABLE_BASE = 'https://temporary.invalid/my-dataset/';
 
 // ---- resources ------------------------------------------------------------------------------------
 export function prepare(res) {
@@ -624,7 +627,16 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   // out of the dataset); then nothing of it is written. A record read as null (an item of the file
   // that is not a place) is not left out by being passed through as null: it is written as before.
   const augmented = (ev) => (options.augment && ev.type === 'record' ? { ...ev, value: options.augment(ev.value) } : ev);
-  const write = async (ev) => { const out = augmented(ev); if (out.type === 'record' && out.value === null && ev.value !== null) return; await writer.event(out); };
+  // Nothing temporary is published (agora/address.js, the stand-in base): a conversion that writes a record holding a
+  // temporary web address says so once, at the end, unless the table's reader has said it already (generic-stand-in-base),
+  // so that a file written from a dataset still under the stand-in (LPF for a gazetteer, RDF, tables) is known not to be for publishing.
+  const temporary = { n: 0, example: undefined };
+  const write = async (ev) => {
+    const out = augmented(ev);
+    if (out.type === 'record' && out.value === null && ev.value !== null) return;
+    if (action === 'convert' && out.value) { const f = standInIn(out.value); if (f) { temporary.n++; temporary.example ??= f; } }
+    await writer.event(out);
+  };
   // options.signal: checked at the top of every loop over the records, so that a caller can stop a
   // long run at the next record (run(), above). A pass made by a helper is read through halting().
   const signal = options.signal;
@@ -950,6 +962,8 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   figures.finish();
   for (const c of membershipCycles(membership)) rep.error('membership-cycle', 'A route, itinerary or network is, through its members, a member of itself (MemberOf, followed round, comes back to where it started)', c);
   if (writer) await writer.close();
+  // (Said already: by a table's reader, generic-stand-in-base, or of spreadsheet tables with no base_uri, in the tables' own words.)
+  if (temporary.n && ![...rep.kinds.values()].some((k) => k.kind === 'generic-stand-in-base' || /made from a stand-in base/.test(k.message))) rep.add('warning', 'stand-in-written', LOSS_TEXT['stand-in-written'], temporary.example, temporary.n);
   // The code lists of a table of figures, which PLATO JSON has no place for: N-Triples beside the output, for the targets that hold figures.
   if (figureCodes && writer && action === 'convert' && ['plato-json', 'plato-jsonl', 'ntriples'].includes(target)) {
     const sink = await textOutput(env, (options.name || input.files[0].name).replace(/\.(gz)$/i, '').replace(/\.[^.]+$/, '') + '.codes.nt', options);

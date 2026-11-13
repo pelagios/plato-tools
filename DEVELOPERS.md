@@ -239,7 +239,7 @@ are held to.
   tables, N-Triples, or PLATO JSON made from RDF) neither carries nor reports.
 - **The base address** for the places and sources of a set of tables is the one given for the
   conversion (`--base`, or the page's field), else the about sheet's `base_uri`, else
-  `https://example.org/my-dataset/` (`DEFAULT_TABLE_BASE` in `pipeline.js`). A base given that
+  `https://temporary.invalid/my-dataset/` (`DEFAULT_TABLE_BASE` in `pipeline.js`). A base given that
   differs from `base_uri` is used, with a warning. Writing tables, a place's or source's address
   survives only if reading the tables back would mint the same one.
 - **Names where RDF needs addresses.** PLATO's context reads a gazetteer's `contributor` or an

@@ -34,6 +34,7 @@ import { whgIdOf, linkState } from './identities.js';
 import { distanceKm, LOOKUP_DEFAULTS } from './lookup.js';
 import { matchesOf } from './regions.js';
 import { licenceTerms, rightsStatement, attestationLicences } from '../agora/licence.js';
+import { isStandIn } from '../agora/address.js';
 import { collectWithdrawn, resolveWithdrawn } from '../../formats/shared.js';
 import ISO from '../../vendor/iso-countries.json' with { type: 'json' };
 export { QID, CONSENT, STATEMENTS, DEFAULT_STATEMENTS, MINT_VERSION, wdLang, checkMint } from './mint-section.js';
@@ -309,7 +310,8 @@ export function qualifying(work, places = null, { records = null, base = null } 
     const st = searchState(work, iri);
     if (st === null) { leave('notSearched'); continue; }
     if (st !== 'answered') { leave('unanswered'); continue; }
-    if (!HTTP.test(iri)) { leave('noAddress'); continue; }
+    // Nor a temporary one (the stand-in base, agora/address.js): nothing temporary is published, and an item cites its place's address.
+    if (!HTTP.test(iri) || isStandIn(iri)) { leave('noAddress'); continue; }
     if (base && !iri.startsWith(base)) { leave('outsideBase'); continue; }
     if (!(rec.label || p.label) && !(rec.names || p.names || []).length) { leave('noName'); continue; }
     if (!Array.isArray(rec.point ?? p.point) && !regionItem(work, iri)) { leave('noPoint'); continue; }

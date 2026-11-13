@@ -13,7 +13,7 @@ const result = `place.dataset ?? ${decided}`;
 export default {
   key: 'map-your-data',
   title: 'Map your data',
-  version: 3,
+  version: 4,   // 4 (13 November 2026): the dataset step's standInRegions and the mint step's base, for a table with regions and no base address
   files: {
     files: { words: 'The table of place names (a spreadsheet: .xlsx or .csv)', types: ['files'] },
   },
@@ -25,7 +25,10 @@ export default {
     'will-publish': { question: 'Will you publish the result?', kind: 'yes-no', default: false },
     // Issue #36: Wikidata items, under their own answer, no by default (the question is asked last).
     'will-mint': { question: 'Will you create Wikidata items for the places no gazetteer knows (a batch you run in QuickStatements yourself)?', kind: 'yes-no', default: false },
-    // Asked by the interview when the table gives regions, or the result is published (interview.js baseAsked), pre-filled from Options and written back there.
+    // Asked by the interview when the table gives regions, or the result is published (interview.js baseAsked), pre-filled from Options and written back
+    // there; optional in both (Stephen, 13 November 2026). Without it the dataset step mints the regions under the temporary stand-in base
+    // (`standInRegions`, with the places), the relate step exports its candidates for that base, and the mint step, given the real base when
+    // publishing (the base in Options then, or the host's), moves every temporary address to it; no part of publishing takes a temporary address.
     base: BASE,
     target: { question: 'In what format do you want the result?', kind: 'choice', choices: ['plato-json', 'plato-jsonl', 'tables', 'ntriples', 'lpf', 'lpf-seq'] },
     release: { question: 'What is this release called (for example 2026-10 or v1)?', kind: 'text', optional: true },
@@ -35,7 +38,7 @@ export default {
   steps: [
     { id: 'columns', op: 'read.columns', title: 'Match the columns to PLATO', from: { files: '$files' } },
     { id: 'check', op: 'check', title: 'Check the table', from: { files: '$files', mapping: 'columns.mapping' } },
-    { id: 'dataset', op: 'convert', title: 'Make a PLATO dataset of it', from: { files: '$files', mapping: 'columns.mapping' }, options: { target: 'plato-json', base: '$base' } },
+    { id: 'dataset', op: 'convert', title: 'Make a PLATO dataset of it', from: { files: '$files', mapping: 'columns.mapping' }, options: { target: 'plato-json', base: '$base', standInRegions: '$has-regions' } },
     { id: 'regions', op: 'lookup.levels', title: 'Identify the regions, the widest first', from: { subjects: 'dataset.dataset' }, when: 'has-regions' },
     { id: 'lookup', op: 'lookup', title: 'Look the places up in the World Historical Gazetteer', from: { subjects: 'dataset.dataset', work: 'regions.work' } },
     { id: 'review', op: 'review', title: 'Decide which candidates are the same place', from: { work: 'lookup.work' } },
@@ -46,7 +49,7 @@ export default {
     { id: 'again', op: 'check', title: 'Check the result', from: { files: result } },
     { id: 'compare', op: 'compare', title: 'Compare the result with the dataset made from the table', from: { earlier: 'dataset.dataset', later: result } },
     { id: 'out', op: 'convert', title: 'Write it out', from: { files: result }, options: { target: '$target' } },
-    { id: 'mint', op: 'publish.mint', title: 'Give every place and source a permanent address', from: { dataset: result }, options: { release: '$release' }, when: 'will-publish' },
+    { id: 'mint', op: 'publish.mint', title: 'Give every place and source a permanent address', from: { dataset: result }, options: { release: '$release', base: '$base' }, when: 'will-publish' },
     { id: 'report', op: 'publish.report', title: 'Write the FAIR report', from: { dataset: 'mint.dataset' }, options: { release: '$release' }, when: 'will-publish' },
     { id: 'site', op: 'publish.site', title: 'Build the web site', from: { dataset: 'mint.dataset' }, options: { release: '$release', repo: '$repo' }, when: 'will-publish' },
     { id: 'w3id', op: 'publish.w3id', title: 'Write the permanent-address rules', from: { dataset: 'mint.dataset' }, options: { repo: '$repo', maintainers: '$maintainers' }, when: 'will-publish' },

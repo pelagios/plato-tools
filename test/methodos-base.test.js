@@ -8,25 +8,32 @@ import { RECIPES, runner, writesItself, baseDiffers, digest, recordOf, reconcile
 
 const BASE = 'https://example.org/parishes/';
 
-test('the base address is asked only for a workflow that mints addresses: Map your data with regions (needed), Publish a dataset (optional)', () => {
+test('the base address is asked only for a workflow that mints addresses: Map your data with regions (optional since 13 November 2026: a temporary address is used without one), Publish a dataset (optional)', () => {
   const map = choose('table', 'map'), pub = choose('plato', 'publish'), mapPub = choose('table', 'publish');
   const yes = { 'has-regions': true, 'will-draw': false, 'will-publish': false }, no = { ...yes, 'has-regions': false };
-  assert.deepEqual(baseAsked(map, yes), { needed: true, question: RECIPES['map-your-data'].asks.base.question });
+  const LATER = 'Leave this empty if you have no web site for your places: a temporary address is used, and your own is asked for when you publish.';
+  assert.deepEqual(baseAsked(map, yes), { needed: false, question: RECIPES['map-your-data'].asks.base.question, why: LATER });
   assert.equal(baseAsked(map, no), null, 'no regions: nothing is minted, so it is not asked');
   assert.equal(baseAsked(map, {}), null, 'not before the regions question is answered');
-  assert.equal(baseAsked(mapPub, { 'has-regions': true, 'will-draw': false }).needed, true);
+  assert.equal(baseAsked(mapPub, { 'has-regions': true, 'will-draw': false }).needed, false);
+  // Control: a workflow that mints as it goes still needs it (Trace a historical map).
+  assert.equal(baseAsked(choose('map', 'map'), {}).needed, true);
   assert.deepEqual(baseAsked(pub, {}), { needed: false, question: RECIPES['publish-a-dataset'].asks.base.question });
   // Not asked by a choice that leads to no recipe, nor to the grid.
   assert.equal(baseAsked(choose('text', 'convert'), {}), null);
   assert.equal(baseAsked(choose('table', 'unsure'), {}), null);
 });
 
-test('with regions, the interview is answered only once a base address is given, and the address goes into the answers, and so to the steps that mint', () => {
+test('with regions, the interview is answered with no base address (the regions take a temporary one); given, the address goes into the answers, and so to the steps that mint', () => {
   const map = choose('table', 'map');
   const yes = { 'has-regions': true, 'will-draw': false, 'will-publish': false };
-  assert.equal(answered(map, yes), false);
-  assert.equal(answered(map, yes, { base: 'not an address' }), false);
+  assert.equal(answered(map, yes), true, 'no base: answered, and the regions are minted under the temporary stand-in');
+  assert.equal(Object.hasOwn(answersFor(map, yes), 'base'), false);
   assert.equal(answered(map, yes, { base: ` ${BASE} ` }), true);
+  // Control: where it is still needed (a map traced), no base is no answer.
+  const trace = choose('map', 'map'), traced = { 'will-identify': false, 'will-publish': false, 'will-mint': false };
+  assert.equal(answered(trace, traced), false);
+  assert.equal(answered(trace, traced, { base: BASE }), true);
   assert.equal(answersFor(map, yes, { base: ` ${BASE} ` }).base, BASE);
   // Without regions: answered without one, and none put in the answers even if typed.
   assert.equal(answered(map, { ...yes, 'has-regions': false }), true);
@@ -40,7 +47,12 @@ test('with regions, the interview is answered only once a base address is given,
   assert.equal(Object.hasOwn(mint(answersFor(pub, {})), 'base'), false);
   // Map your data's conversion takes it too.
   const conv = runner.start(RECIPES['map-your-data'], answersFor(map, yes, { base: BASE }), files).steps.find((s) => s.id === 'dataset').options;
-  assert.deepEqual(conv, { target: 'plato-json', base: BASE });
+  assert.deepEqual(conv, { target: 'plato-json', base: BASE, standInRegions: true });
+  // With no base: the conversion is told to mint the regions all the same (under the stand-in), and the publishing step is given none.
+  const bare = runner.start(RECIPES['map-your-data'], answersFor(map, { ...yes, 'will-publish': true }), files).steps;
+  assert.deepEqual(bare.find((s) => s.id === 'dataset').options, { target: 'plato-json', standInRegions: true });
+  assert.equal(Object.hasOwn(bare.find((s) => s.id === 'mint').options, 'base'), false);
+  assert.equal(runner.start(RECIPES['map-your-data'], answersFor(map, { ...yes, 'will-publish': true }, { base: BASE }), files).steps.find((s) => s.id === 'mint').options.base, BASE, 'the base given reaches the minting');
   assert.equal(baseAnswer('https://x.org/'), 'https://x.org/');
   assert.equal(baseAnswer('x.org'), null);
   assert.ok(plan('map-your-data', answersFor(map, yes, { base: BASE })).steps.length);
@@ -85,9 +97,9 @@ test('every workflow that publishes asks the base address, in the same words (on
   // "A citable, published dataset" settles publishing: asked at once. Not publishing and no regions: not asked (the absence beside the presences).
   assert.deepEqual(baseAsked(choose('table', 'publish'), { 'has-regions': false, 'will-draw': false }), { needed: false, question: RECIPES['map-your-data'].asks.base.question });
   assert.equal(baseAsked(map, { ...pub, 'will-publish': false }), null);
-  // With regions it is still needed, publishing or not.
-  assert.equal(baseAsked(map, { ...pub, 'has-regions': true }).needed, true);
-  assert.equal(baseAsked(map, { ...pub, 'has-regions': true, 'will-publish': false }).needed, true);
+  // With regions it is asked, publishing or not, and needed in neither (13 November 2026).
+  assert.equal(baseAsked(map, { ...pub, 'has-regions': true }).needed, false);
+  assert.equal(baseAsked(map, { ...pub, 'has-regions': true, 'will-publish': false }).needed, false);
 });
 
 test('a Map your data or Publish a dataset workflow kept from before the shared question is resumed: only the recipe\'s words changed, so it carries on, at its step', () => {

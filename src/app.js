@@ -16,6 +16,7 @@ import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed
 import { QUALIFIER_LISTS } from './engine/krisis/qualifiers.js';
 import { exportCandidates, readCandidateSet, serialiseCandidateSet } from './engine/krisis/candidates.js';
 import { datasetAddress, baseDiffers } from './engine/methodos/containment.js';
+import { STAND_IN_BASE } from './engine/agora/address.js';
 import { acceptGuarded, undoBatch, guardOf, guardsFirst, planGuarded } from './engine/krisis/guards.js';
 import { KRISIS_CANDIDATES, KRISIS_WITHDRAW, guardWords as GW, variantWords as VW, rowWords as RW } from './engine/words.js';
 import { keptFileStore, keptLine, sameAbout, onChange as keptChanged } from './lib/kept-file.js';
@@ -275,7 +276,9 @@ function start(action, earlier) {
   else worker.postMessage({ cmd: 'run', files, action, target, candidates: action === 'check' && earlier?.length ? earlier : undefined, options: { base, typing: $('typing').checked, cube: target === 'ntriples' && $('cube').checked, gzip: action === 'convert' && $('gzip').checked,
     // Hermes: the matching of columns shown, as chosen (the same JSON as the command line's --columns,
     // a pattern column in its object form), and the reading options chosen.
-    ...(isTable(input) && columns ? { columns: columnOptions() } : {}), ...sheetOption(), ...readingOptions(), ...(isTable(input) ? spellings.options() : {}) } });
+    ...(isTable(input) && columns ? { columns: columnOptions() } : {}), ...sheetOption(), ...readingOptions(), ...(isTable(input) ? spellings.options() : {}),
+    // Map your data, the table said to give regions: with no base address they are minted under the temporary stand-in, as the places are (generic.js).
+    ...(action === 'convert' && methodos.step()?.answers?.['has-regions'] === true ? { standInRegions: true } : {}) } });
 }
 // Agora's options, from the Options panel: only those given are sent.
 function publishOptions() {
@@ -1845,8 +1848,10 @@ $('export-candidates').onclick = () => {
   let x;
   // A table converted under a base address is that dataset (as Agora takes it): with no address of its
   // own, its candidates are exported for the base address given in Options, and the review keeps it.
-  const forBase = !work.subjects.uri && datasetAddress($('base').value);
-  if (forBase) Object.assign(work.subjects, { uri: forBase, uriFrom: 'base' });
+  // With no base address, a review with regions (minted under the temporary stand-in base, with the places) is exported for that base: minting moves it to the real one.
+  const typed = datasetAddress($('base').value);
+  const forBase = !work.subjects.uri && (typed || (Object.keys(work.regions || {}).length > 0 && STAND_IN_BASE));
+  if (forBase) Object.assign(work.subjects, { uri: forBase, uriFrom: typed ? 'base' : 'stand-in' });
   try { x = exportCandidates(work, { previousSets: earlierSets }); }
   catch (err) { if (forBase) { delete work.subjects.uri; delete work.subjects.uriFrom; } if (err?.name !== 'DataError') throw err; candidatesStatus(err.message, true); return; }
   work = x.work; exportedSet = x.set;

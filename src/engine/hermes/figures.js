@@ -183,7 +183,7 @@ function readTable(given, say) {
  * place, a 'record' for each new place, and last a 'codes' event with the code lists. `options.columns` is
  * the saved mapping { columns, table } (or the columns alone); `options.base` the base address.
  */
-export async function* figuresSource(input, rep, options = {}, defaultBase = 'https://example.org/my-dataset/') {
+export async function* figuresSource(input, rep, options = {}, defaultBase = 'https://temporary.invalid/my-dataset/') {
   const file = input.files[0];
   const KINDS = { ...GENERIC_KINDS, ...FIGURES_KINDS };
   const report = (kind, example) => rep.add(KINDS[kind] || 'loss', kind, LOSS_TEXT[kind] || kind, example);

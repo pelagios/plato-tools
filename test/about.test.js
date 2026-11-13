@@ -188,8 +188,8 @@ test('about: a missing base_uri is a warning that the addresses will not be perm
   assert.deepEqual(errors(r), []);
   assert.deepEqual(tableItems(r, 'warning'), ['about.csv, column base_uri: is empty, so the addresses of places and sources are made from a stand-in base and will not be permanent: give a base address you control']);
   const [head, ...places] = records(r);
-  assert.ok(places.every((p) => p['@id'].startsWith('https://example.org/my-dataset/place/')), 'the stand-in base');
-  assert.equal(head.gazetteer['@id'], 'https://example.org/my-dataset/', 'with no dataset_uri, the base is the gazetteer\'s address, as before');
+  assert.ok(places.every((p) => p['@id'].startsWith('https://temporary.invalid/my-dataset/place/')), 'the stand-in base');
+  assert.equal(head.gazetteer['@id'], 'https://temporary.invalid/my-dataset/', 'with no dataset_uri, the base is the gazetteer\'s address, as before');
   const given = await go(customsWith('T,,,,,https://creativecommons.org/licenses/by/4.0/,,draft,,,,,,,\n'), 'check', undefined, { base: 'https://example.org/c/' });
   assert.match(tableItems(given, 'warning')[0], /^about\.csv, column base_uri: is empty, so the addresses of places and sources are made from the base given for this conversion/);
 });

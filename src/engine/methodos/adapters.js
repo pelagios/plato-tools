@@ -35,6 +35,7 @@ import { seedRegions, levelsOf, regionNodes, regionProgress } from '../krisis/re
 import { exportCandidates, serialiseCandidateSet } from '../krisis/candidates.js';
 import { relateProblem, datasetAddress, containment } from './containment.js';
 import { OPERATIONS } from './operations.js';
+import { STAND_IN_BASE } from '../agora/address.js';
 import { HandoffError, refsOf, refsDiffer } from './handoffs.js';
 import * as runner from './runner.js';
 
@@ -89,7 +90,12 @@ const part = (name) => async ({ inputs, options, host, signal }) => {
   const [[slot, type]] = Object.entries(OPERATIONS[`publish.${name}`].gives);
   const input = await inputOf(inputs.dataset, host, 'dataset');
   const previous = inputs.previous ? await inputOf(inputs.previous, host, 'previous release') : undefined;
-  const r = await engine(host, type, (env) => publish({ part: name, input, previous, options: { ...options, signal } }, env));
+  // The base address asked for at publishing: the step's own (the workflow's answer), else the host's as it is
+  // now (host.base: the page's Options field), since a workflow begun with no base, its places and regions under
+  // the temporary stand-in, is given the real one only here (Stephen, 13 November 2026). Minting moves every
+  // temporary address to it; with none, Agora refuses in words (agora/index.js, 'stand-in-address').
+  const base = options.base ?? (typeof host.base === 'function' ? host.base() : host.base) ?? undefined;
+  const r = await engine(host, type, (env) => publish({ part: name, input, previous, options: { ...options, ...(base ? { base } : {}), signal } }, env));
   return r.problem ? r : { report: r.report, outputs: { [slot]: r.outputs } };
 };
 
@@ -125,7 +131,7 @@ export const REVIEWS = {
     const subjects = await inputOf(inputs.subjects, host, 'dataset');
     const g = await engine(host, null, (env) => gather({ subjects, options: { signal } }, env));
     if (g.problem) return g;
-    if (!g.result.regions?.length) throw new DataError('The dataset gives no regions its places lie in: its table was converted without "within" columns, or without a base address, so there is nothing to identify level by level.');
+    if (!g.result.regions?.length) throw new DataError('The dataset gives no regions its places lie in: its table was converted without "within" columns (columns read as regions), so there is nothing to identify level by level.');
     let work = partial?.work ? readWork(await (await filesFor(partial.work, host))[0].text()) : newWork(g.result.subjects, { reviewer: options.reviewer ?? null });
     seedRegions(work, g.result);
     const how = { lookup: host.lookup, signal, options: { ...(options.lookup || {}), scope }, reviewer: options.reviewer ?? null };
@@ -292,9 +298,10 @@ export const ADAPTERS = {
     const problem = relateProblem(work, { exported: false });
     if (problem) throw new DataError(problem);
     if (!work.subjects.uri) {
-      const uri = datasetAddress(options.base);
-      if (!uri) throw new DataError('The dataset has no address of its own, and no base address was given, so its candidates cannot be exported for it: give the base address the table was converted under.');
-      Object.assign(work.subjects, { uri, uriFrom: 'base' });
+      // With no base address given, the table was converted under the temporary stand-in base (its regions too),
+      // and its candidates are exported for that: minting moves them, with everything else, to the real base.
+      const given = datasetAddress(options.base);
+      Object.assign(work.subjects, { uri: given || STAND_IN_BASE, uriFrom: given ? 'base' : 'stand-in' });
     }
     const x = exportCandidates(work, { ...(options.issued ? { issued: options.issued } : {}) });
     work = x.work;
@@ -312,7 +319,7 @@ export const ADAPTERS = {
     const found = containment(doc, work);
     // Every place the review has within a region must still be ContainedIn one, and every matched region must have its identity, promotedFrom its candidate.
     const placesWithin = Object.values(work.places).filter((p) => typeof p.within === 'string').length;
-    if (found.containedIn < placesWithin) throw new DataError(`${placesWithin - found.containedIn} of the ${placesWithin} places in regions are not ContainedIn their region in the dataset: the table was converted without the regions it gives (Hermes writes them under a base address).`);
+    if (found.containedIn < placesWithin) throw new DataError(`${placesWithin - found.containedIn} of the ${placesWithin} places in regions are not ContainedIn their region in the dataset: the table was converted without the regions it gives (Hermes writes them under the base address, or a temporary one).`);
     if (found.missing.length) throw new Error(`${found.missing.length} matched ${found.missing.length === 1 ? 'region has' : 'regions have'} no identity naming the candidate it answers, which is a fault in the tools.`);
     return { report: { ...r.report, counts: { ...(r.report?.counts || {}), containment: found, candidateSet: x.setIri } }, outputs: { dataset: r.outputs } };
   },

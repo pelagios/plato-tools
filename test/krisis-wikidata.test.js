@@ -162,6 +162,13 @@ test('which places qualify: each reason to leave one out, and the same place rea
   // A place whose address is not under the base, or not a web address, has nothing the dataset will serve to cite.
   const w5 = workAfterReview([...places, { iri: 'urn:x-local:1', label: 'Nowhere', names: ['Nowhere'], point: [0, 50], identities: { linked: [], denied: [] } }]);
   assert.deepEqual(qualifying(w5, null, { base: X }).leftOut.noAddress, ['urn:x-local:1']);
+  // Nor has one under the temporary stand-in base (13 November 2026): nothing temporary is published, and an item cites its place's address.
+  const TEMP = 'https://temporary.invalid/my-dataset/place/1';
+  const w5t = workAfterReview([...places, { iri: TEMP, label: 'Nowhere', names: ['Nowhere'], point: [0, 50], identities: { linked: [], denied: [] } }]);
+  const q5t = qualifying(w5t, null);
+  assert.deepEqual(q5t.leftOut.noAddress, [TEMP]);
+  assert.equal(q5t.ready.includes(TEMP), false);
+  assert.equal(q5t.ready.includes(P('newstead')), true, 'the control: a place with a real address is ready beside it');
   assert.deepEqual(qualifying(w5, null, { base: 'https://elsewhere.example/' }).leftOut.outsideBase.includes(P('newstead')), true);
   // Never looked up in any other gazetteer: counted, not a reason.
   const w6 = workAfterReview(places); w6.lookups = [w6.lookups[1]]; w6.candidates = w6.candidates.filter((c) => c.lookup !== 'l1');

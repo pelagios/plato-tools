@@ -230,3 +230,29 @@ test('--overwrite replaces a tree whole, so no file of the last one stays behind
     assert.ok(existsSync(join(dir, 'site')));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ---- the stand-in base (Stephen, 13 November 2026: nothing temporary is ever published) ----------------------
+test('the stand-in base is on a host that can be nobody\'s, is what a table with no base is read under, and is told from every real address', async () => {
+  const { STAND_IN_BASE, OLD_STAND_IN_BASE, isStandIn, holdsStandIn, standInIn, rewriteStandIn } = await import('../src/engine/agora/address.js');
+  const { DEFAULT_TABLE_BASE } = await import('../src/engine/pipeline.js');
+  assert.equal(DEFAULT_TABLE_BASE, STAND_IN_BASE, 'the reader and the guard name one stand-in');
+  assert.equal(new URL(STAND_IN_BASE).hostname.split('.').pop(), 'invalid', 'RFC 2606: never anyone\'s');
+  assert.ok(/temporary/.test(STAND_IN_BASE), 'and says what it is');
+  assert.equal(baseKind(STAND_IN_BASE), 'example');
+  for (const iri of [STAND_IN_BASE, STAND_IN_BASE + 'place/region-0a1b', STAND_IN_BASE + 'place/p1#a-12345678', OLD_STAND_IN_BASE + 'place/7', 'http://anything.invalid/x', 'https://invalid/x']) assert.equal(isStandIn(iri), true, iri);
+  // The controls: real addresses, an example.org base the user typed, a host that only contains the word, and what is no address.
+  for (const iri of ['https://w3id.org/whg-epns/place/1', 'https://example.org/lancs/place/p1', 'https://invalid.example.org/place/1', 'https://notinvalid/x', 'https://example.edu/a?u=https', '', null, 7]) assert.equal(isStandIn(iri), false, String(iri));
+  assert.equal(holdsStandIn(`see ${STAND_IN_BASE}place/1, as was`), true, 'inside a longer text');
+  assert.equal(holdsStandIn('nothing here is invalid: https://w3id.org/x/'), false);
+  const doc = { '@id': 'https://w3id.org/x/place/1', attestations: [{ relations: [{ relatesTo: STAND_IN_BASE + 'place/region-9' }] }, { notes: 'fine' }] };
+  assert.equal(standInIn(doc), STAND_IN_BASE + 'place/region-9', 'found however deep');
+  assert.equal(standInIn({ ...doc, attestations: [doc.attestations[1]] }), null);
+  const count = { n: 0 };
+  const moved = rewriteStandIn({ ...doc, old: OLD_STAND_IN_BASE + 'place/2#a-1', [STAND_IN_BASE + 'k']: 1 }, 'https://w3id.org/x/', undefined, count);
+  assert.equal(standInIn(moved), null);
+  assert.equal(moved.attestations[0].relations[0].relatesTo, 'https://w3id.org/x/place/region-9');
+  assert.equal(moved.old, 'https://w3id.org/x/place/2#a-1');
+  assert.equal(moved['https://w3id.org/x/k'], 1);
+  assert.equal(moved['@id'], doc['@id']); assert.equal(moved.attestations[1].notes, 'fine');
+  assert.equal(count.n, 3);
+});

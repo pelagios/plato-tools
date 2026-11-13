@@ -211,9 +211,11 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       const input = el('input', { type: 'url', id: 'methodos-base', name: 'methodos-base', autocomplete: 'url', spellcheck: false, value: page.base?.() || '' });
       input.setAttribute('aria-describedby', 'methodos-base-help');
       fs = el('div', { id: 'methodos-base-q', className: 'methodos-text' }, el('label', { htmlFor: 'methodos-base', textContent: asked.question }), input,
-        el('p', { id: 'methodos-base-help', className: 'muted', textContent: `${asked.needed ? baseWhy(asked) : 'Optional: minting takes it, where the dataset has none of its own.'} It is the base address in Options, which this changes too.` }));
+        el('p', { id: 'methodos-base-help', className: 'muted', textContent: `${asked.needed ? baseWhy(asked) : asked.why || 'Optional: minting takes it, where the dataset has none of its own.'} It is the base address in Options, which this changes too.` }));
       more.append(fs);
     } else if (q(fs, '#methodos-base') !== document.activeElement) q(fs, '#methodos-base').value = page.base?.() || q(fs, '#methodos-base').value;
+    // Said afresh: the words change with the answers (with regions, what leaving it empty does).
+    q(fs, '#methodos-base-help').textContent = `${asked.needed ? baseWhy(asked) : asked.why || 'Optional: minting takes it, where the dataset has none of its own.'} It is the base address in Options, which this changes too.`;
     const field = q(fs, '#methodos-base');
     field.required = asked.needed; field.setAttribute('aria-required', String(asked.needed));
     texts.base = field.value;

@@ -109,7 +109,10 @@ test('the recipe is well formed: the table read as Map your data reads it, the o
   // a dataset already in a PLATO format is checked instead, and taken as it is.
   for (const id of ['columns', 'check', 'dataset']) {
     const [mine, map] = [M, MAP].map((r) => r.steps.find((s) => s.id === id));
-    assert.deepEqual([mine.op, mine.from, mine.options, mine.when], [map.op, map.from, map.options, 'from-table'], id);
+    // But one option: Map your data's regions under a temporary base (standInRegions, from its regions question, which this workflow does not ask).
+    const { standInRegions, ...shared } = map.options || {};
+    assert.deepEqual([mine.op, mine.from, mine.options, mine.when], [map.op, map.from, map.options && shared, 'from-table'], id);
+    assert.equal(standInRegions, id === 'dataset' ? '$has-regions' : undefined, id);
   }
   assert.deepEqual(M.steps.find((s) => s.id === 'check-a'), { id: 'check-a', op: 'check', title: 'Check your dataset', from: { files: '$files' }, when: '!from-table' });
   for (const [id, slot] of [['match', 'subjects'], ['apply', 'subjects'], ['compare', 'earlier']]) assert.equal(M.steps.find((s) => s.id === id).from[slot], 'dataset.dataset ?? $files', id);

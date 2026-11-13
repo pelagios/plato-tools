@@ -402,7 +402,7 @@ export async function genericProfile(input, options) {
  * reads rows with the same id as evidence about one place (an attestation each, and one new place
  * for each id at the end).
  */
-export async function* genericSource(given, rep, options = {}, defaultBase = 'https://example.org/my-dataset/') {
+export async function* genericSource(given, rep, options = {}, defaultBase = 'https://temporary.invalid/my-dataset/') {
   const input = withFirstRow(given, options.firstRowIsPlace);
   const file = input.files[0];
   const report = (kind, example) => rep.add(GENERIC_KINDS[kind] || 'loss', kind, LOSS_TEXT[kind] || kind, example);
@@ -447,11 +447,15 @@ export async function* genericSource(given, rep, options = {}, defaultBase = 'ht
   // narrowest first ("Surrey (England)"), with a name attestation and a plato:ContainedIn attestation
   // to its parent region; each row's place is ContainedIn its narrowest region, and the chain above
   // it follows from the regions. Without a base address, the chain is kept in the notes (columns.js,
-  // applyColumns), and that is said once. Only the keys of the regions made are held, never a row.
-  const containment = !!options.base;
+  // applyColumns), and that is said once: unless the regions are asked for all the same
+  // (options.standInRegions: Map your data, whose user said the table gives regions; Stephen, 13 November
+  // 2026), when they are minted under the stand-in base as the places are, which is said once
+  // (generic-stand-in-base, through mint() below) and replaced by the user's own base at publishing
+  // (agora/address.js). Only the keys of the regions made are held, never a row.
+  const containment = !!options.base || options.standInRegions === true;
   const regionsMade = new Set();
   let withinNoted = false;
-  const regionIri = (key) => minted.place(regionId(key));
+  const regionIri = (key) => mint(regionId(key));
   // What a region's and a place's attestations cite: what the row's attestation cites.
   const cites = (att) => ({ sources: att.sources, citations: att.citations });
   // {relationType, relatesTo} only (PLATO a6bc022): the region's name is in its own name attestation;

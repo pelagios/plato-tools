@@ -368,7 +368,7 @@ test('withinLevels groups identical containers by level, widest first, with the 
   assert.equal(newtons.length, 2);
   const cheshire = levels.get(3).get(containerKey(3, 'Newton', ['England', 'Cheshire']));
   assert.deepEqual({ level: cheshire.level, value: cheshire.value, parents: cheshire.parents, names: cheshire.rows.map((r) => r.name) }, { level: 3, value: 'Newton', parents: ['England', 'Cheshire'], names: ['Farm', 'Barn'] });
-  assert.equal(cheshire.rows[0].iri, 'https://example.org/my-dataset/place/2');
+  assert.equal(cheshire.rows[0].iri, 'https://temporary.invalid/my-dataset/place/2');
 });
 test('withinChains gives each row\'s name and chain, in order', async () => {
   const { events } = await eventsOf(PARISHES);
@@ -522,4 +522,36 @@ test('command line: regions guessed from the headings are printed with their lev
     assert.match(help, /--split COLUMN=SEP\[:LEVELS\]/);
     assert.match(help, /pasted list/);
   } finally { rmSync(d, { recursive: true, force: true }); }
+});
+
+// ---- regions with no base address (Stephen, 13 November 2026) ------------------------------------------------
+test('asked for with no base address (Map your data), the regions are minted under the temporary stand-in base, which is said once; not asked for, they stay notes as before', async () => {
+  const { STAND_IN_BASE, isStandIn } = await import('../src/engine/agora/address.js');
+  const csv = readFileSync(new URL('./fixtures/myd/places.csv', import.meta.url), 'utf8');   // place,county: 20 towns in Lancashire and Cheshire
+  const columns = { place: 'name', county: { field: 'within', level: 1 } };
+  const asked = await eventsOf(csv, { columns, standInRegions: true });
+  const regions = asked.events.filter((e) => e.region);
+  assert.deepEqual(regions.map((e) => e.value.label).sort(), ['Cheshire', 'Lancashire']);
+  for (const r of regions) {
+    assert.ok(r.value['@id'].startsWith(STAND_IN_BASE + 'place/region-'), r.value['@id']);
+    assert.ok(isStandIn(r.value['@id']));
+  }
+  // Each town is ContainedIn its county's region, by that temporary address.
+  const contained = rows(asked.events).flatMap((e) => (e.value.attestations || []).flatMap((a) => (a.relations || []).filter((x) => x.relationType === CONTAINED_IN).map((x) => x.relatesTo)));
+  assert.equal(contained.length, 20);
+  assert.deepEqual([...new Set(contained)].sort(), regions.map((e) => e.value['@id']).sort());
+  assert.equal(asked.items.filter((i) => i.kind === 'generic-stand-in-base').length, 1, 'said once');
+  assert.deepEqual(asked.of('generic-stand-in-base').examples, [STAND_IN_BASE]);
+  assert.match(LOSS_TEXT['generic-stand-in-base'], /temporary/);
+  assert.match(LOSS_TEXT['generic-stand-in-base'], /when you publish/);
+  assert.ok(!asked.kinds.has('generic-within-no-base'));
+  // Control, the reader as it was (the command line with no --base): no region is made, and that is said.
+  const plain = await eventsOf(csv, { columns });
+  assert.equal(plain.events.filter((e) => e.region).length, 0);
+  assert.ok(plain.kinds.has('generic-within-no-base'));
+  // Control: under a base of the user's own nothing is temporary, and nothing says so.
+  const own = await eventsOf(csv, { columns, standInRegions: true, base: BASE });
+  assert.equal(own.events.filter((e) => e.region).length, 2);
+  assert.ok(own.events.filter((e) => e.region).every((e) => e.value['@id'].startsWith(BASE)));
+  assert.ok(!own.kinds.has('generic-stand-in-base'));
 });

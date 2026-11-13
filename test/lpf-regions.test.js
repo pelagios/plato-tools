@@ -324,7 +324,7 @@ async function tablesAndControl(doc) {
     .map((f) => [f['@id'], (f.relations || []).filter((x) => x.relationType === 'gvp:broaderPartitive').map((x) => [x.relationTo, x.label])]));
   return { direct: rels(direct), control: rels(control), report: direct.report };
 }
-const TB = 'https://example.org/my-dataset/place/';
+const TB = 'https://temporary.invalid/my-dataset/place/';
 
 test('exported tables carrying regions give gvp:broaderPartitive its label, as the same data as PLATO JSON does', async () => {
   const { direct, control, report } = await tablesAndControl(dataset());

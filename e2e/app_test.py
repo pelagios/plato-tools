@@ -10827,14 +10827,15 @@ def methodos_page_checks(browser, url):
         # absences, beside the regions and relate steps planned, shown and begun as to come: the presences).
         ctx, page = fresh()
         try:
-            # Options' base address is empty here: the interview asks for one (needed, the regions being minted
-            # under it), and Follow is not offered until it is given; typed, it is written to Options too.
+            # Options' base address is empty here: the interview asks for one, and since 13 November 2026 does not
+            # wait for it (with none, the regions are minted under a temporary stand-in, replaced at publishing), so
+            # Follow is offered at once, and the words under the field say so; typed, it is written to Options too.
             before = {'options base': page.input_value('#base')}
             answer(page, 'table', 'map', {'has-regions': False, 'will-draw': False, 'will-publish': False})
             before['asked without regions'] = page.is_visible('#methodos-base')
             page.check('input[name="methodos-ask-has-regions"][value="yes"]')
             before.update({'asked': page.is_visible('#methodos-base'), 'shown': page.input_value('#methodos-base'), 'follow': page.is_visible('#methodos-start'),
-                           'verdict': page.inner_text('#methodos-verdict')})
+                           'verdict': page.inner_text('#methodos-verdict'), 'help': page.inner_text('#methodos-base-help')})
             page.fill('#methodos-base', 'https://example.org/asked/')
             until(page, "() => !document.getElementById('methodos-start').hidden", 5)
             before['options after'] = page.input_value('#base')
@@ -10854,10 +10855,11 @@ def methodos_page_checks(browser, url):
                   and c['track'][0]['state'] == 'current' and c['where'].startswith(f"Step 1 of {len(want)}") and not last
                   and 'Not yet available' not in page.evaluate("() => document.getElementById('methodos-tracker').textContent")
                   and before['options base'] == '' and before['asked without regions'] is False and before['asked'] is True and before['shown'] == ''
-                  and before['follow'] is False and 'the base address among them' in before['verdict'] and before['options after'] == 'https://example.org/asked/')
+                  and before['follow'] is True and 'the base address among them' not in before['verdict'] and 'a temporary address is used' in before['help']
+                  and before['options after'] == 'https://example.org/asked/')
             return ok, {'base': before, 'plan': a, 'started': b, 'begun': c, 'last step notes': last}
         finally: ctx.close()
-    attempt('Methodos: with regions answered Yes the base address is asked (not without regions), Follow waits for it, and it is written to Options; the workflow is then followed and begun with its regions step and the step recording them available, nothing "Not yet available", and no note at the end', unavailable)
+    attempt('Methodos: with regions answered Yes the base address is asked (not without regions), Follow does not wait for it (a temporary address is used without one, as the field says), and it is written to Options; the workflow is then followed and begun with its regions step and the step recording them available, nothing "Not yet available", and no note at the end', unavailable)
 
     def unsure_and_none():
         # "Not sure" leads to the plain grid of cards; answers with no recipe say so and name the tools.

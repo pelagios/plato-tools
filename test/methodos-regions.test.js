@@ -85,12 +85,12 @@ const REVIEWER = async ({ work, nodes }) => {
 };
 
 /** The workflow taken to the step it waits at after the dataset is made: the columns given, then driven. */
-async function begun({ host, adapters } = {}) {
+async function begun({ host, adapters, answers = ANSWERS } = {}) {
   const table = new File([CSV], 'parishes.csv');
   host = host || memoryHost([table]);
   const mapping = new File([JSON.stringify(MAPPING)], 'columns.json');
   host.store.set('columns.json', mapping);
-  let s = runner.start(MAP, ANSWERS, { files: await refsOf([table], 'files') });
+  let s = runner.start(MAP, answers, { files: await refsOf([table], 'files') });
   s = runner.next(s);
   assert.equal(s.current, 'columns');
   s = runner.complete(s, 'columns', { mapping: await refsOf([mapping], 'mapping') });
@@ -267,4 +267,57 @@ test('recording the regions is refused in words where it could not be done as PL
   assert.throws(() => regionsSettled({ regions: {}, candidates: [], lookups: [] }), /no regions to identify/);
   assert.throws(() => regionsSettled({ regions: Object.fromEntries([region(BASE + 'r', { outcome: null })]), candidates: [], lookups: [] }), /1 of the 1 regions are not settled yet \(level 1: 1 of 1\)/);
   assert.equal(regionsSettled({ regions: Object.fromEntries([region(BASE + 'r', { outcome: 'no-match' })]), candidates: [], lookups: [] }).settled, 1);
+});
+
+// ---- with no base address (Stephen, 13 November 2026): temporary addresses until publishing, and never after -------
+test('Map your data with regions and no base address: the regions are made, reviewed and recorded under the temporary stand-in; publishing is refused in words until the real base is given, and then nothing temporary is left', async () => {
+  const { STAND_IN_BASE, holdsStandIn } = await import('../src/engine/agora/address.js');
+  const REAL = 'https://gazetteer.example.edu/parishes/';
+  const fake = fakeWhg();
+  const host = memoryHost([new File([CSV], 'parishes.csv')]);
+  host.lookup = lookupWith(fake);
+  const { base: _none, ...answers } = { ...ANSWERS, 'will-publish': true };
+  const a = await begun({ host, answers });
+  // No base was asked for, and the regions are there to review all the same.
+  assert.equal(a.state.current, 'regions', JSON.stringify(a.state.steps.filter((x) => x.problem || x.error).map((x) => [x.id, x.problem || x.error])));
+  const converted = JSON.parse(await host.store.get(a.state.steps.find((x) => x.id === 'dataset').outputs.dataset[0].name).text());
+  assert.equal(converted.spatialEntities.filter((e) => e['@id'].startsWith(STAND_IN_BASE + 'place/region-')).length, 6);
+  assert.equal(a.reports.dataset.items.filter((i) => i.kind === 'generic-stand-in-base').length, 1);
+  assert.ok(!a.reports.dataset.items.some((i) => i.kind === 'generic-within-no-base'));
+  const r = await review(a.state, host, { reviewer: REVIEWER });
+  const b = await drive(r.state, host);
+  assert.equal(b.state.current, 'review');
+  const { refs } = await decided(host, b.state);
+  // Recorded, checked, compared and written out: all under the stand-in. Then the first step of publishing stops.
+  const c = await drive(runner.complete(b.state, 'review', { work: refs }), host);
+  const done = (st) => Object.fromEntries(st.steps.map((x) => [x.id, x.state]));
+  assert.deepEqual([done(c.state).relate, done(c.state).out, done(c.state).mint, c.state.status], ['done', 'done', 'stopped', 'stopped']);
+  const out = JSON.parse(await host.store.get(c.state.steps.find((x) => x.id === 'out').outputs.dataset[0].name).text());
+  assert.equal(out.gazetteer.candidateSets.length, 1);
+  assert.ok(String(out.gazetteer.candidateSets[0]['@id'] ?? out.gazetteer.candidateSets[0]).startsWith(STAND_IN_BASE + 'candidates/'));
+  const why = c.state.steps.find((x) => x.id === 'mint').problem.words;
+  assert.match(why, /temporary/);
+  assert.match(why, /Nothing temporary is ever published, so nothing was written/);
+  assert.match(why, /Give the web address your places will live under/);
+  assert.ok(![...host.store.keys()].some((n) => n.includes('-with-ids')), 'nothing was written for publishing');
+  // The real base, given at publishing (the host's: the page's Options field): the step done again mints, and moves every address.
+  host.base = () => REAL;
+  const d = await drive(runner.invalidate(c.state, 'mint'), host);
+  assert.equal(done(d.state).mint, 'done', JSON.stringify(d.state.steps.find((x) => x.id === 'mint')));
+  const copy = await host.store.get(d.state.steps.find((x) => x.id === 'mint').outputs.dataset[0].name).text();
+  assert.equal(holdsStandIn(copy), false);
+  assert.equal(copy.includes('.invalid'), false);
+  const recs = copy.trim().split('\n').slice(1).map((l) => JSON.parse(l));
+  const e = ends({ spatialEntities: recs });
+  assert.deepEqual({ places: e.places, regions: e.regions, contained: e.contained, regionIdentities: e.regionIdentities, stub: e.stub },
+    { places: 10, regions: 6, contained: 10, regionIdentities: 5, stub: true }, 'as the workflow with a base ends');
+  assert.ok(recs.every((p) => p['@id'].startsWith(REAL + 'place/')));
+  assert.ok([...copy.matchAll(/"promotedFrom":"([^"]+)"/g)].length >= 7);
+  assert.ok([...copy.matchAll(/"promotedFrom":"([^"]+)"/g)].every((m) => m[1].startsWith(REAL + 'candidates/')));
+  assert.equal(d.reports.mint.items.find((i) => i.kind === 'stand-in-rewritten')?.severity, 'warning');
+  // The report and the site are made from that copy, and are not refused for a temporary address.
+  for (const id of ['report', 'site']) {
+    assert.ok(!(d.reports[id]?.items || []).some((i) => i.kind === 'stand-in-address'), id);
+    assert.equal(done(d.state)[id], 'done', `${id}: ${JSON.stringify(d.state.steps.find((x) => x.id === id).problem || null)}`);
+  }
 });

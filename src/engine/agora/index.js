@@ -13,7 +13,7 @@
 // to be published does not write it from a dataset that has problems.
 import { run, Aborted, stoppable } from '../pipeline.js';
 import { Report } from '../report.js';
-import { noBaseKind, scheme } from './address.js';
+import { noBaseKind, scheme, normaliseBase, isStandIn, standInIn, rewriteStandIn, STAND_IN_BASE, OLD_STAND_IN_BASE } from './address.js';
 import { openTree, put } from './tree.js';
 import * as fair from './fair.js';
 import * as mint from './mint.js';
@@ -31,6 +31,11 @@ export const TEXT = {
   'base-is-fragment': "The base address ends in '#', so every place's address would be a fragment of one document (<base>#place/<id>). PLATO allows that, but a web server never sees what follows '#', so a static site cannot give each place a page of its own, nor w3id a rule of its own: nothing is published from it. Give a base that ends in '/' instead (the about sheet's base_uri, or uriSpace in PLATO JSON, or one for this run), while the dataset is a draft.",
   // Said by the report and the site of every dataset not published (Issue #26, WHG place#310).
   'draft-is-public': "A draft is public once its site is uploaded: anyone with the address can read its pages and download its data, though each page says DRAFT and asks search engines not to list it (noindex), and an address is easily passed on. GitHub Pages serves a site from a private repository to everyone too (only an Enterprise organisation can restrict it). Until the dataset is ready to be seen, keep the site on your own computer.",
+  // The stand-in base (address.js; Stephen, 13 November 2026): nothing temporary is ever published. Said by every
+  // part, of the base and of any address in the dataset; `-mint` where minting itself is refused, for want of a real base.
+  'stand-in-address': "The dataset still has temporary web addresses (the example gives the first found), which were used so that work could start before you had a web address of your own. Nothing temporary is ever published, so nothing was written. First do the step that gives every place a permanent address (mint), with the web address your places will live under as the base address (in Options on the page, or --base): it moves every temporary address to yours. Then do this step again, with the dataset that step writes.",
+  'stand-in-address-mint': "The dataset's web addresses are temporary ones (the example gives the first found), which were used so that work could start before you had a web address of your own. Nothing temporary is ever published, so nothing was written. Give the web address your places will live under (the base address: in Options on the page, or --base), then do this step again: every temporary address is then moved to yours.",
+  'stand-in-rewritten': "The dataset's web addresses were temporary ones. Every one of them (each place and region, what each relation and identity points at, each candidate and the candidate set's own address) has been moved to the base address given, and nothing temporary is left in the copy written. The example gives the base, and the count how many addresses were moved. Use the copy from here on: the files written before it still hold the temporary addresses, and are not for publishing.",
   'no-base': "The dataset does not say under what address its places are published: give its base address (the about sheet's base_uri, or uriSpace in PLATO JSON), or give one for this run.",
 };
 
@@ -82,6 +87,7 @@ async function publishing({ part, input, previous, options }, env) {
     },
     /** For the parts that write something to publish: stop, and say why, if the dataset cannot be published from. */
     blocked() {
+      if (ctx.standIn) return true;   // said already (the guard below), once
       if (ctx.checkErrors) { rep.add('error', 'dataset-has-problems', TEXT['dataset-has-problems'], undefined, ctx.checkErrors); return true; }
       if (!ctx.scheme) { ctx.noBase(); return true; }
       return false;
@@ -89,14 +95,37 @@ async function publishing({ part, input, previous, options }, env) {
   };
   const p = impl.create(ctx);
   if (p.prepare) { const r = await p.prepare(); if (r && r.incomplete) return { report: rep.toJSON(), outputs, incomplete: true }; }
+  // The guard on the stand-in base (address.js): no part writes anything from a dataset whose base, or any
+  // address in it, is temporary. Minting under a real base is where they are replaced: every address under
+  // the stand-in is rewritten to the base before the part sees it (the header and each record), so that what
+  // it mints, checks against a previous release and writes is the dataset as it will be published. What is
+  // still temporary after that (or, in any other part, at all) is counted, and refused below.
+  const temporary = { found: 0, example: null, moved: { n: 0 } };
+  let rewrite = null;
+  const seen = (value) => { const f = standInIn(value); if (f) { temporary.found++; temporary.example ??= f; } };
   const sink = {
     header(head) {
-      ctx.head = head || {};
-      ctx.gazetteer = (head && typeof head.gazetteer === 'object' && head.gazetteer) || {};
-      ctx.scheme = scheme(options.base || ctx.gazetteer.uriSpace);
+      head = head || {};
+      const g0 = (typeof head.gazetteer === 'object' && head.gazetteer) || {};
+      ctx.scheme = scheme(options.base || g0.uriSpace);
+      if (part === 'mint' && ctx.scheme && !isStandIn(ctx.scheme.base)) {
+        // The stand-in bases, and the dataset's own base or address where that is temporary too.
+        const own = [g0.uriSpace, g0['@id']].map((x) => normaliseBase(typeof x === 'string' ? x.split('#')[0] : x)).filter(isStandIn);
+        const from = [...new Set([STAND_IN_BASE, OLD_STAND_IN_BASE, ...own])].sort((a, b) => b.length - a.length);
+        rewrite = (v) => rewriteStandIn(v, ctx.scheme.base, from, temporary.moved);
+        head = rewrite(head);
+      }
+      ctx.head = head;
+      ctx.gazetteer = (typeof head.gazetteer === 'object' && head.gazetteer) || {};
+      if (ctx.scheme && isStandIn(ctx.scheme.base)) { temporary.found++; temporary.example ??= ctx.scheme.base; }
+      seen(head);
       if (p.header) p.header(ctx.head);
     },
-    event(ev) { if (p.event) p.event(ev); },
+    event(ev) {
+      if (rewrite && ev && ev.value && typeof ev.value === 'object') ev = { ...ev, value: rewrite(ev.value) };
+      if (ev) seen(ev.value);
+      if (p.event) p.event(ev);
+    },
     async close() { if (p.close) await p.close(); },
   };
   const r = await ctx.read(sink);
@@ -106,6 +135,14 @@ async function publishing({ part, input, previous, options }, env) {
   }
   ctx.checkErrors = r.report.errors;
   ctx.checked = r.report;
+  if (temporary.found) {
+    ctx.standIn = true;
+    const kind = part === 'mint' ? 'stand-in-address-mint' : 'stand-in-address';
+    rep.add('error', 'stand-in-address', TEXT[kind], temporary.example, temporary.found);
+  } else if (temporary.moved.n) {
+    rep.add('warning', 'stand-in-rewritten', TEXT['stand-in-rewritten'], ctx.scheme.base, temporary.moved.n);
+    rep.counts.standInMoved = temporary.moved.n;
+  }
   // A part that could not finish what it began (a second reading that stopped) says so, and the
   // host then removes what it wrote, as after a failure.
   const f = await p.finish();

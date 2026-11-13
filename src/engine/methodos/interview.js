@@ -35,20 +35,23 @@ export const WANT = Object.freeze([
 // `base`: when the base address is asked (Stephen, 4 October 2026: only for workflows that mint
 // addresses; 12 October 2026: by every workflow that publishes, in one shared field, optional): under any of
 // the yes-or-no answers in `when` (given, or settled by the first two questions), else always; and needed
-// where `needed` is true, or names an answer that is yes (Map your data, when the table gives regions, which
-// are minted under it). Map your data asks it with regions (needed) and when publishing (optional); Places
+// where `needed` is true, or names an answer that is yes. Map your data asks it with regions and when
+// publishing, optional in both (Stephen, 13 November 2026, relaxing the rule of 4 and 12 October: with no
+// base, the regions are minted under a temporary stand-in as the places are, the real base is asked for at
+// publishing, and nothing temporary is ever published: agora/address.js); Places
 // from an edition and Places from Recogito when publishing; Publish a dataset always (optional).
-// Why the base address is needed, where it is (said under its field): the regions a table gives are minted under it
-// (REGIONS), or every place traced from a map is (TRACED).
-const REGIONS = 'Needed: the regions are given addresses under it.';
+// Why the base address is needed, where it is (said under its field): every place traced from a map is minted
+// under it (TRACED), or each place of a list is (LISTED). REGIONS is what is said where it is asked and not
+// needed because of regions: Map your data, whose regions take a temporary address without one.
+const REGIONS = 'Leave this empty if you have no web site for your places: a temporary address is used, and your own is asked for when you publish.';
 const TRACED = 'Needed: every place you trace is given its address under it as you name it.';
 const LISTED = 'Needed: each place of your list is given its address under it, against which what the gazetteer matches it with is recorded.';
 /** The words under the base address's field saying why it is needed (baseAsked's `why`, else the regions'). */
 export const baseWhy = (asked) => asked?.why || REGIONS;
 const ROUTES = [
   // 'will-mint' (Issue #36: Wikidata items for the places no gazetteer knows) is asked last, and is no unless answered.
-  { have: 'table', want: 'map', recipe: 'map-your-data', set: { target: 'plato-json' }, ask: ['has-regions', 'will-draw', 'will-publish', 'will-mint'], base: { when: ['has-regions', 'will-publish'], needed: 'has-regions' } },
-  { have: 'table', want: 'publish', recipe: 'map-your-data', set: { target: 'plato-json', 'will-publish': true }, ask: ['has-regions', 'will-draw', 'will-mint'], base: { when: ['has-regions', 'will-publish'], needed: 'has-regions' } },
+  { have: 'table', want: 'map', recipe: 'map-your-data', set: { target: 'plato-json' }, ask: ['has-regions', 'will-draw', 'will-publish', 'will-mint'], base: { when: ['has-regions', 'will-publish'], needed: false, later: 'has-regions' } },
+  { have: 'table', want: 'publish', recipe: 'map-your-data', set: { target: 'plato-json', 'will-publish': true }, ask: ['has-regions', 'will-draw', 'will-mint'], base: { when: ['has-regions', 'will-publish'], needed: false, later: 'has-regions' } },
   { have: 'plato', want: 'publish', recipe: 'publish-a-dataset', set: {}, ask: [], base: { needed: false } },
   // A new version of a published dataset (plan #34, item 10; 17 October 2026): revised against the previous release,
   // chosen at the revise step; the base address when publishing, optional, as Publish a dataset asks it.
@@ -117,8 +120,8 @@ const given = (choice, yesNo, k) => (typeof yesNo[k] === 'boolean' ? yesNo[k] : 
 
 /**
  * Whether the base address is asked under these answers: { needed, question, why? } (needed: a workflow that
- * mints regions, or traced places, under it cannot go on without one; why: the words that say so, given by a
- * route that names its own, else baseWhy's), or null when it is not asked.
+ * mints traced places, or a list's, under it cannot go on without one; why: the words that say so, given by a
+ * route that names its own, else baseWhy's; where it is not needed, `why` is given only to say what leaving it empty does: Map your data with regions), or null when it is not asked.
  */
 export function baseAsked(choice, yesNo = {}) {
   const b = choice?.kind === 'recipe' ? choice.base : null;
@@ -128,7 +131,9 @@ export function baseAsked(choice, yesNo = {}) {
   if (!b || (when.length && !when.some(yes))) return null;
   const needed = b.needed === true || (typeof b.needed === 'string' && yes(b.needed));
   // Why it is needed, in words, only where it is (a route's own `why`, else the regions').
-  return { needed, question: RECIPES[choice.recipe].asks.base.question, ...(needed && b.why ? { why: b.why } : {}) };
+  // Where it may be left empty though the table gives regions (`later` names that answer), the words that say what happens then.
+  const later = !needed && typeof b.later === 'string' && yes(b.later);
+  return { needed, question: RECIPES[choice.recipe].asks.base.question, ...(needed && b.why ? { why: b.why } : later ? { why: REGIONS } : {}) };
 }
 /** A base address as the interview takes one: a web address, trimmed, or null. */
 export const baseAnswer = (v) => (typeof v === 'string' && /^https?:\/\/\S+$/.test(v.trim()) ? v.trim() : null);

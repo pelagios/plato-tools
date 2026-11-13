@@ -54,9 +54,11 @@ test('the interview: a map, to a map or to publish, leads to it; the base addres
     assert.equal(answered(c, yes, { base: BASE }), true);
     assert.equal(answersFor(c, yes, { base: BASE }).base, BASE);
   }
-  // Map your data's regions keep their own words.
-  assert.equal(baseWhy(baseAsked(choose('table', 'map'), { 'has-regions': true })), 'Needed: the regions are given addresses under it.');
-  assert.equal(baseAsked(choose('table', 'map'), { 'has-regions': true }).why, undefined, "Map your data's answer is as it was");
+  // Map your data's regions no longer need it (Stephen, 13 November 2026): its words say what leaving it empty does.
+  const regions = baseAsked(choose('table', 'map'), { 'has-regions': true });
+  assert.equal(regions.needed, false);
+  assert.equal(regions.why, 'Leave this empty if you have no web site for your places: a temporary address is used, and your own is asked for when you publish.');
+  assert.equal(baseWhy(regions), regions.why);
 });
 
 test('the plan: the lookup, its review and the decisions only when identifying, saying WHG\'s cap of 5,000 requests a day per token; publishing adds Agora\'s steps', () => {
