@@ -3,19 +3,22 @@
 //       of words is; a matching with neither a name nor an address is warned of.
 //   D1  a table with no ids can have its rows numbered, at the user's asking (Stephen's ruling of
 //       13 November 2026): row-1, row-2…, said to be made up, never made from a name.
+//   R-05 (robust review) a list of names with no heading row keeps its first name: the page ticks
+//       "The first row is a place, not a heading" beforehand where the first row is no known heading.
 // The fixtures in test/fixtures/myd/ are the reviews' own (handoff myd-2026-11), unchanged. Every
 // test that asserts an absence asserts, in the same test, a presence it could have missed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as COLUMNS from '../src/engine/hermes/columns.js';
-import { genericSource, mappingOf } from '../src/engine/hermes/generic.js';
+import * as GENERIC from '../src/engine/hermes/generic.js';
 import { columnWarnings, COLUMN_WORDS } from '../src/engine/words.js';
 import { detect, HEADERLESS_REASON } from '../src/engine/input.js';
 import { Report } from '../src/engine/report.js';
-import { file } from './engine.js';
+import { file, textFile } from './engine.js';
 
 // By name from the namespace: on a tree without these, each is undefined and each test fails on its own.
 const { guessColumns, resolveColumns, mappingToSave, numbersRows, ROW_NUMBER, NAME_FALLBACK } = COLUMNS;
+const { genericSource, mappingOf, withFirstRow } = GENERIC;
 const FX = 'test/fixtures/myd/';
 const plain = (o) => ({ ...o });
 const fx = (name) => file(FX + name);
@@ -132,9 +135,45 @@ test('D1: a table with ids of its own keeps them, is offered no numbering, and a
   assert.ok(!numbersRows({ name: 'name', [ROW_NUMBER]: 'note' }) && !numbersRows({ name: 'name' }) && !numbersRows(undefined));
 });
 
-// ---- the heading row ------------------------------------------------------------------------------
-test('a file whose first row is decimals is still refused as having no heading row', async () => {
+// ---- robust R-05: a list with no heading row ---------------------------------------------------------
+test('R-05: a one-column file with no heading row keeps its first name once the first row is said to be a place', async () => {
+  const f = () => fx('14c-one-column-no-header.csv');
+  const input = await detect([f()]);
+  assert.equal(input.headingDoubt, true, 'the page ticks the Reading option beforehand on this');
+  const said = await read(f(), { firstRowIsPlace: true });
+  assert.deepEqual(said.places.map((p) => p.label), ['Aquae Sulis', 'Eboracum', 'Deva Victrix', 'Lindum Colonia']);
+  assert.equal(said.of('generic-first-row-is-place')?.severity, 'warning');
+  assert.equal(said.of('generic-heading-doubt'), undefined);
+  const m = await mappingOf(withFirstRow(input, true));
+  assert.deepEqual(m.headers, ['name']);
+  assert.deepEqual(plain(m.mapping), { name: 'name' });
+  // Numbered too, the first name is row-1.
+  const numbered = await read(f(), { firstRowIsPlace: true, columns: { name: 'name', '(row number)': 'id' } });
+  assert.deepEqual(numbered.places.map((p) => [p.entityIdentifier, p.label])[0], ['row-1', 'Aquae Sulis']);
+  // Said to be a heading (the option unticked), it is one: three places, as before, and no more is said.
+  const heading = await read(f(), { firstRowIsPlace: false });
+  assert.deepEqual(heading.places.map((p) => p.label), ['Eboracum', 'Deva Victrix', 'Lindum Colonia']);
+  assert.equal(heading.of('generic-heading-doubt'), undefined);
+  assert.equal(heading.of('generic-first-row-is-place'), undefined);
+  // Nobody says (the command line): read as a heading, as before, but no longer without a word.
+  const unsaid = await read(f());
+  assert.equal(unsaid.places.length, 3);
+  assert.deepEqual(unsaid.of('generic-heading-doubt')?.examples, ['14c-one-column-no-header.csv: "Aquae Sulis"']);
+});
+
+test('R-05: a file with a heading these tools know is not doubted, and a first row of decimals is still refused', async () => {
+  const headed = await detect([fx('14-one-column.csv')]);
+  assert.equal(headed.format, 'csv');
+  assert.equal(headed.headingDoubt, undefined);
+  const r = await read(fx('14-one-column.csv'));
+  assert.equal(r.places.length, 5);
+  assert.equal(r.of('generic-heading-doubt'), undefined);
+  // "place" and "Site" are known too; a table of two columns is never doubted on its first row's words.
+  assert.equal((await detect([textFile('Site\nChester\nPreston\n', 's.csv')])).headingDoubt, undefined);
+  assert.equal((await detect([textFile('Chester,Cheshire\nPreston,Lancashire\n', 't.csv')])).headingDoubt, undefined);
   assert.equal((await detect([fx('08b-no-header-row.csv')])).reason, HEADERLESS_REASON);
-  // Control: the one-column list with a heading is read, all five rows.
-  assert.equal((await read(fx('14-one-column.csv'))).places.length, 5);
+  // Control: the doubt is found where it should be (the same call, on a list with no heading).
+  assert.equal((await detect([textFile('Chester\nPreston\n', 'u.csv')])).headingDoubt, true);
+  // Asked for a file that is not a plain CSV table, the option changes nothing.
+  assert.equal(withFirstRow({ format: 'geojson' }, true).firstRowIsPlace, undefined);
 });

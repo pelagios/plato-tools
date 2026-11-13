@@ -394,6 +394,16 @@ const isTable = (inp) => inp?.format === 'csv' || inp?.format === 'geojson';
 // chosen), sent with every command that reads the table.
 const isSheet = (inp) => inp?.format === 'csv' && inp.container === 'workbook';
 const sheetOption = () => (isSheet(input) && input.sheet !== undefined ? { sheet: input.sheet } : {});
+// A table of one column that may have no heading row (input.js, headingDoubt): its first row is read as
+// a place while the Reading option says so, as it does until it is unticked. Sent with every command
+// that reads the table's columns, and with a run's options (readingOptions).
+// The choice is kept for the file detected (a new detection is a new `input`, and starts ticked): the
+// columns are asked for before the Reading options are drawn again, so the box itself may be another file's.
+let firstRowFor = null, firstRowOn = true;
+const firstRowOption = () => {
+  if (firstRowFor !== input) { firstRowFor = input; firstRowOn = true; }
+  return input?.headingDoubt === true ? { firstRowIsPlace: firstRowOn } : {};
+};
 // The choice of sheet, above the columns table, when the workbook has more than one.
 function sheetControl() {
   if (!isSheet(input) || !(input.sheets?.length > 1)) return '';
@@ -407,7 +417,7 @@ function requestColumns(saved, from) {
   columnsFrom = from; columnsSaved = saved;
   state.sheet = sheetOption().sheet ?? null;
   clearPreview();   // the matching is being read again (another sheet, a matching loaded)
-  worker.postMessage({ cmd: 'columns', id, files, saved, ...sheetOption() });
+  worker.postMessage({ cmd: 'columns', id, files, saved, ...sheetOption(), ...firstRowOption() });
 }
 function onColumns(d) {
   if (d.id !== columnsAsked) return;                    // an answer about a file no longer chosen
@@ -725,15 +735,17 @@ let readingCaps = { editorial: false }, teiKeys = null;
 const hasIdColumn = () => !!columns && Object.values(columns.mapping).includes('id');
 // Hermes: "Group similar spellings…", below the Reading options for a table of places. Only the
 // groups ticked are sent with a run or a preview; any change to them clears the preview.
-const spellings = spellingsPanel({ box: $('spellings'), ask: (m) => worker.postMessage({ ...m, files, ...sheetOption() }), changed: () => clearPreview(), publish: (s) => { state.spellings = s; } });
+const spellings = spellingsPanel({ box: $('spellings'), ask: (m) => worker.postMessage({ ...m, files, ...sheetOption(), ...firstRowOption() }), changed: () => clearPreview(), publish: (s) => { state.spellings = s; } });
 function renderReading() {
   const R = READING_WORDS, box = $('reading'), tei = input?.format === 'tei';
   teiKeys = null;
   box.hidden = !(tei || isTable(input));
   if (box.hidden) { box.innerHTML = ''; readingState(); return; }
-  const controls = tei ? ['listPlaces', ...(readingCaps.editorial ? ['headerPlaces', 'commentaryPlaces'] : [])] : ['sameId'];
+  const controls = tei ? ['listPlaces', ...(readingCaps.editorial ? ['headerPlaces', 'commentaryPlaces'] : [])] : ['sameId', ...(input.headingDoubt === true ? ['firstRowIsPlace'] : [])];
+  // "The first row is a place" is ticked beforehand (it is shown only where the first row is no known heading), with why on hover.
+  const before = (c) => (c === 'firstRowIsPlace' && firstRowOption().firstRowIsPlace ? ' checked' : ''), tip = (c) => (c === 'firstRowIsPlace' ? ` data-tip="${escapeHtml(R.firstRowTip)}"` : '');
   box.innerHTML = `<legend>${escapeHtml(R.legend)}</legend>`
-    + controls.map((c) => `<label><input type="checkbox" id="reading-${c}" data-reading="${c}"> ${escapeHtml(R[c])}</label>`).join('')
+    + controls.map((c) => `<label${tip(c)}><input type="checkbox" id="reading-${c}" data-reading="${c}"${before(c)}> ${escapeHtml(R[c])}</label>`).join('')
     + '<div id="reading-keys"></div><div id="reading-message" aria-live="polite"></div>';
   readingState();
 }
@@ -776,7 +788,10 @@ function readingOptions() {
     if (readingCaps.editorial && on('commentaryPlaces')) o.commentaryPlaces = true;
     const kp = keyPatterns();
     if (Object.keys(kp).length) o.keyPatterns = { ...kp };
-  } else if (isTable(input) && on('sameId')) o.sameId = true;
+  } else if (isTable(input)) {
+    if (on('sameId')) o.sameId = true;
+    Object.assign(o, firstRowOption());
+  }
   return o;
 }
 /** Why the reading options chosen cannot be used, in words, or null. A pattern itself the engine checks, and refuses in the report. */
@@ -804,6 +819,8 @@ function readingState() {
 $('reading').addEventListener('change', (e) => {
   clearPreview();
   if (e.target.id === 'reading-sameId' && e.target.checked && !hasIdColumn()) { e.target.checked = false; readingMessage(READING_WORDS.sameIdNoId); return; }
+  // The first row a place, or a heading: the columns are another table's, so they are read again, and guessed afresh.
+  if (e.target.id === 'reading-firstRowIsPlace') { firstRowOption(); firstRowOn = e.target.checked; columns = null; state.columns = null; spellings.reset(true); requestColumns(); gateOnColumns(); readingState(); return; }
   readingMessage('');
 });
 $('reading').addEventListener('input', () => { clearPreview(); readingState(); });

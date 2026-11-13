@@ -229,6 +229,12 @@ function regionKind(n) {
   if (a) return { rank: Number(a[1]) * 10, words: `administrative level ${a[1]}` };
   return REGION_KINDS.find((k) => k.test.test(n));
 }
+/**
+ * Whether a heading is one these tools know: a field's (name, lat, id…), one that usually holds the
+ * name (place, Site), a kind of region, or a gazetteer's. A one-column file whose first row is none
+ * of these may have no heading row at all (input.js, headingDoubt).
+ */
+export const knownHeading = (h) => { const n = normaliseHeader(h); return BY_HEADING.has(n) || WEAK_NAME.has(n) || !!regionKind(n) || namesGazetteer(n) || n === 'pid'; };
 const isLevel = (l) => Number.isInteger(l) && l >= 1;
 const ordinal = (n) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`;
 

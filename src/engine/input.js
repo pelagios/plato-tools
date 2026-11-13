@@ -4,6 +4,7 @@
 // Vendored, with the one change that keeps a U+FEFF inside a string: see src/vendor/streamparser-json/.
 import { JSONParser, Tokenizer, TokenizerError, TokenType } from '../vendor/streamparser-json/index.js';
 import Papa from 'papaparse';
+import { knownHeading } from './hermes/columns.js';
 
 /**
  * Where and why a JSON parser stopped, in plain words, from its error: "at character 220: NaN, which
@@ -459,7 +460,7 @@ export async function detect(files) {
     return { format: 'tables', container: 'zip', files, ...(textBytes !== undefined ? { textBytes } : {}) };
   }
   if (n.endsWith('.xlsx') || n.endsWith('.ods')) return workbookKind(files);
-  if (n.endsWith('.tsv') || n.endsWith('.tab')) return (await headerless(f, '\t')) ? { format: null, reason: HEADERLESS_REASON } : { format: 'csv', delimiter: '\t', files };
+  if (n.endsWith('.tsv') || n.endsWith('.tab')) return (await headerless(f, '\t')) ? { format: null, reason: HEADERLESS_REASON } : { format: 'csv', delimiter: '\t', files, ...(await headingDoubt(f, '\t') ? { headingDoubt: true } : {}) };
   if (n.endsWith('.nt')) return { format: 'ntriples', files };
   if (n.endsWith('.nq')) return { format: 'nquads', files };
   if (n.endsWith('.ttl')) return { format: 'turtle', files };
@@ -693,7 +694,7 @@ function lpfVersion(obj) {
  */
 async function csvSetKind(files) {
   if (files.length > 1 ? files.some((f) => sheetOf(f.name)) : (await tableSheets(files)).length) return { format: 'tables', container: 'csv', files };
-  if (files.length === 1) return (await headerless(files[0])) ? { format: null, reason: HEADERLESS_REASON } : { format: 'csv', files };
+  if (files.length === 1) return (await headerless(files[0])) ? { format: null, reason: HEADERLESS_REASON } : { format: 'csv', files, ...(await headingDoubt(files[0]) ? { headingDoubt: true } : {}) };
   return { format: null, reason: 'These CSV files are not a set of PLATO spreadsheet tables (none is named after one of its sheets, such as places.csv), so choose one of them at a time: each is read as a table of places, with its columns matched to PLATO.' };
 }
 export const HEADERLESS_REASON = 'This file seems to have no heading row: its first row holds numbers with decimals, as rows of data do, where the names of its columns should be. Add a first row naming each column (name, latitude, longitude…), then choose it again.';
@@ -709,6 +710,23 @@ async function headerless(file, delimiter) {
   catch (e) { if (e instanceof DataError) return false; throw e; }
   const numbers = cells.map((c) => String(c).trim()).filter((c) => /^[+-]?\d+(\.\d+)?$/.test(c));
   return numbers.length >= 2 && numbers.some((c) => c.includes('.'));
+}
+/**
+ * Whether a table of one column may have no heading row: its first row is not a heading these tools
+ * know (columns.js, knownHeading: name, place, Site, toponym…), and rows follow it. Nothing is read
+ * differently for this: it is a hint (`headingDoubt` on what detect returns), on which the page ticks
+ * "The first row is a place, not a heading" beforehand, for the user to untick (generic.js,
+ * withFirstRow). A list of names saved from a spreadsheet often has no heading, and read with one
+ * its first name is lost without a word. With two columns or more, a first row of decimals is
+ * refused (headerless); nothing else can be told from one row.
+ */
+async function headingDoubt(file, delimiter) {
+  let rows;
+  try { rows = Papa.parse((await head(file, 4096)).replace(/^\uFEFF/, ''), { preview: 2, skipEmptyLines: 'greedy', ...(delimiter ? { delimiter } : {}) }).data; }
+  catch (e) { if (e instanceof DataError) return false; throw e; }
+  if (rows.length < 2 || rows[0].length !== 1 || rows[1].length !== 1) return false;
+  const first = String(rows[0][0]).trim();
+  return first !== '' && !knownHeading(first);
 }
 /**
  * A FeatureCollection (or Feature) is Linked Places Format when it says so or has LPF's structure:

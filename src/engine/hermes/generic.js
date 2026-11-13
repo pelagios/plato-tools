@@ -35,7 +35,7 @@ export const regionId = (key) => `region-${sha256(key).slice(0, 16)}`;
 // Spellings grouped for lookup (cluster.js): carried beside each record, never in place of its name.
 import { lookupSpellings, isMappingEntry } from './cluster.js';
 import { cellText, ROW_NUMBER, rowNumberId, numbersRows } from './columns.js';
-import { CLUSTER_WORDS, COLUMN_WORDS } from '../words.js';
+import { CLUSTER_WORDS, COLUMN_WORDS, READING_WORDS } from '../words.js';
 
 // The CSV reader is shared with the spreadsheet tables (src/formats/csv.js); exported here as before.
 export { csvRecords };
@@ -66,13 +66,22 @@ const opened = new WeakMap();
  */
 async function open(input, sheet = input.sheet) {
   const file = input.files[0];
-  const key = input.container === 'workbook' ? `sheet:${sheet}` : 'file';
+  const key = input.container === 'workbook' ? `sheet:${sheet}` : input.firstRowIsPlace === true ? 'file:no-heading' : 'file';
   if (!opened.has(file)) opened.set(file, new Map());
   const done = opened.get(file);
   if (done.has(key)) return done.get(key);
   const t = input.container === 'workbook' ? await openSheet(file, sheet) : input.format === 'csv' ? await openCsv(file, input) : await openGeojson(file, input);
   done.set(key, t);
   return t;
+}
+/**
+ * A CSV input to be read with its first row as a place, not a heading (`on` true: the page's Reading
+ * option "The first row is a place, not a heading", a run's options.firstRowIsPlace): its columns are
+ * then named for it, "name" for a table of one column, else "column 1", "column 2"…. Any other
+ * input, or `on` not true, is given back as it is: a workbook's sheet and GeoJSON are not read so.
+ */
+export function withFirstRow(input, on) {
+  return on === true && input?.format === 'csv' && input.container !== 'workbook' && input.firstRowIsPlace !== true ? { ...input, firstRowIsPlace: true } : input;
 }
 /**
  * A table opened (open), with the column of row numbers a saved mapping asks for (columns.js,
@@ -235,10 +244,13 @@ function rowOfCells(headers, cells) {
 async function openCsv(file, input) {
   const records = () => csvRecords(textChunks(file), { delimiter: input.delimiter });
   // The header and the first rows, for the guess: the rest of the file is not read here.
+  // With no heading row (withFirstRow), the columns are named here and the first row is a row like the rest.
+  const noHeading = input.firstRowIsPlace === true;
   let rawHeaders = [];
   const first = [];
   for await (const cells of records()) {
-    if (!rawHeaders.length) { rawHeaders = cells; continue; }
+    if (!rawHeaders.length && !noHeading) { rawHeaders = cells; continue; }
+    if (!rawHeaders.length) rawHeaders = cells.length === 1 ? ['name'] : cells.map((_, j) => `column ${j + 1}`);
     first.push(cells);
     if (first.length >= SAMPLE) break;
   }
@@ -255,13 +267,13 @@ async function openCsv(file, input) {
   const headProblems = [];
   for (const [h, cols] of uses) if (cols.length > 1) headProblems.push({ kind: 'generic-csv-duplicate-header', example: `"${h}": ${cols.length} columns (${cols.join(', ')}), read as ${cols.map((c) => `"${h} (column ${c})"`).join(', ')}` });
   return {
-    headers, headerText, headProblems, sample: first.map((cells) => rowOfCells(headers, cells)), head: {},
+    headers, headerText, headProblems, sample: first.map((cells) => rowOfCells(headers, cells)), head: {}, noHeading,
     // Each row.
     async *rows() {
-      let i = -1;
+      let k = 0;
       for await (const cells of records()) {
-        if (i++ < 0) continue;   // the header
-        const where = `row ${i + 1}`;   // as a spreadsheet numbers it, the header being row 1
+        if (++k === 1 && !noHeading) continue;   // the header
+        const where = `row ${k}`;   // as a spreadsheet numbers it, the header (if there is one) being row 1
         const extra = cells.length > headers.length ? cells.slice(headers.length) : undefined;
         const problem = cells.length < headers.length ? `${plural(cells.length, 'cell')} where the header has ${plural(headers.length, 'column')}` : undefined;
         yield { row: rowOfCells(headers, cells), where, problem, extra };
@@ -376,7 +388,7 @@ export function savedColumns(given) {
  */
 export async function genericProfile(input, options) {
   const saved = savedColumns(options);
-  const { mapping } = await mappingOf(input, saved, sheetIn(input, options));
+  const { mapping } = await mappingOf(saved !== options ? withFirstRow(input, options?.firstRowIsPlace) : input, saved, sheetIn(input, options));
   const fields = Object.values(mapping);
   const sameId = saved !== options && options?.sameId === true && fields.includes('id');
   return fields.includes('address') || sameId || fields.some((f) => FIGURE_FIELDS.has(f)) ? 'attestation-centric' : 'place-centric';
@@ -390,13 +402,18 @@ export async function genericProfile(input, options) {
  * reads rows with the same id as evidence about one place (an attestation each, and one new place
  * for each id at the end).
  */
-export async function* genericSource(input, rep, options = {}, defaultBase = 'https://example.org/my-dataset/') {
+export async function* genericSource(given, rep, options = {}, defaultBase = 'https://example.org/my-dataset/') {
+  const input = withFirstRow(given, options.firstRowIsPlace);
   const file = input.files[0];
   const report = (kind, example) => rep.add(GENERIC_KINDS[kind] || 'loss', kind, LOSS_TEXT[kind] || kind, example);
   const sheet = sheetIn(input, options);
   const t = numbered(await open(input, sheet), options.columns);
   const { mapping, patterns, levels, splits, problems } = resolveColumns(t.headers, t.sample, options.columns, t.headerText, { ownGeometry: t.ownGeometry });
   for (const p of [...(t.headProblems || []), ...problems]) report(p.kind, p.example);
+  // No heading row, at the user's saying: said once, with what the columns are called instead.
+  if (t.noHeading) rep.add('warning', 'generic-first-row-is-place', READING_WORDS.firstRowReport, `${file.name}: ${t.headers.length === 1 ? 'the column is called "name"' : `the columns are called ${t.headers.map((h) => `"${h}"`).join(', ')}`}`);
+  // One column under a first row that is no heading these tools know, and nobody has said which it is: read as a heading, and said.
+  else if (given.headingDoubt === true && options.firstRowIsPlace === undefined && t.headers.length === 1) rep.add('warning', 'generic-heading-doubt', READING_WORDS.headingDoubt, `${file.name}: "${t.headers[0]}"`);
   // Ids made from the rows' numbers, at the user's asking: said once, as made up.
   if (t.numbered && mapping[ROW_NUMBER] === 'id') rep.add('warning', 'generic-row-number-ids', COLUMN_WORDS.rowNumberIds, file.name);
   // Spellings grouped for lookup (options.clusters, the groups the user ticked): each grouped row's

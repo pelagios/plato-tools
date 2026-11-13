@@ -16,7 +16,7 @@ import { DataError } from './input.js';
 import { output } from './output-file.js';
 import { pragmas } from '../lib/store.js';
 import { detect, readable } from './input.js';
-import { columnsOf, mappingOf, withSheet } from './hermes/generic.js';
+import { columnsOf, mappingOf, withSheet, withFirstRow } from './hermes/generic.js';
 // Hermes: grouping similar spellings for lookup.
 import { columnValues } from './hermes/generic.js';
 import { clusterCounter } from './hermes/cluster.js';
@@ -224,7 +224,7 @@ self.onmessage = async ({ data }) => {
       // reports it again, in full.
       try {
         // A workbook's sheet chosen on the page (else the one detection chose); one it does not have is said.
-        const input = withSheet(await detect(data.files), data.sheet);
+        const input = withFirstRow(withSheet(await detect(data.files), data.sheet), data.firstRowIsPlace);
         const { headers, sample } = await columnsOf(input);
         const examples = Object.fromEntries(headers.map((h) => [h, sample.map((r) => cellText(r?.[h])).filter(Boolean).slice(0, 3)]));
         const { mapping, patterns, levels, splits, suggested, reasons, problems, gazetteer } = await mappingOf(input, data.saved);
@@ -241,7 +241,7 @@ self.onmessage = async ({ data }) => {
       // user ticks with the run's options. `id` is the page's: an answer about a file, a sheet or a
       // column no longer chosen is set aside.
       try {
-        const input = withSheet(await detect(data.files), data.sheet);
+        const input = withFirstRow(withSheet(await detect(data.files), data.sheet), data.firstRowIsPlace);
         const counter = clusterCounter({ method: data.method });
         let values = 0;
         for await (const v of columnValues(input, data.column)) { values++; counter.add(v); }

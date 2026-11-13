@@ -287,6 +287,17 @@ export const READING_WORDS = {
   headerPlaces: "Read the places in the header (found at, made at), as the editors' words",
   commentaryPlaces: "Read place names in the commentary and notes, as the editors' words",
   sameId: 'Rows with the same id are one place',
+  /**
+   * A table of one column whose first row is not a heading these tools know (input.js, headingDoubt):
+   * ticked beforehand, so that a list of names with no heading keeps its first name; unticked, the
+   * first row names the column, as in any other table.
+   */
+  firstRowIsPlace: 'The first row is a place, not a heading',
+  firstRowTip: 'Your file has one column, and its first row is not a heading these tools know (such as “name” or “place”), so it is read as the first place. If the first row is a heading, untick this. Technical term: a table with no header row.',
+  /** Said once in the report of a run where nobody said which the first row is (the command line; the page always says). */
+  headingDoubt: 'This file has one column, and its first row is not a heading these tools know (such as “name” or “place”), so it may be a place, not a heading. It was read as the heading, so it is not among the places. If it is a place, add a first row “name” above it; on the page, the Reading option “The first row is a place, not a heading” does the same. The example gives the first row.',
+  /** Said once in the report of a run read so. */
+  firstRowReport: 'The first row of the file was read as a place, not as a heading, as the Reading options say. If the first row is a heading, untick “The first row is a place, not a heading” and run this again.',
   /** Refused: the checkbox ticked with no column read as the place id. */
   sameIdNoId: 'Rows can be one place only when a column is read as the place id. Choose one in the table above first.',
   keysCaption: 'Keys with no web address: make one from each key with a pattern',

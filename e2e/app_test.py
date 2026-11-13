@@ -653,6 +653,32 @@ def myd_read_checks(page, tmp):
                 and not any(i['kind'] == 'generic-row-number-ids' for i in (r.get('report') or {}).get('items', []))), {'back': back, 'own': own, 'ids': ids}
     attempt('Map your data, reading: "Remove the numbers" takes the made column away and the offer returns; a table with ids of its own is offered no numbering and keeps its ids', removed_and_own)
 
+    def no_heading():
+        # robust R-05: a list with no heading row. The Reading option is there, ticked beforehand, and the first name is kept;
+        # unticked, the first row is the heading again; a file with a heading these tools know is shown no such option.
+        BOX = "() => { const b = document.getElementById('reading-firstRowIsPlace'); return b ? { checked: b.checked, label: b.closest('label').innerText.trim(), tip: b.closest('label').dataset.tip || '', title: b.closest('label').title || '' } : null; }"
+        def checked_as():
+            page.click('#check')
+            r = wait_state(page, lambda x: x.get('phase') in ('done', 'error'), 120, 'check')
+            return r.get('phase'), page.inner_text('#summary')[:200]
+        s = reading_case(page, fx / '14c-one-column-no-header.csv', columns=True)
+        box = page.evaluate(BOX); ticked = s.get('columns') or {}
+        one = checked_as()
+        page.uncheck('#reading-firstRowIsPlace')
+        st = wait_state(page, lambda x: (x.get('columns') or {}).get('headers') == ['Aquae Sulis'], 30, 'the first row as the heading')
+        two = checked_as()
+        page.check('#reading-firstRowIsPlace')
+        back = wait_state(page, lambda x: (x.get('columns') or {}).get('headers') == ['name'], 30, 'the first row as a place')
+        reading_case(page, fx / '14-one-column.csv', columns=True)
+        headed = page.evaluate("() => ({ box: !!document.getElementById('reading-firstRowIsPlace'), other: !!document.getElementById('reading-sameId') })")
+        three = checked_as()
+        return (box and box['checked'] and box['label'] == 'The first row is a place, not a heading' and 'untick this' in box['tip'] and not box['title']
+                and ticked.get('headers') == ['name'] and (ticked.get('examples') or {}).get('name', [None])[0] == 'Aquae Sulis'
+                and one[0] == 'done' and '4 places' in one[1]
+                and (st.get('columns') or {}).get('headers') == ['Aquae Sulis'] and two[0] == 'done' and '3 places' in two[1]
+                and (back.get('columns') or {}).get('headers') == ['name']
+                and headed == {'box': False, 'other': True} and '5 places' in three[1]), {'box': box, 'ticked': ticked.get('headers'), 'checks': [one, two, three], 'unticked': (st.get('columns') or {}).get('headers'), 'headed': headed}
+    attempt('Map your data, reading: a one-column list with no heading row has "The first row is a place, not a heading" ticked beforehand and Check reads all 4 names; unticked, the first row is the heading and 3 are read; a headed list is shown no such option', no_heading)
 
 def krisis_place(iri, label, lon, lat, *also):
     return {'@id': iri, 'label': label, 'attestations': [{'names': [{'toponym': n} for n in (label, *also)],
