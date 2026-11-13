@@ -6,7 +6,7 @@
 // implementation (rdf-tabular, strict mode) on the same good and broken tables.
 import { PLATO } from '../lib/context.js';
 import { encodeId } from '../engine/agora/address.js';
-import { list, isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey, isComputed, isComputedFacet, identityBundleLosses, evidenceSpanLosses } from './shared.js';
+import { list, isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey, isComputed, isComputedFacet, identityBundleLosses, acceptedMatches, matchProvenanceLoss, evidenceSpanLosses } from './shared.js';
 
 export const CITO = 'http://purl.org/spar/cito/';
 
@@ -457,10 +457,22 @@ export function recordToRows(rec, ids, loss = () => {}, accepts = () => true, wi
     // things together ("no market and no fair here") split into rows would deny each of them on its
     // own, which the source did not say; so it is left out whole, and reported.
     const deny = isDenial(a);
-    // Identities the attestation bundles have no row: the identities sheet states a match on its own
-    // (identityBundleLosses). A denial that bundles them denies them with its facets, so nothing of
-    // it can be written: its facets alone would be denied on their own.
-    const bundled = identityBundleLosses(a, rec['@id'], loss);
+    // The matches an attestation accepts (a review's decisions) are rows of the identities sheet, one
+    // for each identity (D3, 13 November 2026), with the attestation's first source where the match
+    // names none. What a row cannot say is reported: who decided, from which candidate, and that a
+    // bundle was made together (matchProvenanceLoss). A denial that bundles identities denies them
+    // with its facets, so nothing of it can be written (identityBundleLosses): its facets alone
+    // would be denied on their own.
+    const matches = acceptedMatches(a, rec['@id']);
+    if (matches.length) {
+      const from = list(a.sources)[0] || list(a.citations).map((c) => c?.source).find(Boolean);
+      for (const { subject, ir } of matches) {
+        const { assertedBy, promotedFrom, ...own } = ir;   // reported once, for the attestation
+        rows.identities.push(identityRow({ ...own, source: own.source || from }, ids, loss, subject));
+      }
+      matchProvenanceLoss(a, rec['@id'], loss);
+    }
+    const bundled = identityBundleLosses(a, rec['@id'], loss, matches.length);
     if (deny && bundled) continue;
     if (deny && facets.reduce((n, k) => n + a[k].length, 0) > 1) { loss({ kind: 'denial-bundled', value: rec['@id'] }); continue; }
     if (facets.length > 1) loss({ kind: 'bundled-attestation', value: facets.join('+') });

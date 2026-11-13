@@ -122,27 +122,31 @@ for (const target of ['tables', 'lpf']) {
     assert.match(out, /newton-by-the-river/, 'control');
   });
 
-  test(`${target}: an asserted bundle is not split into standalone matches, and is reported`, async () => {
+  // Until 13 November 2026 an asserted bundle was left out whole (identity-bundle). Stephen's ruling
+  // of that day (D3): the matches a review accepts go out as matches on their own, and what that
+  // loses is reported.
+  test(`${target}: an asserted bundle is written as a match for each identity, and what a match on its own loses is reported`, async () => {
     const d = one(bundle({ names: [{ toponym: 'Pee' }] }));
     const r = await go([textFile(JSON.stringify(d), 'b.json')], 'convert', target);
     assert.deepEqual(errors(r), []);
-    const l = loss(r, 'identity-bundle');
+    const l = loss(r, 'identity-provenance');
     assert.equal(l?.count, 1, JSON.stringify(lossKinds(r)));
-    assert.match(l.message, /lose the source, date and certainty they share/);
+    assert.match(l.message, /Who made an identity match, and the candidate it answers/);
     assert.deepEqual(l.examples, ['https://example.org/att/cluster']);
+    assert.equal(loss(r, 'identity-bundle'), undefined);
     assert.ok(!r.report.items.some((i) => i.kind === 'dropped' && /identities/.test(i.message)), 'reported once, in its own words');
     if (target === 'tables') {
       const zip = r.e.outs['b-tables.zip'][0];
-      assert.deepEqual(sheet(zip, 'identities.csv'), []);
+      assert.deepEqual(sheet(zip, 'identities.csv').map((x) => [x.place_id, x.same_as, x.match_type, x.certainty]), [['p', 'https://example.org/place/q', 'exactMatch', '0.8']]);
       assert.equal(sheet(zip, 'names.csv').filter((n) => n.name === 'Pee').length, 1, 'the name it also attests is written');
     } else {
       const fc = JSON.parse(outText(r.e, 'b.geojson'));
-      assert.ok(!fc.features.some((f) => f.links?.length), JSON.stringify(fc.features.map((f) => f.links)));
+      assert.deepEqual(fc.features.map((f) => f.links || []), [[{ type: 'exactMatch', identifier: 'https://example.org/place/q' }], []]);
       assert.ok(fc.features.some((f) => f.names?.some((n) => n.toponym === 'Pee')));
     }
-    // A bundle alone is reported as that, not also as an attestation with no facet.
+    // A bundle alone is written too, and is not reported as an attestation with no facet.
     const alone = await go([textFile(JSON.stringify(one(bundle())), 'a.json')], 'convert', target);
-    assert.ok(loss(alone, 'identity-bundle'));
+    assert.ok(loss(alone, 'identity-provenance'));
     assert.equal(loss(alone, 'attestation-without-facet'), undefined);
   });
 }

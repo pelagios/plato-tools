@@ -64,9 +64,12 @@ test('the example with its candidate set: each ContainedIn is one gvp:broaderPar
   assert.equal(rel.citations?.length, 1, 'the containment keeps its citation');
   const [up] = containedIn(byId, SURREY);
   assert.deepEqual([up.relationTo, up.label, up.certainty, up.whg_match_score], [WHG_ENGLAND, 'England', 'certain', 98]);
-  // A presence control for the absences below: the reviewers' identities are still reported as not
-  // written as links (identity-bundle), and the run's losses are read.
-  assert.equal(loss(r, 'identity-bundle')?.count, 2, JSON.stringify(losses(r).map((i) => i.kind)));
+  // A presence control for the absences below: the reviewers' identities are written as links too
+  // (13 November 2026), what a link cannot say of each is reported (identity-provenance), and the
+  // run's losses are read.
+  assert.equal(loss(r, 'identity-provenance')?.count, 2, JSON.stringify(losses(r).map((i) => i.kind)));
+  assert.equal(loss(r, 'identity-bundle'), undefined);
+  assert.deepEqual(byId.get(SURREY).links, [{ type: 'closeMatch', identifier: WHG_SURREY, whg_match_score: 93 }]);
   assert.equal(loss(r, 'region-match-no-score'), undefined, JSON.stringify(losses(r).map((i) => i.kind)));
   // The reviewers' certainty is written, in the broaderPartitive, so it is not reported as dropped.
   assert.equal(loss(r, 'certainty-level'), undefined, JSON.stringify(losses(r).map((i) => i.kind)));

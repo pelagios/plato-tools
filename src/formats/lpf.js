@@ -6,7 +6,7 @@
 // Writing LPF from PLATO is lossy by design (bundling, locators, form status, numeric certainty
 // and more have no LPF slot); every loss is reported, with counts.
 import { PLATO, isAbsoluteIri } from '../lib/context.js';
-import { list, isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey, isComputed, isComputedFacet, identityBundleLosses, evidenceSpanLosses, isContainedIn } from './shared.js';
+import { list, isDenial, isAlternative, qualificationLosses, currentAttestations, isFigure, dropKeys, dropKey, isComputed, isComputedFacet, identityBundleLosses, acceptedMatches, matchProvenanceLoss, evidenceSpanLosses, isContainedIn } from './shared.js';
 
 // The README's alias table, plus the vocabulary prefixes its own examples use.
 export const LPF_PREFIXES = {
@@ -271,6 +271,8 @@ const SAME_PLACE = new Set(['exactMatch', 'closeMatch']);
 /** A record's label, which names a region only where it has no current name attestation (RegionIndex). */
 export const regionLabel = (rec) => (typeof rec?.label === 'string' && rec.label) || undefined;
 
+// A match an attestation accepts: its provenance is reported once, for the attestation (matchProvenanceLoss).
+const MATCH_KEEPS = new Set(['subject', 'object', 'identityType', 'certainty', 'basis', 'source', 'assertedBy', 'promotedFrom']);
 /**
  * What the whole document says of the regions its places are ContainedIn, gathered before any feature
  * is written (a region's match may come anywhere in the file): the attestations bundling identities
@@ -321,12 +323,25 @@ export class RegionIndex {
   nameLater(attestations, subject, label, wanted) {
     if (typeof subject === 'string' && wanted.has(subject) && !this.named.has(subject)) { this.named.add(subject); this.nameRecord(attestations, subject, label); }
   }
-  /** Keep only what concerns the regions some place is ContainedIn; returns the Candidates wanted. */
+  /**
+   * Keep only what concerns the regions some place is ContainedIn; returns the Candidates wanted:
+   * those every match of the document was promoted from, a place's as well as a region's, since
+   * each match is written as a link with its Candidate's score where one is found (recordToFeature).
+   */
   prune() {
-    for (const m of [this.matches, this.names, this.labels]) for (const k of [...m.keys()]) if (!this.targets.has(k)) m.delete(k);
     const wanted = new Set();
     for (const stubs of this.matches.values()) for (const s of stubs) for (const ir of s.identities) if (typeof ir.promotedFrom === 'string') wanted.add(ir.promotedFrom);
+    for (const m of [this.matches, this.names, this.labels]) for (const k of [...m.keys()]) if (!this.targets.has(k)) m.delete(k);
     return wanted;
+  }
+  /**
+   * The score of the Candidate the match `ir` of `subject` was promoted from, when the sets given
+   * hold it, for this very pair (either way round), with one score: else undefined, and no guess.
+   */
+  scoreOf(subject, ir) {
+    const c = typeof ir?.promotedFrom === 'string' ? this.candidates?.get(ir.promotedFrom) : undefined;
+    if (!c || c.conflict || typeof c.score !== 'number') return undefined;
+    return (c.subject === subject && c.object === ir.object) || (c.subject === ir.object && c.object === subject) ? c.score : undefined;
   }
   /**
    * True when attestation `a` of record `id` is a current match whose certainty level the region's
@@ -406,7 +421,7 @@ function containment(r, a, when, cits, regions, withdrawn, loss) {
  */
 export function recordToFeature(rec, idrs = [], loss = () => {}, withdrawn = null, regions = null) {
   const f = { '@id': rec['@id'], type: 'Feature', properties: clean({ title: rec.label, ccodes: rec.ccodes?.length ? rec.ccodes : undefined }), names: [], types: [], relations: [], links: [], descriptions: [], depictions: [] };
-  const geoms = [], fclasses = [], whens = [];
+  const geoms = [], fclasses = [], whens = [], matched = [];
   dropKeys(rec, 'spatialEntity', KEEPS.spatialEntity, loss);
   for (const whole of currentAttestations(rec, withdrawn, loss)) {
     // A computed value (plato:computed) is not evidence, and LPF cannot mark one: written, it would
@@ -422,9 +437,17 @@ export function recordToFeature(rec, idrs = [], loss = () => {}, withdrawn = nul
     // would date the place, so it is left out, and reported (PLATO 7720890, #20).
     evidenceSpanLosses(a, whole['@id'] || rec['@id'], loss);
     dropKeys(a, 'attestation', KEEPS.attestation, loss);
-    // Identities the attestation bundles are never made links: a link states a match on its own, and
-    // in a denial they say that two places are not the same (identityBundleLosses).
-    const bundled = identityBundleLosses(a, rec['@id'], loss);
+    // The matches an attestation accepts (a review's decisions) are links of the place, one for each
+    // identity (D3, 13 November 2026): exactMatch where the review recorded one, closeMatch otherwise,
+    // with the Candidate's score (whg_match_score, as on a region's broaderPartitive) where the
+    // candidate sets given hold it. What a link cannot say is reported: who decided, from which
+    // candidate, and that a bundle was made together (matchProvenanceLoss). In a denial the
+    // identities say that two places are not the same, and are left out (identityBundleLosses), as
+    // are those about another place than this one.
+    const matches = acceptedMatches(a, rec['@id'], rec['@id']);
+    for (const { ir } of matches) matched.push({ ir, score: regions?.scoreOf(rec['@id'], ir) });
+    if (matches.length) matchProvenanceLoss(a, rec['@id'], loss);
+    const bundled = identityBundleLosses(a, rec['@id'], loss, matches.length);
     // LPF cannot say that a source denies something: a denial written as LPF would assert what its
     // source says is not so. It is left out, and reported (PLATO cf87b78).
     if (isDenial(a)) { if (!bundled) loss({ kind: 'denial', value: rec['@id'] }); continue; }
@@ -501,6 +524,17 @@ export function recordToFeature(rec, idrs = [], loss = () => {}, withdrawn = nul
     if (ir.identityType === 'exactMatch' || ir.identityType === 'closeMatch') f.links.push({ type: ir.identityType, identifier: ir.object });
     else { f.links.push({ type: 'closeMatch', identifier: ir.object }); loss({ kind: 'identity-type', value: ir.identityType }); }
     if (ir.certainty !== undefined || ir.basis) loss({ kind: 'identity-certainty-or-basis' });
+  }
+  // The matches its attestations accept, after those stated on their own; one the record already
+  // states with the same type is not written twice (its score is added, if it had none).
+  for (const { ir, score } of matched) {
+    dropKeys(ir, 'identityRelation', MATCH_KEEPS, loss);
+    const type = ir.identityType === 'exactMatch' ? 'exactMatch' : 'closeMatch';
+    if (ir.identityType !== 'exactMatch' && ir.identityType !== 'closeMatch') loss({ kind: 'identity-type', value: ir.identityType });
+    if (ir.certainty !== undefined || ir.basis) loss({ kind: 'identity-certainty-or-basis' });
+    const same = f.links.find((l) => l.type === type && l.identifier === ir.object);
+    if (same) { if (score !== undefined && same.whg_match_score === undefined) same.whg_match_score = score; continue; }
+    f.links.push(score === undefined ? { type, identifier: ir.object } : { type, identifier: ir.object, whg_match_score: score });
   }
   if (fclasses.length) f.properties.fclasses = [...new Set(fclasses)];
   else loss({ kind: 'lpf-fclasses-missing' });

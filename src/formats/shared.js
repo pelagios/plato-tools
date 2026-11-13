@@ -163,18 +163,46 @@ export const dropKey = (where, key, loss) => loss({ kind: 'dropped', key: `${whe
 
 // ---- identities an attestation bundles (plato:attests_identity, PLATO 238d15f) -------------------
 /**
- * Report the identity relations attestation `a` bundles, which a format without attestations of
- * identity (LPF, the spreadsheet tables) cannot hold. They are never written as standalone identity
- * matches (LPF links, identities rows): those would lose the provenance the attestation gives them
- * together, and could no longer be withdrawn together. In a denial (plato:negated) they say that two
- * entities are NOT the same: written as a match, that would say the opposite, so the words say so.
- * Returns true when there were any.
+ * Report the identity relations attestation `a` bundles that a format without attestations of
+ * identity (LPF, the spreadsheet tables) cannot hold: those of a denial (plato:negated), which say
+ * that two entities are NOT the same, so that written as a match they would say the opposite; and
+ * those acceptedMatches does not give the writer (`written` is how many it did give, and the writer
+ * wrote). Returns true when the attestation bundled any identities at all.
  */
-export function identityBundleLosses(a, where, loss) {
+export function identityBundleLosses(a, where, loss, written = 0) {
   if (!a || !Array.isArray(a.identities) || !a.identities.length) return false;
-  loss({ kind: isDenial(a) ? 'identity-denied' : 'identity-bundle', value: a['@id'] || where });
+  if (isDenial(a)) loss({ kind: 'identity-denied', value: a['@id'] || where });
+  else if (written < a.identities.length) loss({ kind: 'identity-bundle', value: a['@id'] || where });
   return true;
 }
+/**
+ * The matches attestation `a` accepts, for a writer that has a place for a match on its own (LPF's
+ * links, the tables' identities sheet): each identity of an attestation that is not a denial, as
+ * { subject, ir }, one for each identity, so that a bundle of two or more gives one match for each
+ * (Stephen's ruling of 13 November 2026, D3: the matches a review accepts go out in LPF and in the
+ * tables, where before they were left out whole). The subject is the identity's own, else the
+ * attestation's (`about`), else the record it is nested under. With `only`, the matches of that
+ * subject alone (an LPF feature holds its own links); the rest are for identityBundleLosses to
+ * report. The caller gives only current attestations (currentAttestations), and reports what the
+ * match loses on the way, with matchProvenanceLoss.
+ */
+export function acceptedMatches(a, subject, only) {
+  if (!a || !Array.isArray(a.identities) || isDenial(a)) return [];
+  const out = [];
+  for (const ir of a.identities) {
+    if (!ir || typeof ir !== 'object' || typeof ir.object !== 'string' || !ir.object) continue;
+    const s = typeof ir.subject === 'string' && ir.subject ? ir.subject : typeof a.about === 'string' ? a.about : subject;
+    if (typeof s !== 'string' || (only !== undefined && s !== only)) continue;
+    out.push({ subject: s, ir });
+  }
+  return out;
+}
+/**
+ * What a match written on its own loses: who decided it and when, the source and certainty level the
+ * attestation gave it, the candidate it answers, and that the matches of one attestation were made,
+ * and can be withdrawn, together. Reported once for each attestation, naming it.
+ */
+export const matchProvenanceLoss = (a, where, loss) => loss({ kind: 'identity-provenance', value: a['@id'] || where });
 
 // ---- routes, itineraries and networks (PLATO 0.6.0) ----------------------------------------------
 const plato = (iri) => (typeof iri === 'string' && iri.startsWith('plato:') ? PLATO + iri.slice(6) : iri);
