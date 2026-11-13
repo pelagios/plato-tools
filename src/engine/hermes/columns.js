@@ -125,6 +125,22 @@ export const GENERIC_KINDS = {
 /** The name of the column that stands for a GeoJSON feature's own id (its `id` member, not a property). */
 export const FEATURE_ID = '(feature id)';
 
+/**
+ * The name of the column made for a table that has no ids of its own, at the user's asking ("Number
+ * the rows" on the page; "(row number)": "id" in a mapping given with --columns): it holds row-1,
+ * row-2… by each row's place in the file. The ids are made up, and said to be: they follow the rows'
+ * order, so rows added or moved later change them. It is never guessed, and never made from a name.
+ */
+export const ROW_NUMBER = '(row number)';
+/** The id made for the k-th row of the file (the first row after the headings is 1). */
+export const rowNumberId = (k) => `row-${k}`;
+/** Whether a saved mapping asks for the rows to be numbered: its "(row number)" column is the id. */
+export function numbersRows(saved) {
+  const c = figuresSpec(saved)?.columns ?? saved;
+  if (!isObject(c) || !Object.hasOwn(c, ROW_NUMBER)) return false;
+  return (isObject(c[ROW_NUMBER]) ? c[ROW_NUMBER].field : c[ROW_NUMBER]) === 'id';
+}
+
 /** A column heading reduced for matching: case, accents, spaces and punctuation do not count. */
 export const normaliseHeader = (h) => String(h).normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -149,6 +165,10 @@ const HEADINGS = {
   gridref: ['gridref', 'gridrefs', 'gridreference', 'gridreferences', 'ngr', 'osngr', 'osgb', 'osgb36', 'osgrid', 'osgridref', 'osgridreference', 'osref', 'bng', 'britishnationalgrid', 'nationalgrid', 'nationalgridref', 'nationalgridreference', 'irishgrid', 'irishgridref', 'irishgridreference', 'igr'],
 };
 const BY_HEADING = new Map(Object.entries(HEADINGS).flatMap(([f, hs]) => hs.map((h) => [h, f])));
+// Headings that usually hold the place's name in a table of one's own (place, Site, town), but say
+// less than those above: one is read as the name only when no column has a heading above for it, and
+// its values are words. With such a column (name, town), "town" is something about the place, a note.
+const WEAK_NAME = new Set(['place', 'places', 'placenames', 'site', 'sitename', 'town', 'village', 'settlement', 'city', 'locality', 'location', 'ort', 'lieu', 'nom', 'nombre', 'nome']);
 // A gazetteer's name at the start of a heading (wikidata_uri, pleiades_url, geonames_id) reads as an address column.
 // GeoNames' own heading for its id is geonameid (geoname_id), without the s.
 const GAZETTEER_PREFIX = /^(wikidata|pleiades|geonames?|whg|tgn|gazetteer)/;
@@ -166,6 +186,13 @@ const namesAddress = (s) => { const p = placeAddress(s); return isWebAddress(p.l
 const lostKind = (lost) => (lost === 'address-not-a-place' ? lost : lost === 'whg-staging' ? 'generic-whg-staging' : 'generic-whg-record');
 const NUMBER = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
 const isNumber = (s) => NUMBER.test(s);
+// Values that read as names: at least half of them have a letter and are neither numbers nor web addresses.
+const wordy = (vs) => 2 * vs.filter((v) => /\p{L}/u.test(v) && !isNumber(v) && !isWebAddress(v)).length >= vs.length;
+// A column that could hold the places' names though its heading says nothing: words (each value has
+// a letter, and at least half a run of three, which a code such as A1, NY or SW1A 1AA has not), none
+// of them long (a description is not a name), and mostly distinct (three in four, where a county repeats).
+const nameLike = (vs) => vs.length > 0 && vs.every((v) => /\p{L}/u.test(v) && !isNumber(v) && !isWebAddress(v) && v.length <= 100)
+  && 2 * vs.filter((v) => /\p{L}{3}/u.test(v)).length >= vs.length && 4 * new Set(vs).size >= 3 * vs.length;
 const FIELD_WORDS = {
   name: "the place's name", alternativeNames: 'other names', latitude: 'latitude', longitude: 'longitude', wkt: 'Well-Known Text', geometry: 'a geometry',
   gridref: 'a grid reference',
@@ -231,6 +258,11 @@ const gazetteerNamed = (n) => { const g = PATTERN_GAZETTEER.exec(n)?.[1]; return
 const fitsGazetteer = (g, v) => GAZETTEER_PATTERNS[g].shape.test(patternId(v, GAZETTEER_PATTERNS[g].pattern));
 const GAZETTEER_WORDS = { pleiades: 'Pleiades', geonames: 'GeoNames', wikidata: 'Wikidata' };
 
+/** The reason shown for the column of row numbers. */
+export const ROW_NUMBER_REASON = "made up at your asking: each row's number in the file, so rows added or moved later change the ids";
+const UNRECOGNISED = 'the heading is not one these tools recognise, so it is kept in the notes';
+/** The reason shown for a column taken as the name because no heading says which column holds the names. */
+export const NAME_FALLBACK = 'no heading says which column holds the names, so the first column of words is taken: change it if that is wrong';
 /**
  * Guess which column holds what, from the headings and a few rows. Returns { mapping, patterns,
  * suggested, reasons, gazetteer }: the mapping as described at the top of this file (fields as
@@ -247,10 +279,18 @@ export function guessColumns(headers, sampleRows = [], headerText = {}, { ownGeo
   const mapping = Object.create(null), reasons = Object.create(null), taken = new Map();
   const suggested = Object.create(null), levels = Object.create(null), regions = [];
   const values = (h) => sampleRows.map((r) => cellText(r?.[h])).filter(Boolean);
+  const norm = (h) => normaliseHeader(Object.hasOwn(headerText, h) ? headerText[h] : h);
+  // The column whose heading says outright that it holds the name, if there is one.
+  const named = headers.find((h) => h !== FEATURE_ID && BY_HEADING.get(norm(h)) === 'name');
   for (const h of headers) {
-    const n = normaliseHeader(Object.hasOwn(headerText, h) ? headerText[h] : h);
+    const n = norm(h);
     let field = h === FEATURE_ID ? 'id' : BY_HEADING.get(n);
     let reason = h === FEATURE_ID ? "the GeoJSON feature's own id" : field ? `the heading "${h}" reads as ${FIELD_WORDS[field]}` : undefined;
+    // "place", "Site", "town": the name, unless another column's heading says it is, or its values are not words.
+    if (!field && h !== FEATURE_ID && WEAK_NAME.has(n)) {
+      if (named !== undefined) { field = 'note'; reason = `the heading "${h}" could be the place's name, but the column "${named}" is read as the name, so it is kept in the notes`; }
+      else if (wordy(values(h))) { field = 'name'; reason = `the heading "${h}" reads as ${FIELD_WORDS.name}`; }
+    }
     if (!field && (GAZETTEER_PREFIX.test(n) || ADDRESS_SUFFIX.test(n))) { field = 'address'; reason = `the heading "${h}" reads as a web address`; }
     const vs = values(h);
     const kind = !field && h !== FEATURE_ID ? regionKind(n) : undefined;
@@ -308,7 +348,7 @@ export function guessColumns(headers, sampleRows = [], headerText = {}, { ownGeo
       field = 'gridref'; reason = `${k === vs.length ? (k === 1 ? 'its one sampled value is a grid reference' : `all ${k} of its sampled values are grid references`) : `${k} of its ${vs.length} sampled values ${k === 1 ? 'is a grid reference' : 'are grid references'}`} (such as TQ 33760 80560, or O 15 34)`;
     }
     if (field && single(field) && taken.has(field)) { reason = `${reason}, but ${FIELD_WORDS[field]} is already column "${taken.get(field)}", so it is kept in the notes`; field = 'note'; }
-    if (!field) { field = 'note'; reason = 'the heading is not one these tools recognise, so it is kept in the notes'; }
+    if (!field) { field = 'note'; reason = UNRECOGNISED; }
     if (single(field)) taken.set(field, h);
     mapping[h] = field; reasons[h] = reason;
   }
@@ -320,6 +360,13 @@ export function guessColumns(headers, sampleRows = [], headerText = {}, { ownGeo
   });
   // A suggestion only when no other column is the address already: one column only can be.
   for (const h of Object.keys(suggested)) if (Object.keys(mapping).some((c) => c !== h && mapping[c] === 'address')) delete suggested[h];
+  // No heading says which column holds the names, and none holds the places' addresses: the first
+  // column of words no heading claimed is taken as the name, and its reason says it is a guess.
+  const read = Object.values(mapping);
+  if (!read.includes('name') && !read.includes('address')) {
+    const h = headers.find((c) => c !== FEATURE_ID && mapping[c] === 'note' && reasons[c] === UNRECOGNISED && !Object.hasOwn(suggested, c) && nameLike(values(c)));
+    if (h !== undefined) { mapping[h] = 'name'; reasons[h] = NAME_FALLBACK; }
+  }
   for (const [h, s] of Object.entries(suggested)) {
     const have = s.fit === s.sampled ? (s.sampled === 1 ? 'its one sampled value has' : `all ${s.sampled} of its sampled values have`) : `${s.fit} of its ${s.sampled} sampled values have`;
     reasons[h] += mapping[h] === 'address'
@@ -419,7 +466,7 @@ export function resolveColumns(headers, sampleRows, saved, headerText, options) 
       splits[h] = s;
     }
     if (single(f)) taken.set(f, h);
-    mapping[h] = f; reasons[h] = pattern === undefined ? 'as the mapping given says' : `as the mapping given says, with each address made from the column's value through the pattern ${pattern}`;
+    mapping[h] = f; reasons[h] = h === ROW_NUMBER && f === 'id' && numbersRows(saved) ? ROW_NUMBER_REASON : pattern === undefined ? 'as the mapping given says' : `as the mapping given says, with each address made from the column's value through the pattern ${pattern}`;
     if (pattern !== undefined) patterns[h] = pattern;
   }
   // A "within" column given no level: the next level free, in the file's order, after those given.

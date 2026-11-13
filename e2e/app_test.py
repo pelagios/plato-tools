@@ -578,6 +578,82 @@ def spellings_checks(page, tmp):
           {'saved': saved, 'fresh': fresh, 'loaded': loaded, 'state': st2.get('spellings'), 'notes': grouped_notes(doc2)})
 
 
+MYD_COLUMNS = """() => { const t = document.querySelector('#columns table'); return {
+  offer: document.getElementById('columns-no-ids')?.innerText || '', button: document.getElementById('columns-number')?.textContent || null,
+  tip: document.getElementById('columns-number')?.dataset.tip || '', title: document.getElementById('columns-number')?.title || '',
+  remove: document.getElementById('columns-unnumber')?.textContent || null,
+  rows: t ? [...t.tBodies[0].rows].map((r) => r.cells[0].textContent + ' | ' + [...r.cells[1].querySelectorAll('li')].map((li) => li.textContent).join(' ') + ' | ' + r.cells[3].textContent) : [],
+  warnings: document.getElementById('columns-warnings')?.innerText || '' }; }"""
+
+def myd_read_checks(page, tmp):
+    """Map your data, "read and write" (13 November 2026; Stephen's rulings D1 and S1 of the simple review).
+    A column headed "Site" is read as the name, so a workbook of sites checks as 8 places; a table with
+    no ids is offered "Number the rows", which gives row-1… as ids said to be made up, and the places
+    can then be looked up (5, where before there were none). Each absence is beside a presence: the
+    table with ids of its own is offered no button and keeps its ids."""
+    fx = ROOT / 'test/fixtures/myd'
+    def sites():
+        s = reading_case(page, fx / 'sites.xlsx', columns=True)
+        cols = s.get('columns') or {}
+        shown = page.inner_text('#columns') if cols else ''
+        page.click('#check')
+        r = wait_state(page, lambda x: x.get('phase') in ('done', 'error'), 120, 'check')
+        said = page.inner_text('#summary')
+        return ((cols.get('mapping') or {}).get('Site') == 'name' and 'the heading "Site" reads as the place\'s name' in shown
+                and r.get('phase') == 'done' and '8 places' in said and 'Not one row became a place' not in page.inner_text('#report')
+                and "No column is read as the place's name yet" not in shown), {'mapping': cols.get('mapping'), 'phase': r.get('phase'), 'summary': said[:300]}
+    attempt('Map your data, reading: a workbook whose names are under "Site" is read with Site as the name, and Check reads 8 places', sites)
+
+    def numbered():
+        s = reading_case(page, fx / '14-one-column.csv', columns=True)
+        before = page.evaluate(MYD_COLUMNS)
+        page.click('#columns-number')
+        st = wait_state(page, lambda x: ((x.get('columns') or {}).get('mapping') or {}).get('(row number)') == 'id', 10, 'numbered')
+        after = page.evaluate(MYD_COLUMNS)
+        r = reading_run(page)
+        doc = reading_doc(page, r, tmp, 'myd-numbered.json')
+        ids = [(p.get('entityIdentifier'), p.get('label')) for p in doc.get('spatialEntities', [])]
+        made = next((i for i in (r.get('report') or {}).get('items', []) if i['kind'] == 'generic-row-number-ids'), None)
+        # The dataset made, chosen as the workflow's "Use …" chooses it: the lookup would now take all five.
+        page.set_input_files('#picker', [str(tmp / 'myd-numbered.json')])
+        wait_state(page, lambda x: x.get('phase') in ('detected', 'unrecognised'), 60, 'detection')
+        opened = page.evaluate("() => document.getElementById('lookup').open")
+        if not opened: page.click('#lookup > summary')
+        try:
+            page.wait_for_function("() => /Would look up \\d+ places|No places to look up/.test(document.getElementById('lookup-preview').textContent)", timeout=60_000)
+        except Exception: pass
+        preview = page.inner_text('#lookup-preview')[:200]
+        if not opened: page.click('#lookup > summary')
+        return (before['button'] == 'Number the rows' and 'Your table has no column of ids' in before['offer'] and 'follow the order of the rows' in before['offer']
+                and 'made-up id' in before['tip'] and not before['title'] and before['remove'] is None and len(before['rows']) == 1
+                and (st.get('columns') or {}).get('headers') == ['name', '(row number)'] and after['button'] is None and after['remove'] == 'Remove the numbers'
+                and len(after['rows']) == 2 and after['rows'][1].startswith('id (made up: the row\u2019s number) | row-1 row-2 row-3 | made up at your asking')
+                and 'Your table has no column of ids' not in after['warnings']
+                and ids == [('row-1', 'Aquae Sulis'), ('row-2', 'Eboracum'), ('row-3', 'Deva Victrix'), ('row-4', 'Eboracum'), ('row-5', 'Lindum Colonia')]
+                and made and made['severity'] == 'warning' and 'made up' in made['message']
+                and 'Would look up 5 places' in preview), {'before': before, 'after': after, 'ids': ids, 'made': made, 'preview': preview, 'phase': r.get('phase')}
+    attempt('Map your data, reading: a one-column table is offered "Number the rows"; pressed, a made column gives the ids row-1 to row-5, said in the report to be made up, and the lookup would take 5 places', numbered)
+
+    def removed_and_own():
+        # The numbers are taken away by their own button, and the offer comes back; a table with ids of its own is offered nothing.
+        reading_case(page, fx / '14-one-column.csv', columns=True)
+        page.click('#columns-number')
+        wait_state(page, lambda x: ((x.get('columns') or {}).get('mapping') or {}).get('(row number)') == 'id', 10, 'numbered')
+        page.click('#columns-unnumber')
+        st = wait_state(page, lambda x: '(row number)' not in ((x.get('columns') or {}).get('mapping') or {'(row number)': 1}), 10, 'not numbered')
+        back = page.evaluate(MYD_COLUMNS)
+        s = reading_case(page, fx / '00-baseline-with-ids.csv', columns=True)
+        own = page.evaluate(MYD_COLUMNS)
+        r = reading_run(page)
+        doc = reading_doc(page, r, tmp, 'myd-own-ids.json')
+        ids = [p.get('entityIdentifier') for p in doc.get('spatialEntities', [])]
+        return ((st.get('columns') or {}).get('headers') == ['name'] and back['button'] == 'Number the rows' and len(back['rows']) == 1
+                and own['button'] is None and own['remove'] is None and len(own['rows']) == 9 and (s.get('columns') or {}).get('mapping', {}).get('id') == 'id'
+                and ids == ['bath', 'york', 'chester', 'lincoln', None]
+                and not any(i['kind'] == 'generic-row-number-ids' for i in (r.get('report') or {}).get('items', []))), {'back': back, 'own': own, 'ids': ids}
+    attempt('Map your data, reading: "Remove the numbers" takes the made column away and the offer returns; a table with ids of its own is offered no numbering and keeps its ids', removed_and_own)
+
+
 def krisis_place(iri, label, lon, lat, *also):
     return {'@id': iri, 'label': label, 'attestations': [{'names': [{'toponym': n} for n in (label, *also)],
             'geometries': [{'geojson': {'type': 'Point', 'coordinates': [lon, lat]}}], 'sources': [{'title': 'A survey'}]}]}
@@ -2929,7 +3005,7 @@ def main():
                   and 'Roma' in shown and 'Athenae' in shown and 'Lutetia' in shown and 'Aquae Sulis' not in shown and cols.get('warnings') == [], {'state': cols, 'a11y': a11y})
             # The warnings, each seen appearing where it was absent: an address column, then no id and no
             # address; a latitude with its longitude, then without.
-            noids = 'These places will have no web addresses'
+            noids = 'Your table has no column of ids'   # the warning's place on the page, with "Number the rows" beside it (myd_read_checks)
             before = page.inner_text('#columns-warnings') if cols else None
             s = table_case(page, odd, {'wikidata': 'note', 'Long': 'note'})
             after = page.inner_text('#columns-warnings') if s.get('columns') else ''
@@ -3017,6 +3093,7 @@ def main():
             reading_checks(page, tmp)
             within_checks(page, tmp)
             spellings_checks(page, tmp)
+            myd_read_checks(page, tmp)
             krisis_case(page, tmp)
             krisis_pattern_match(page, tmp)
             krisis_withdraw_case(page, tmp)

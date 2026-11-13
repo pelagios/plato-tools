@@ -11,7 +11,9 @@
 //     the spreadsheet tables make one from place_id (tableIds), with the id kept as the place's own
 //     identifier (entityIdentifier). Two rows with one id are refused. With no id, a place has no
 //     address at all, and the report says once how to give it one: no address is ever made from a
-//     row's number or its name, since such an address would change whenever the file did;
+//     row's name, nor, unasked, from its number, since such an address would change whenever the
+//     file did. Asked (a mapping whose "(row number)" column is the id: columns.js, ROW_NUMBER), the
+//     rows are numbered, row-1, row-2…, and the report says once that those ids are made up;
 //   - with options.sameId (rows with the same id are evidence about one place), each row is an
 //     attestation about the address made from its id (attestation-centric), and at the end each id
 //     is one new place, with its label and entityIdentifier and no attestations of its own: the
@@ -32,8 +34,8 @@ import { sha256 } from '../../lib/sha256.js';
 export const regionId = (key) => `region-${sha256(key).slice(0, 16)}`;
 // Spellings grouped for lookup (cluster.js): carried beside each record, never in place of its name.
 import { lookupSpellings, isMappingEntry } from './cluster.js';
-import { cellText } from './columns.js';
-import { CLUSTER_WORDS } from '../words.js';
+import { cellText, ROW_NUMBER, rowNumberId, numbersRows } from './columns.js';
+import { CLUSTER_WORDS, COLUMN_WORDS } from '../words.js';
 
 // The CSV reader is shared with the spreadsheet tables (src/formats/csv.js); exported here as before.
 export { csvRecords };
@@ -71,6 +73,29 @@ async function open(input, sheet = input.sheet) {
   const t = input.container === 'workbook' ? await openSheet(file, sheet) : input.format === 'csv' ? await openCsv(file, input) : await openGeojson(file, input);
   done.set(key, t);
   return t;
+}
+/**
+ * A table opened (open), with the column of row numbers a saved mapping asks for (columns.js,
+ * ROW_NUMBER; `saved` is the mapping, or the run's options' `columns`): the last column, holding
+ * row-1, row-2… by each row's place in the file. A table that has a column of that very name, or
+ * a mapping that does not ask, is given back as it is.
+ */
+function numbered(t, saved) {
+  if (!numbersRows(saved) || t.empty || t.headers.includes(ROW_NUMBER)) return t;
+  const add = (row, k) => { const out = Object.create(null); for (const h of Object.keys(row)) out[h] = row[h]; out[ROW_NUMBER] = rowNumberId(k); return out; };
+  return {
+    ...t, numbered: true,
+    headers: [...t.headers, ROW_NUMBER],
+    sample: t.sample.map((row, i) => add(row, i + 1)),
+    async *rows() {
+      let k = 0;
+      for await (const r of t.rows()) {
+        if (r.notAList) { yield r; continue; }
+        k++;
+        yield r.row ? { ...r, row: add(r.row, k) } : r;
+      }
+    },
+  };
 }
 /** The workbook's sheet a run reads: options.sheet when the options are a run's (not a mapping alone), else the input's. */
 export const sheetIn = (input, options) => (input.container === 'workbook' && options && savedColumns(options) !== options && typeof options.sheet === 'string' ? options.sheet : input.sheet);
@@ -322,7 +347,7 @@ export async function* columnValues(input, column, sheet) {
  * does not keep for a column whose heading is a number).
  */
 export async function mappingOf(input, saved, sheet) {
-  const { headers, sample, headerText, ownGeometry } = await open(input, sheet ?? input.sheet);
+  const { headers, sample, headerText, ownGeometry } = numbered(await open(input, sheet ?? input.sheet), saved);
   return { ...resolveColumns(headers, sample, saved, headerText, { ownGeometry }), headers };
 }
 /**
@@ -369,9 +394,11 @@ export async function* genericSource(input, rep, options = {}, defaultBase = 'ht
   const file = input.files[0];
   const report = (kind, example) => rep.add(GENERIC_KINDS[kind] || 'loss', kind, LOSS_TEXT[kind] || kind, example);
   const sheet = sheetIn(input, options);
-  const t = await open(input, sheet);
+  const t = numbered(await open(input, sheet), options.columns);
   const { mapping, patterns, levels, splits, problems } = resolveColumns(t.headers, t.sample, options.columns, t.headerText, { ownGeometry: t.ownGeometry });
   for (const p of [...(t.headProblems || []), ...problems]) report(p.kind, p.example);
+  // Ids made from the rows' numbers, at the user's asking: said once, as made up.
+  if (t.numbered && mapping[ROW_NUMBER] === 'id') rep.add('warning', 'generic-row-number-ids', COLUMN_WORDS.rowNumberIds, file.name);
   // Spellings grouped for lookup (options.clusters, the groups the user ticked): each grouped row's
   // event carries its lookup spelling (lookupName, lookupValues) and its attestation a note; the name stays the source's.
   const spell = options.clusters ? lookupSpellings(options.clusters) : null;

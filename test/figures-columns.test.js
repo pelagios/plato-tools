@@ -104,7 +104,9 @@ test('which mappings are tables of figures', () => {
 test('a guess never makes a column of figures: only a mapping given does', () => {
   const g = guessColumns(['Place', 'Year', 'Persons', 'Count', 'Total', 'Value'], [{ Place: 'A', Year: '1851', Persons: '5', Count: '1', Total: '6', Value: '7' }]);
   assert.ok(!Object.values(g.mapping).some((f) => FIGURE_FIELDS.has(f)), JSON.stringify(g.mapping));
-  assert.equal(g.mapping.Place, 'note', 'a heading that says nothing of its role is kept in the notes');
+  // "Place" is read as the name (columns.js, WEAK_NAME); a heading that says nothing of its role is kept in the notes.
+  assert.equal(g.mapping.Place, 'name');
+  assert.equal(g.mapping.Persons, 'note', 'a heading that says nothing of its role is kept in the notes');
   assert.deepEqual({ ...g.figures }, {});
 });
 test('a table of figures is read by the engine as the mapping says: the mapping of a run, and its profile', async () => {

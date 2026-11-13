@@ -4,7 +4,7 @@
 // window.__plato for automated tests; nothing else reads it.
 import { fmtBytes, formatName, progressText, summary, groups, draftNote, explainedLines } from './engine/words.js';
 import { COLUMN_CHOICES, COLUMN_WORDS, columnWarnings, columnProblem, READING_WORDS, PASTE_WORDS } from './engine/words.js';
-import { mappingToSave, levelChoices } from './engine/hermes/columns.js';
+import { mappingToSave, levelChoices, ROW_NUMBER, ROW_NUMBER_REASON, rowNumberId } from './engine/hermes/columns.js';
 import { pastedListFile } from './engine/hermes/pasted.js';
 // Hermes: grouping similar spellings for lookup, a panel of its own (src/hermes-spellings.js).
 import { spellingsPanel } from './hermes-spellings.js';
@@ -425,6 +425,8 @@ function onColumns(d) {
     patterns: own(d.patterns || {}), suggested: own(d.suggested || {}), first: own(d.mapping),
     // A region's level ("within"), and a column split into levels, as the engine read them (columns.js).
     levels: own(d.levels || {}), splits: own(Object.fromEntries(Object.entries(d.splits || {}).map(([h, x]) => [h, { ...x, levels: [...x.levels] }]))) };
+  // A saved matching that numbers the rows (columns.js, ROW_NUMBER): the made column is shown last, as "Number the rows" adds it.
+  if (d.mapping[ROW_NUMBER] === 'id' && !d.headers.includes(ROW_NUMBER)) { columns.headers = [...d.headers, ROW_NUMBER]; columns.examples[ROW_NUMBER] = rowNumberExamples(); }
   // A column the saved matching gives, and the engine took as given, says so in the page's words;
   // one it could not take keeps the engine's reason.
   if (d.saved) for (const h of d.headers) if (d.reasons[h] && d.problems.every((p) => p.example !== h && !String(p.example).startsWith(`${h}: `))) columns.reasons[h] = W.saved;
@@ -445,6 +447,32 @@ function chooseSheet(name) {
   requestColumns();
   gateOnColumns();
 }
+// ---- Hermes: "Number the rows" (D1, 13 November 2026) ---------------------------------------------
+// A table with no column of ids or addresses is offered one press that gives each row a plain id,
+// row-1, row-2… by its place in the file. It is a made column, "(row number)" in the matching (so a
+// saved matching keeps it, and the command line reads it), shown last in the table as made up, with
+// a button to take it away. Nothing is made from a name, and nothing unasked. Choosing a column of
+// the file as the id or the address takes the numbers away: one column only can be either.
+const rowsNumbered = () => !!columns && columns.mapping[ROW_NUMBER] === 'id' && columns.headers.includes(ROW_NUMBER);
+// As many examples as the file's own columns show (three, or fewer for a short file).
+const rowNumberExamples = () => Array.from({ length: Math.max(1, ...columns.headers.filter((h) => h !== ROW_NUMBER).map((h) => (columns.examples[h] || []).length)) }, (_, k) => rowNumberId(k + 1));
+function numberRows() {
+  if (!columns || rowsNumbered() || columns.headers.includes(ROW_NUMBER) || state.columnsLocked) return;
+  columns.headers.push(ROW_NUMBER);
+  columns.mapping[ROW_NUMBER] = 'id'; columns.reasons[ROW_NUMBER] = ROW_NUMBER_REASON; columns.examples[ROW_NUMBER] = rowNumberExamples();
+  clearPreview();
+  renderColumns();
+  gateOnColumns();
+}
+function removeRowNumbers() {
+  if (!rowsNumbered()) return;
+  columns.headers = columns.headers.filter((h) => h !== ROW_NUMBER);
+  for (const o of [columns.mapping, columns.reasons, columns.examples, columns.first]) delete o[ROW_NUMBER];
+  if ($('reading-sameId')?.checked && !hasIdColumn()) { $('reading-sameId').checked = false; readingMessage(READING_WORDS.sameIdNoId); }
+  clearPreview();
+  renderColumns();
+  gateOnColumns();
+}
 function choiceOptions(chosen) {
   const keys = [...Object.keys(COLUMN_CHOICES).filter((k) => columns.fields[k] || k === 'note' || k === 'skip'),
     ...Object.keys(columns.fields).filter((k) => !COLUMN_CHOICES[k])];     // a field these words do not yet name
@@ -454,6 +482,13 @@ function renderColumns() {
   const W = COLUMN_WORDS, c = columns, geojson = input.format === 'geojson';
   const rows = c.headers.map((h, i) => {
     const ex = c.examples[h] || [];
+    // The made column of row numbers: named as made up, read as the id and nothing else, with a button to take it away.
+    if (h === ROW_NUMBER && rowsNumbered()) {
+      return `<tr class="column-made"><th scope="row">${escapeHtml(W.rowNumberColumn)}</th>`
+        + `<td><ul class="examples">${ex.map((v) => `<li>${escapeHtml(v)}</li>`).join('')}</ul></td>`
+        + `<td>${escapeHtml(COLUMN_CHOICES.id)} <button type="button" id="columns-unnumber">${escapeHtml(W.removeNumbers)}</button></td>`
+        + `<td id="column-why-${i}" class="why-guess">${escapeHtml(c.reasons[h] || '')}</td></tr>`;
+    }
     return `<tr><th scope="row"><code>${escapeHtml(h)}</code></th>`
       + `<td>${ex.length ? `<ul class="examples">${ex.map((v) => `<li>${escapeHtml(v.length > 60 ? v.slice(0, 59) + '…' : v)}</li>`).join('')}</ul>` : `<em>${W.noExamples}</em>`}</td>`
       + `<td><label for="column-${i}" class="visually-hidden">${escapeHtml(W.selectLabel(h))}</label><select id="column-${i}" data-column="${i}" aria-describedby="column-why-${i}">${choiceOptions(c.mapping[h])}</select>${patternControl(h, i)}<span id="column-extra-${i}" class="column-extra">${extraControls(h, i)}</span></td>`
@@ -483,6 +518,8 @@ function lockColumns() {
   for (const el of document.querySelectorAll('#columns [data-level-column], #columns [data-split-column]')) el.disabled = reviewing;
   // The sheet too: a review was made of one sheet.
   if ($('columns-sheet')) $('columns-sheet').disabled = reviewing;
+  // And the rows' numbers: a review's places are known by their ids.
+  for (const id of ['columns-number', 'columns-unnumber']) if ($(id)) $(id).disabled = reviewing;
   // and says why, exactly when they are locked.
   const note = $('columns-locked'); if (note) note.hidden = !(reviewing && selects.length);
   state.columnsLocked = reviewing;
@@ -571,7 +608,12 @@ function chooseSplit(i, what, el) {
 }
 function renderColumnWarnings() {
   const warnings = columnWarnings(columns.mapping, columns.gazetteer, columns.suggested, columns.patterns, columns.levels, columns.splits);
-  $('columns-warnings').innerHTML = warnings.map((w) => `<p class="warn">${escapeHtml(w)}</p>`).join('');
+  // No ids: in place of the warning's sentence, what it means and the one press that puts it right.
+  const W = COLUMN_WORDS;
+  $('columns-warnings').innerHTML = warnings.map((w) => (w === W.noIds && !columns.headers.includes(ROW_NUMBER)
+    ? `<p class="warn" id="columns-no-ids">${escapeHtml(W.noIdsOffer)} <button type="button" id="columns-number" data-tip="${escapeHtml(W.numberRowsTip)}">${escapeHtml(W.numberRows)}</button> <small>${escapeHtml(W.numberRowsNote)}</small></p>`
+    : `<p class="warn">${escapeHtml(w)}</p>`)).join('');
+  if ($('columns-number')) $('columns-number').disabled = !!state.columnsLocked;
   state.columns = { headers: [...columns.headers], mapping: Object.assign(Object.create(null), columns.mapping), reasons: Object.assign(Object.create(null), columns.reasons), examples: columns.examples, warnings, messages: [...columns.messages],
     patterns: Object.assign(Object.create(null), columns.patterns), suggested: Object.assign(Object.create(null), columns.suggested),
     levels: Object.assign(Object.create(null), columns.levels), splits: JSON.parse(JSON.stringify(columns.splits)) };
@@ -580,6 +622,8 @@ function renderColumnWarnings() {
 // column that had it, which is then kept as a note, and says why.
 function chooseColumn(i, field) {
   const W = COLUMN_WORDS, h = columns.headers[i];
+  // A column of the file's own as the id or the address: the rows' numbers go (the made column is last, so `i` stands).
+  if ((field === 'id' || field === 'address') && h !== ROW_NUMBER && rowsNumbered()) { removeRowNumbers(); $(`column-${i}`).value = field; }
   if (columns.fields[field]?.single) {
     columns.headers.forEach((other, j) => {
       if (j === i || columns.mapping[other] !== field) return;
@@ -657,6 +701,10 @@ async function loadMatching(file) {
   }
   requestColumns(mapping, file.name);
 }
+$('columns').addEventListener('click', (e) => {
+  if (e.target.id === 'columns-number') numberRows();
+  else if (e.target.id === 'columns-unnumber') removeRowNumbers();
+});
 $('columns').addEventListener('change', (e) => {
   if (e.target.id === 'columns-sheet') chooseSheet(e.target.value);
   else if (e.target.matches('select[data-column]')) chooseColumn(Number(e.target.dataset.column), e.target.value);

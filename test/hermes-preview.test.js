@@ -294,7 +294,8 @@ test('plato-tools preview: JSON Lines to stdout and the losses to stderr, or bot
     assert.match(refused.err, /RDF \(N-Triples\), which is not previewed/);
     // Problems in what was read (1): a table none of whose rows becomes a place, read to its end.
     const nameless = join(dir, 'nameless.csv');
-    writeFileSync(nameless, 'colour,size\nred,1\nblue,2\n');
+    // Numbers only: a column of words under a heading that says nothing would be taken as the name (columns.js, NAME_FALLBACK).
+    writeFileSync(nameless, 'size,weight\n1,2\n3,4\n');
     const bad = cli('preview', nameless);
     assert.equal(bad.code, 1, bad.err);
     assert.equal(bad.out, '');

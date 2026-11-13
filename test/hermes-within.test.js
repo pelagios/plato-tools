@@ -481,8 +481,8 @@ test('command line: --split splits a column into levels, prints it in the mappin
     assert.match(cli('check', '--split', 'Place=,:2,name', join(d, 'places.csv')).err, /"name" can only come first/);
     assert.match(cli('check', '--split', 'Place=,:2,2', join(d, 'places.csv')).err, /a level is given twice/);
     assert.match(cli('compare', '--split', 'Place=,', join(d, 'places.csv'), join(d, 'places.csv')).err, /--split is for check, convert and preview/);
-    // Control: without --split, the column is a note.
-    assert.ok(cli('check', join(d, 'places.csv')).out.includes('{"Place":"note"}'));
+    // Control: without --split, the column is not split: "Place" is read whole, as the name (columns.js, WEAK_NAME).
+    assert.ok(cli('check', join(d, 'places.csv')).out.includes('{"Place":"name"}'));
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
 test('the page\'s level selector reaches the highest level in use, so a gapped mapping\'s 6 is reachable from level 1', () => {

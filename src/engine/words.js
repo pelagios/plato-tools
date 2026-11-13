@@ -188,6 +188,21 @@ export const COLUMN_WORDS = {
   unusable: (example) => `Part of the saved matching cannot be used, so that column is kept as a note: ${example}.`,
   cannotRead: (message) => `The columns could not be read: ${message}`,
   noIds: 'These places will have no web addresses: they can be checked and converted, but not published or linked until they have ids. Choose a column as the place id, or add one.',
+  /**
+   * A table with no column of ids or addresses (D1, Stephen 13 Nov 2026): one press numbers the rows.
+   * The ids are plain (row-1, row-2…), never made from the names, and are said to be made up.
+   */
+  noIdsOffer: 'Your table has no column of ids, and a place needs an id to be looked up, linked or published. If it has one, choose “Place id” for that column. If not, the rows can be numbered for you.',
+  numberRows: 'Number the rows',
+  numberRowsTip: 'Adds a made-up id to each row: row-1, row-2… in the order of the rows in your file. Technical term: a local identifier, from which each place’s web address is made.',
+  numberRowsNote: 'The numbers follow the order of the rows, so rows added or moved later change them: keep the file in this order, or add a column of ids of your own when you can.',
+  /** The made column's name in the table of columns, and the control that takes it away. */
+  rowNumberColumn: 'id (made up: the row’s number)',
+  removeNumbers: 'Remove the numbers',
+  /** Said once in the report of a run whose ids are the rows' numbers. */
+  rowNumberIds: 'The ids of these places are made up: each is its row’s number in the file (row-1, row-2…), because the table has no column of ids and you asked for the rows to be numbered. They follow the order of the rows, so rows added or moved later change them.',
+  /** No column is the name or the address: no row can become a place (Hermes's reader ends in "Not one row became a place"). */
+  noName: "No column is read as the place's name yet. Under “Read as”, choose Name for the column that holds the names.",
   latOnly: 'A column is read as latitude but none as longitude, so no place will have a location from them. Choose the longitude column too, or keep the latitude as a note.',
   lonOnly: 'A column is read as longitude but none as latitude, so no place will have a location from them. Choose the latitude column too, or keep the longitude as a note.',
   /** A column of a gazetteer's ids for which a pattern is suggested (columns.js, guessColumns `suggested`), until it is confirmed. */
@@ -225,6 +240,7 @@ export function columnWarnings(mapping, gazetteer = [], suggested = {}, patterns
     for (const l of ls) at.set(l, [...(at.get(l) || []), h]);
   }
   for (const [l, cols] of at) if (new Set(cols).size > 1) out.push(COLUMN_WORDS.sameLevel([...new Set(cols)], l));
+  if (!fields.has('name') && !fields.has('address')) out.push(COLUMN_WORDS.noName);
   if (!fields.has('address') && !fields.has('id')) out.push(COLUMN_WORDS.noIds);
   if (fields.has('latitude') && !fields.has('longitude')) out.push(COLUMN_WORDS.latOnly);
   if (fields.has('longitude') && !fields.has('latitude')) out.push(COLUMN_WORDS.lonOnly);
