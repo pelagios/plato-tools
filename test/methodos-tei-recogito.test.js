@@ -109,7 +109,9 @@ function ends(doc) {
 test('both recipes are well formed, take Map your data\'s questions in its words (not its regions), and follow its steps after the dataset through the same operations', () => {
   for (const r of [TEI, REC]) {
     assert.equal(checkRecipe(r), r);
-    for (const k of ['will-draw', 'will-publish', 'target', 'release', 'repo', 'maintainers']) assert.deepEqual(r.asks[k], MAP.asks[k], `${r.key}: ${k}`);
+    for (const k of ['target', 'release', 'repo', 'maintainers']) assert.deepEqual(r.asks[k], MAP.asks[k], `${r.key}: ${k}`);
+    // Drawing and publishing in Map your data's words, not with its defaults (No, 13 November 2026), which are its own: these workflows still ask.
+    for (const k of ['will-draw', 'will-publish']) { assert.deepEqual(r.asks[k], { question: MAP.asks[k].question, kind: 'yes-no' }, `${r.key}: ${k}`); assert.equal(MAP.asks[k].default, false, k); }
     assert.equal(r.asks['has-regions'], undefined, 'no regions: an edition and an export do not say which region a place is in');
     assert.deepEqual(r.asks.base, RECIPES['publish-a-dataset'].asks.base);
     // The steps: read and made a dataset, then Map your data's own, without regions, by operation and id.

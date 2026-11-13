@@ -1385,6 +1385,21 @@ methodos = mountMethodos({
       if (!$('result').hidden && !lingering) { lingering = { step: was.id, words: $('summary').textContent.trim(), label: resultLabel(was.title) }; resultOf(lingering.label); }
       showNext(!$('action').hidden ? $('action-h') : $('workflow-title'), { from: stepHead() });
     }
+    // Gone on from a step whose result is the review as it stands (its decisions said done, or written by Finish): the
+    // workflow holds them now, so leaving the page loses none of them (leaveGuard, below).
+    if (wentOn(was, step) && REVIEW_HELD.has(was?.op)) handedOver = unsaved;
+    // At the review step (the lookup has ended, or the step is come back to): the review is the one thing to do, so the
+    // lookup's panel is closed, "Match with another dataset" and "Resume a review" are put away (src/styles.css,
+    // body[data-review-step]), and the review, where it is open, is brought to the top with the focus in it.
+    const reviewing = workflowStep?.op === 'review';
+    if (reviewing) document.body.dataset.reviewStep = ''; else delete document.body.dataset.reviewStep;
+    if (reviewing && (workflowStep.id !== was?.id || !was.op)) {
+      $('lookup').open = false;
+      if (!$('review').hidden) {
+        $('review').scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
+        ($('review-who').hidden ? $('review-place') : $('review-name')).focus({ preventScroll: true });
+      }
+    }
   },
 });
 // Scope: the workflow's while one is followed, else this tab's; its chips in the rail and the lookup panel,
@@ -1542,6 +1557,10 @@ keptAtStart();
 let work = null, workName = 'review.krisis.json', order = [], cursor = 0, current = 0, basisFor = null, allDone = false;
 let unsaved = 0;   // decisions made since the review began or was last saved (a reload would lose them)
 let saves = 0;     // how many times it has been saved (Krisis × Methodos: with unsaved, whether the guards' plan may be stale)
+// How many of `unsaved` a workflow already holds: the count as it stood when the workflow last went on from a step whose
+// result is the review (onStep, above). Decisions made since are in this page alone.
+let handedOver = 0;
+const REVIEW_HELD = new Set(['review', 'lookup.levels', 'wikidata.items', 'apply', 'relate.containment']);
 const REVIEWER_KEY = 'plato-tools.reviewer';
 /**
  * The reviewer remembered, checked again on load by the engine's own rule (checkReviewer), as before a
@@ -1610,7 +1629,7 @@ async function resume(file) {
   try { const differ = await filesDiffer(w.subjects, files); showWarning(differ.length ? W.differs(differ) : ''); } catch { showWarning(''); }
 }
 function beginReview(w, name, { focus = true } = {}) {
-  work = w; workName = name || workName; basisFor = null; findFor = null; allDone = false; unsaved = 0;
+  work = w; workName = name || workName; basisFor = null; findFor = null; allDone = false; unsaved = 0; handedOver = 0;
   exportedSet = null; earlierSets = []; candidatesStatus('');
   wikidata.reset();   // Krisis: Wikidata items (#36): a new review, nothing of the last one's kept
   // Krisis: what a Finish does with an earlier answer in a draft, as the review last chose (withdraw.js).
@@ -1796,7 +1815,7 @@ $('save-review').onclick = () => {
   const who = reviewer(); if (who) work.reviewer = who;
   saveBlob(new Blob([serialiseWork(work)], { type: 'application/json' }), workName);
   Object.assign(state, { reviewSaved: workName });
-  unsaved = 0; saves++;
+  unsaved = 0; handedOver = 0; saves++;
 };
 $('finish').onclick = () => {
   if (!work) return;
@@ -1953,9 +1972,22 @@ permissions.mount({ state });
 // A tool that keeps more (Krisis's review) says what it would lose the same way, with onBeforeReload.
 // Chora, shown with these files open, keeps them across the reload, and they are chosen here again
 // (src/chora/resume.js); while it is starting, or its engine is in another tab, they are lost as on any reload.
-permissions.onBeforeReload(() => {}, { loses: () => (files.length && !(choraShown() && chora?.holds(files)) ? RELOAD_LOSES.files(files.map((f) => f.name)) : null) });
+// So does a workflow (src/methodos/outputs.js): the table it began with and every file its steps made are kept in this
+// browser while working data is kept, and chosen again as it is taken up after the reload, so nothing is said to be lost.
+const workflowKeepsFiles = () => !!workflowStep && !!methodos?.id() && permissions.keepWorkingData();
+permissions.onBeforeReload(() => {}, { loses: () => (files.length && !(choraShown() && chora?.holds(files)) && !workflowKeepsFiles() ? RELOAD_LOSES.files(files.map((f) => f.name)) : null) });
 permissions.onBeforeReload(() => {}, { loses: () => (busy ? RELOAD_LOSES.running : null) });
 permissions.onBeforeReload(() => {}, { loses: () => (work && unsaved ? RELOAD_LOSES.review(unsaved) : null) });
+// Leaving the page, reloading it or closing the tab (robust-R-02, R-06): the browser asks first, in its own words, while
+// a review on screen holds decisions that neither a saved file nor a workflow has, and while a lookup is running, whose
+// answers so far are in this page alone. A reload for a permission has asked already, in the panel (above), and is let through.
+let leaveAsked = false;
+const leaveLoses = () => (looking ? 'lookup' : work && !$('review').hidden && unsaved > handedOver ? 'review' : null);
+permissions.onBeforeReload(() => { leaveAsked = true; });
+window.addEventListener('beforeunload', (e) => {
+  if (leaveAsked || !leaveLoses()) return;
+  e.preventDefault(); e.returnValue = true;
+});
 // Krisis: gazetteer lookup (online, optional). The places of the dataset are looked up in WHG, or
 // another reconciliation service, and what is found is added to the review on screen (or begins one).
 // It runs HERE, on the page's thread, never in the worker (which is not under the page's policy), so
@@ -2074,7 +2106,8 @@ function gatherPlaces() {
 function onPlaces(data) {
   const w = placesWaiting; placesWaiting = null;
   busy = false; buttons(!!looking);   // a lookup running keeps them disabled
-  gathered = { files: w.files, base: w.base, cols: w.cols, subjects: data.subjects || null, places: data.places || null, regions: data.regions || [] };
+  gathered = { files: w.files, base: w.base, cols: w.cols, subjects: data.subjects || null, places: data.places || null, regions: data.regions || [],
+    unaddressed: data.places ? data.report?.counts?.unaddressed || 0 : 0 };   // the places with no id, which no lookup can take (S2, robust-R-07)
   lookupSay('');
   w.resolve(gathered);
 }
@@ -2171,14 +2204,18 @@ async function refreshPreview() {
   const lines = LOOKUP_WORDS.preview(p);
   if (svc.whg) lines.splice(1, 0, LW.share(p.requests, WHG_REQUESTS_A_DAY));
   if (!places) lines.push(LOOKUP_WORDS.linksUnknown);
+  // Places the table gave no id are not among `places`: said, with how many, and what to do, where the lookup shows it.
+  const noIds = places ? g?.unaddressed || 0 : 0;
+  if (noIds && places.length) lines.push(LOOKUP_WORDS.someNoIds(noIds));
+  const nothing = noIds && !places.length ? LOOKUP_WORDS.allNoIds(noIds) : LOOKUP_WORDS.noPlaces;
   // The dataset's language, where the preview names it, is shown as code.
   const said = lines.map(escapeHtml).join(' '), at = p.lang ? ` sent as ${escapeHtml(p.lang)}, ` : null;
   box.innerHTML = `<p>${at ? said.replace(at, ` sent as <code class="code-chip">${escapeHtml(p.lang)}</code>, `) : said}</p>`
-    + (p.first.length ? `<ol class="lookup-queries">${p.first.map((q) => `<li><code>${escapeHtml(JSON.stringify(shortTypes(q)))}</code></li>`).join('')}</ol>` + typesSent(p.first) : `<p>${escapeHtml(LOOKUP_WORDS.noPlaces)}</p>`);
+    + (p.first.length ? `<ol class="lookup-queries">${p.first.map((q) => `<li><code>${escapeHtml(JSON.stringify(shortTypes(q)))}</code></li>`).join('')}</ol>` + typesSent(p.first) : `<p${nothing === LOOKUP_WORDS.noPlaces ? '' : ' class="warn" id="lookup-no-ids"'}>${escapeHtml(nothing)}</p>`);
   send.textContent = LW.send(p.queries, shortName(svc.service));
   send.disabled = !p.queries || !!looking;
   // `scope`: the keys of the Scope this preview was drawn with, so that a check can wait for the preview of the Scope in force (it is drawn again, asynchronously, after each change).
-  lookupState({ preview: { places: p.places, queries: p.queries, requests: p.requests, first: p.first, scope: p.scope?.keys ?? [] } });
+  lookupState({ preview: { places: p.places, queries: p.queries, requests: p.requests, first: p.first, scope: p.scope?.keys ?? [], noIds } });
 }
 
 /**
@@ -2491,7 +2528,13 @@ function showRegionOffer(g) {
   const levels = new Set(g.regions.map((r) => r.level)).size;
   $('regions-offer-text').textContent = RP.offer(n, levels);
   $('regions-start').textContent = RP.start;
+  // At a workflow's regions step this is the one thing to press: the primary button, brought into view once as the step is come to.
+  const here = workflowStep?.op === 'lookup.levels' ? workflowStep.id : null;
+  $('regions-start').classList.toggle('primary', !!here);
+  if (here && regionOfferShown !== here) box.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'center' });
+  regionOfferShown = here;
 }
+let regionOfferShown = null;   // the regions step the offer was last brought into view for
 /** Begin the region review: the dataset's regions into the review on screen, or into a new one. */
 async function startRegions() {
   if (busy || looking) return;

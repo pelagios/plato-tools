@@ -18,7 +18,9 @@ test('each pair of answers that names a recipe gives it, with its questions, and
     assert.equal(c.kind, 'recipe'); assert.equal(c.recipe, p.recipe);
     assert.deepEqual(questionsFor(c).map((q) => q.key), Object.keys(p.yes));
     for (const q of questionsFor(c)) assert.equal(q.question, RECIPES[p.recipe].asks[q.key].question);
-    assert.equal(answered(c, {}), Object.keys(p.yes).length === 0 && !p.base);
+    // With nothing answered under 3, the plan is shown where every question still asked has a default (Map your data's: S7,
+    // 13 November 2026) and no base address is needed.
+    assert.equal(answered(c, {}), questionsFor(c).every((q) => typeof q.default === 'boolean') && !p.base);
     // A row whose workflow needs the base address gives one (Trace a historical map): without it, not answered.
     assert.equal(answered(c, p.yes), !p.base);
     assert.equal(answered(c, p.yes, { base: p.base }), true);
@@ -33,6 +35,20 @@ test('each pair of answers that names a recipe gives it, with its questions, and
     const st = runner.start(RECIPES[c.recipe], a, Object.keys(RECIPES[c.recipe].files).length ? { files: [ref] } : {});
     assert.deepEqual(st.steps.filter((s) => s.state === 'pending').map((s) => s.id), p.steps);
   }
+});
+
+test('Map your data asks nothing that must be answered: a list of names, places on a map, and the plan is its nine steps, every yes-or-no question No until it is changed (S7)', () => {
+  const c = choose('table', 'map');
+  assert.deepEqual(questionsFor(c).map((q) => [q.key, q.default]), [['has-regions', false], ['will-draw', false], ['will-publish', false], ['will-mint', false]]);
+  assert.equal(answered(c, {}), true);
+  const a = answersFor(c, {});
+  assert.deepEqual(a, { target: 'plato-json', 'has-regions': false, 'will-draw': false, 'will-publish': false, 'will-mint': false });
+  assert.deepEqual(plan(c.recipe, a).steps.map((s) => s.id), ['columns', 'check', 'dataset', 'lookup', 'review', 'apply', 'again', 'compare', 'out']);
+  // A Yes is still an answer: the default is taken only where none is given (the control).
+  assert.ok(plan(c.recipe, answersFor(c, { 'will-draw': true })).steps.some((s) => s.id === 'place'));
+  // A workflow whose questions have no default still waits for them (Places from an edition: the control that `answered` can be false).
+  assert.equal(answered(choose('tei', 'map'), {}), false);
+  assert.match(RECIPES['map-your-data'].files.files.words, /spreadsheet: \.xlsx or \.csv/);
 });
 
 test('"not sure" gives the plain grid, whatever is had; nothing is chosen until both are answered', () => {
@@ -97,6 +113,6 @@ test('answers not asked are not carried into the recipe', () => {
   const c = choose('plato', 'publish');
   assert.deepEqual(answersFor(c, { 'will-draw': true }), {});
   const m = choose('table', 'publish');
-  // 'will-mint' is asked on this route, with a default (no), so it is carried, as the interview shows it chosen.
-  assert.deepEqual(answersFor(m, { 'will-publish': false, 'has-regions': false }), { target: 'plato-json', 'will-publish': true, 'has-regions': false, 'will-mint': false });
+  // 'will-mint' and 'will-draw' are asked on this route, each with a default (no), so they are carried, as the interview shows them chosen.
+  assert.deepEqual(answersFor(m, { 'will-publish': false, 'has-regions': false }), { target: 'plato-json', 'will-publish': true, 'has-regions': false, 'will-draw': false, 'will-mint': false });
 });

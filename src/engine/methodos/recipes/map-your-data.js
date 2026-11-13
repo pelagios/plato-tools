@@ -15,12 +15,14 @@ export default {
   title: 'Map your data',
   version: 3,
   files: {
-    files: { words: 'The table of place names (CSV or GeoJSON)', types: ['files'] },
+    files: { words: 'The table of place names (a spreadsheet: .xlsx or .csv)', types: ['files'] },
   },
   asks: {
-    'has-regions': { question: 'Does the table say which region each place is in (a parish, a county)?', kind: 'yes-no' },
-    'will-draw': { question: 'Will you draw or trace places that the gazetteer cannot locate?', kind: 'yes-no' },
-    'will-publish': { question: 'Will you publish the result?', kind: 'yes-no' },
+    // No by default, each of them (13 November 2026): a list of names needs none, so the plan and "Follow" are shown as soon
+    // as the first two questions are answered, and a Yes is one click for whoever wants it.
+    'has-regions': { question: 'Does the table say which region each place is in (a parish, a county)?', kind: 'yes-no', default: false },
+    'will-draw': { question: 'Will you draw or trace places that the gazetteer cannot locate?', kind: 'yes-no', default: false },
+    'will-publish': { question: 'Will you publish the result?', kind: 'yes-no', default: false },
     // Issue #36: Wikidata items, under their own answer, no by default (the question is asked last).
     'will-mint': { question: 'Will you create Wikidata items for the places no gazetteer knows (a batch you run in QuickStatements yourself)?', kind: 'yes-no', default: false },
     // Asked by the interview when the table gives regions, or the result is published (interview.js baseAsked), pre-filled from Options and written back there.

@@ -110,6 +110,8 @@ select { padding: .4rem; border-radius: 6px; max-width: min(100%, 30rem); }
 .versions small, .publishing small, .mapping small { flex-basis: 100%; color: var(--muted); }
 /* A part of step 2 hidden when a tool is chosen that it is not for (src/app.js, data-tools). */
 #action [data-tools][hidden] { display: none; }
+/* At a workflow's review step the review is the one thing to do: the ways to another match are put away (src/app.js, onStep). */
+body[data-review-step] #action .actions.matching { display: none; }
 #action.narrowed .actions { margin-top: 0; }
 a.button, a.button:visited { display: inline-block; padding: .45rem 1rem; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--fg); text-decoration: none; }
 /* The guide, in the masthead beside Permissions: the one link among those buttons, the same size, and in
@@ -703,6 +705,10 @@ code.code-chip { font-family: var(--font-mono); font-size: .85em; padding: 0 .3e
 /* The one line that opens the interview (in the workflow rail; above step 1 on a narrow screen): quiet, and secondary to step 1's drop zone. */
 .methodos-banner { margin: 1.25rem 0 -.5rem; font-size: .95rem; color: var(--muted); }
 .methodos-banner a { color: var(--accent); }
+/* The opening's call to action (index.html, #methodos-banner): Map your data named, with its Start; the other ways in beneath it, small. */
+.methodos-banner .banner-start { display: block; color: var(--fg); font-size: 1rem; }
+.methodos-banner .banner-start button { margin-left: .35rem; }
+.methodos-banner .banner-else { display: block; margin-top: .5rem; font-size: .85rem; }
 #methodos-tracker-h { display: block; }
 /* A step not yet available is greyed, not numbered and skipped; the reason stays readable. */
 .track-step.is-unavailable { counter-increment: none; border: 1px dashed var(--line); }

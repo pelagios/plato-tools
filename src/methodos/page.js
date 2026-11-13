@@ -171,7 +171,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   const yesNo = {};
   let choice = null, pending = null;
 
-  // ---- The interview: three questions, as radio buttons, each group a fieldset with its question as legend.
+  // ---- The interview: two questions, and a third group of yes-or-no ones (each with its default where the recipe gives one), as radio buttons, each group a fieldset with its question as legend.
   const radios = (fs, name, items) => {
     const box = el('div', { className: 'choices' });
     for (const { key, words } of items) box.append(el('label', {}, el('input', { type: 'radio', name, value: key }), ' ', words));
@@ -351,6 +351,16 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     // A file already chosen in step 1 begins the workflow at once.
     const files = page.files();
     if (files.length) chosen(files);
+  });
+
+  // The opening's Start (index.html, #methodos-quick): Map your data begun with every answer its default, as if "A list of
+  // place names" and "Places on a map" were answered and Follow pressed. Should an answer be needed after all, the interview opens.
+  q(banner, '#methodos-quick')?.addEventListener('click', () => {
+    for (const [name, v] of [['methodos-have', 'table'], ['methodos-want', 'map']]) q(interview, `input[name="${name}"][value="${v}"]`).checked = true;
+    for (const k of Object.keys(yesNo)) delete yesNo[k];
+    choice = choose('table', 'map');
+    askMore(); baseField(); verdictNow();
+    if (answered(choice, yesNo, texts)) startB.click(); else open();
   });
 
   const bannerNow = () => { banner.hidden = !interview.hidden || !!wf || !!pending || !!changed; };

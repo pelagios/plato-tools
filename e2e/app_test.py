@@ -2262,7 +2262,9 @@ def krisis_regions_case(page, tmp, url):
         route.fulfill(status=200, headers={**cors, 'Content-Type': 'application/json'}, body=json.dumps(out))
     WHG = re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/')
     page.route(WHG, fake_whg)
-    page.on('dialog', lambda d: (dialogs.append(d.type), d.dismiss()))
+    # The browser's own question before leaving a page that holds decisions not saved (the page's guard, 13 November 2026) is
+    # answered yes, as Playwright answers it where nothing listens: this page is used by the cases after this one, which begin by loading it again.
+    page.on('dialog', lambda d: d.accept() if d.type == 'beforeunload' else (dialogs.append(d.type), d.dismiss()))
     def step(fn):
         try: return fn()
         except Exception as e: return {'error': str(e).split('\n')[0][:200]}
@@ -3276,6 +3278,8 @@ def main():
             krisis_regions_case(page, tmp, url)
             # The lookup panel's token and language fields (Issue #33, points 6 and 7); nothing is sent.
             lookup_panel_case(page, tmp, url)
+            # Map your data's door and lookup (13 November 2026), in a browser of its own, with a fake WHG of its own.
+            myd_door_checks(pw, url, tmp)
             # Wikidata items for the places no gazetteer knows (Issue #36): a fake Wikidata (page.route), never the real one.
             krisis_wikidata_case(page, tmp, url)
             ctx.close()
@@ -6394,7 +6398,8 @@ def whg_checks(pw, url, tmp):
         ctx.add_init_script('window.__plato_forceDownload = true;')
         ctx.route(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'), forward)
         ctx.on('request', lambda r: seen.append(r.url))
-        ctx.on('page', lambda p: p.on('dialog', lambda d: (dialogs.append(d.message), d.dismiss())))
+        # The browser's own question before leaving a page that holds decisions not saved is answered yes, as Playwright answers it where nothing listens.
+        ctx.on('page', lambda p: p.on('dialog', lambda d: d.accept() if d.type == 'beforeunload' else (dialogs.append(d.message), d.dismiss())))
         p = ctx.new_page()
         p.goto(NOTOOLS if PROVE else base)
         js = []
@@ -7529,6 +7534,253 @@ def scope_checks(pw, url, tmp):
                 and len(two) == 4 and all(q.get('contained_in') in (['gn:2653941'], ['gn:2644974']) and q.get('countries') == ['GB'] and 'types' not in q for q in two)), \
             {'scope': scope_now, 'level 1': one, 'level 2': two}
     attempt('Scope: the table\'s region columns win over Where: with a Scope of countries (FR), kinds of place, years and sources, the widest regions (counties) are sent the countries alone, and the parishes within their county\'s match (contained_in) and its countries, never FR', regions_override)
+    try: browser.close()
+    except Exception: pass
+
+# ---- Map your data: the door and the lookup (13 November 2026; simple.md S2, S4, S6, S7, S9, S11; robust.md R-02, R-06, R-07) ----
+# The opening names Map your data and starts it in one press; its yes-or-no questions are No until answered; the lookup
+# says why places with no id are not looked up; a reload for a permission asks nothing about a file the workflow keeps;
+# the review is brought to the top when the lookup ends; and leaving the page is asked about while decisions, or a
+# lookup's answers, are in the page alone. A fake WHG (never the real one). Each absence has its presence beside it.
+MYD_FIX = ROOT / 'test/fixtures/myd'
+MYD_DOOR = '''() => { const $ = (id) => document.getElementById(id), v = (e) => !!e && !e.closest('[hidden]') && !!(e.offsetWidth || e.offsetHeight), t = $('methodos-tracker');
+  const top = (e) => (e ? Math.round(e.getBoundingClientRect().top) : null);
+  return { quick: v($('methodos-quick')), banner: v($('methodos-banner')) ? $('methodos-banner').innerText.replace(/\\s+/g, ' ').trim() : null, ask: v($('methodos-ask')) ? $('methodos-ask').textContent : null,
+    interview: v($('methodos')), tracker: v(t), status: t?.dataset.status || null, recipe: t?.dataset.recipe || null, title: v(t) ? (t.querySelector('h2')?.textContent || '') : null,
+    steps: t ? [...t.querySelectorAll('li.track-step')].map((li) => li.dataset.step) : [], current: t?.querySelector('li.track-step[aria-current="step"]')?.dataset.step || null,
+    lookupOpen: !!$('lookup')?.open, matching: v(document.querySelector('.actions.matching')), review: v($('review')), reviewTop: top($('review')), height: innerHeight,
+    offer: v($('regions-offer')), offerTop: top($('regions-offer')), offerBottom: $('regions-offer') ? Math.round($('regions-offer').getBoundingClientRect().bottom) : null,
+    primary: !!$('regions-start')?.classList.contains('primary') }; }'''
+MYD_LEAVE = "() => { const e = new Event('beforeunload', { cancelable: true }); dispatchEvent(e); return e.defaultPrevented; }"
+
+def myd_door_checks(pw, url, tmp):
+    import re
+    base = url.rstrip('/') + '/'
+    out = tmp / 'myd-door'; out.mkdir(exist_ok=True)
+    browser = pw.chromium.launch(headless=True)
+    cors = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+            'Access-Control-Allow-Headers': 'authorization, content-type, accept, user-agent'}
+    posts, held, hold = [], [], {'on': False}
+    def answer(route):
+        body = json.loads(route.request.post_data or '{}'); res = {'attribution': LOOKUP_ATTRIBUTION}
+        for k, q in (body.get('queries') or {}).items():
+            n = len(posts) * 100 + len(res)
+            res[k] = {'result': [{'id': f'place:gn:91{n:05d}', 'name': q.get('query'), 'score': 100, 'match': True, 'description': 'Country: GB', 'ccodes': ['GB'],
+                                  'repr_point': [-2.0, 52.0], 'namespace': 'gn', 'alt_names': [], 'has_geom': True, 'confidence': 100}]}
+        posts.append(body)
+        route.fulfill(status=200, headers={**cors, 'Content-Type': 'application/json'}, body=json.dumps(res))
+    def stub(route):
+        req = route.request
+        if req.method == 'OPTIONS': return route.fulfill(status=204, headers=cors)
+        if req.method == 'GET': return route.fulfill(status=404, headers={**cors, 'Content-Type': 'application/json'}, body='{"detail":"Not found"}')
+        if hold['on']: held.append(route); return   # answered later, by the check: the lookup is running meanwhile
+        answer(route)
+    GRANT = "() => { localStorage.setItem('plato-tools.permissions', JSON.stringify({ version: 1, grants: { 'gazetteer:whg': { state: 'allowed', at: '2026-11-13T10:00:00Z' } } })); }"
+    made = []
+    def fresh(grant=False):
+        ctx = browser.new_context(accept_downloads=True, viewport={'width': 1440, 'height': 900}, reduced_motion='reduce')
+        made.append(ctx)
+        ctx.add_init_script('window.__plato_forceDownload = true;')
+        ctx.route(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'), stub)
+        page = ctx.new_page()
+        page.goto(NOTOOLS if PROVE else base)
+        if grant: page.evaluate(GRANT); page.goto(NOTOOLS if PROVE else base)
+        s = wait_state(page, lambda s: s.get('phase') == 'ready' and s.get('canary') in ('enforced', 'not-enforced'), T(30), 'ready')
+        if s.get('phase') != 'ready': raise RuntimeError(f'the page is not ready: {s.get("phase")}')
+        return page
+    D = lambda page: page.evaluate(MYD_DOOR)
+    def choose(page, f):
+        page.set_input_files('#picker', []); page.set_input_files('#picker', [str(f)])
+        s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised') and s.get('columnsPending') is not True, T(60), 'detection')
+        if s.get('phase') != 'detected': raise RuntimeError(f'not detected: {s.get("phase")}')
+        return s
+    def step_is(page, step, state, timeout=60):
+        until(page, f"() => document.querySelector('#methodos-track li[data-step=\"{step}\"]')?.dataset.state === '{state}'", timeout)
+    def run(page, button):
+        page.click(button, timeout=T(15) * 1000)
+        return wait_state(page, lambda s: s.get('phase') in ('done', 'error'), T(120), 'run')
+    def preview(page, want=None):
+        """The lookup panel's preview of the file chosen, once it is of that file (`want`: its count of queries, where known)."""
+        if not page.evaluate("() => document.getElementById('lookup').open"): page.click('#lookup > summary')
+        s = wait_state(page, lambda s: ((s.get('lookup') or {}).get('preview') or {}).get('queries') == want if want is not None else bool((s.get('lookup') or {}).get('preview')), T(60), 'preview')
+        return {'state': (s.get('lookup') or {}).get('preview') or {}, 'text': re.sub(r'\s+', ' ', page.inner_text('#lookup-preview')), 'send': page.evaluate("() => { const b = document.getElementById('lookup-send'); return [b.textContent, b.disabled]; }")}
+    def to_lookup(page, f):
+        """Map your data, by the interview with every yes-or-no question answered No (so that these checks do not rest on the
+        opening's Start, which has its own), to its lookup step, the converted dataset chosen there."""
+        page.click('#methodos-ask'); until(page, "!document.getElementById('methodos').hidden", 5)
+        page.check('input[name="methodos-have"][value="table"]'); page.check('input[name="methodos-want"][value="map"]')
+        for k in ('has-regions', 'will-draw', 'will-publish'): page.check(f'input[name="methodos-ask-{k}"][value="no"]')
+        page.click('#methodos-start', timeout=T(15) * 1000)
+        until(page, "['pending', 'idle'].includes(document.getElementById('methodos-tracker').dataset.status)", 10)
+        if page.evaluate("() => document.getElementById('methodos-tracker').dataset.status") == 'pending': choose(page, f)   # not yet chosen
+        until(page, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+        wait_state(page, lambda s: s.get('columns') and s.get('columnsPending') is False, T(30), 'columns')
+        page.click('#methodos-done'); step_is(page, 'columns', 'done', 15)
+        run(page, '#check'); step_is(page, 'check', 'done')
+        page.select_option('#target', 'plato-json')
+        run(page, '#convert'); step_is(page, 'dataset', 'done')
+        page.click('#methodos-use', timeout=T(15) * 1000)
+        wait_state(page, lambda s: s.get('phase') == 'detected' and s.get('format') == 'plato-json', T(60), 'the converted dataset chosen')
+        step_is(page, 'lookup', 'current', 15)
+
+    def two_answers():
+        page = fresh()
+        ask = D(page)['ask']
+        page.click('#methodos-ask'); until(page, "!document.getElementById('methodos').hidden", 5)
+        page.check('input[name="methodos-have"][value="table"]')
+        before = {'follow': page.is_visible('#methodos-start'), 'verdict': page.inner_text('#methodos-verdict')}   # one answer: no plan yet (the control)
+        page.check('input[name="methodos-want"][value="map"]')
+        asked = page.eval_on_selector_all('#mq-more fieldset[data-ask]', "fs => fs.map((f) => [f.dataset.ask, f.querySelector('input:checked')?.value || null])")
+        planned = page.eval_on_selector_all('#methodos-plan li.track-step', 'ls => ls.map((l) => l.dataset.step)')
+        verdict = page.inner_text('#methodos-verdict'); follow = page.is_visible('#methodos-start')
+        # A Yes is still taken: drawing answered Yes plans its step (the default is not all there is).
+        page.check('input[name="methodos-ask-will-draw"][value="yes"]')
+        drawn = page.eval_on_selector_all('#methodos-plan li.track-step', 'ls => ls.map((l) => l.dataset.step)')
+        # Another workflow's questions have no default of Map your data's: an edition keeps the Yes just given for drawing, and still asks
+        # about publishing, with no plan until it is answered (the control that a plan can be withheld).
+        page.check('input[name="methodos-have"][value="tei"]')
+        tei = {'follow': page.is_visible('#methodos-start'), 'asked': page.eval_on_selector_all('#mq-more fieldset[data-ask]', "fs => fs.map((f) => [f.dataset.ask, f.querySelector('input:checked')?.value || null])")}
+        ok = (ask == 'Answer two questions' and not before['follow'] and follow and len(planned) == 9 and 'in 9 steps' in verdict
+              and asked == [['has-regions', 'no'], ['will-draw', 'no'], ['will-publish', 'no'], ['will-mint', 'no']]
+              and 'place' in drawn and len(drawn) == 10 and not tei['follow'] and tei['asked'] == [['will-draw', 'yes'], ['will-publish', None]])
+        return ok, {'link': ask, 'before': before, 'asked': asked, 'planned': planned, 'verdict': verdict, 'follow': follow, 'with drawing': drawn, 'an edition': tei}
+    attempt('Map your data, the door: after the first two questions, with no yes-or-no question touched, the plan has its 9 steps and "Follow" is shown, each question No until changed; a Yes still plans its step, and an edition still asks its own', two_answers)
+
+    def start_at_once():
+        page = fresh()
+        d0 = D(page)
+        page.click('#methodos-quick', timeout=T(15) * 1000)
+        until(page, "document.getElementById('methodos-tracker').dataset.status === 'pending'", 10)
+        d1 = D(page)
+        kept = page.evaluate("() => document.getElementById('methodos-message').textContent")
+        ok = (d0['quick'] and 'Map your data' in (d0['banner'] or '') and d0['ask'] == 'Answer two questions' and not d0['tracker']
+              and d1['tracker'] and d1['status'] == 'pending' and d1['recipe'] == 'map-your-data' and len(d1['steps']) == 9 and 'place' not in d1['steps'] and 'mint' not in d1['steps']
+              and not d1['interview'] and not d1['quick'])
+        return ok, {'before': {k: d0[k] for k in ('quick', 'banner', 'tracker')}, 'after': {k: d1[k] for k in ('tracker', 'status', 'recipe', 'steps', 'interview', 'quick', 'title')}, 'message': kept[:160]}
+    attempt('Map your data, the door: the opening names Map your data with a Start button; pressed, the tracker shows Map your data, not started, its nine steps planned with no question asked', start_at_once)
+
+    def no_ids_said():
+        page = fresh(grant=True)
+        choose(page, MYD_FIX / '14-one-column.csv')
+        none = preview(page, 0)
+        choose(page, MYD_FIX / '00-baseline-with-ids.csv')
+        some = preview(page, 4)
+        ok = ('None of your 5 places can be looked up yet' in none['text'] and 'Number the rows' in none['text'] and none['send'][1] is True and none['state'].get('noIds') == 5
+              and some['send'] == ['Send 4 queries to WHG', False] and '1 more place has no id, and is left out' in some['text'] and 'Number the rows' in some['text']
+              and some['state'].get('noIds') == 1 and 'None of your' not in some['text'])
+        return ok, {'no id column': {'text': none['text'][-330:], 'send': none['send'], 'noIds': none['state'].get('noIds')}, 'one row without': {'text': some['text'][:520], 'send': some['send'], 'noIds': some['state'].get('noIds')}}
+    attempt('Map your data, the lookup: a table with no id column is told why none of its 5 places can be looked up, and what to do ("Number the rows"); a table with one row without an id still offers "Send 4 queries", and says 1 place is left out', no_ids_said)
+
+    r = {}
+    def reload_keeps():
+        page = fresh()
+        # Outside a workflow (the control): the reload for a permission says it would lose the file chosen, and is cancelled.
+        choose(page, MYD_FIX / '00-baseline-with-ids.csv')
+        page.click('#permissions-button'); until(page, '() => document.getElementById("permissions-panel")?.open', 10)
+        page.check('#permissions-panel fieldset.perm[data-key="gazetteer:whg"] input[value="allowed"]')
+        page.click('#permissions-panel [data-reload]')
+        outside = page.inner_text('#permissions-panel .perm-confirm') if page.is_visible('#permissions-panel .perm-confirm') else ''
+        page.click('#permissions-panel [data-reload-cancel]'); page.keyboard.press('Escape')
+        until(page, '() => !document.getElementById("permissions-panel").open', 10)
+        # In the workflow, at its lookup step: the same reload asks nothing, and the file is chosen again after it.
+        to_lookup(page, MYD_FIX / '00-baseline-with-ids.csv')
+        page.evaluate('() => { window.__beforePermReload = true; }')
+        page.click('#permissions-button'); until(page, '() => document.getElementById("permissions-panel")?.open', 10)
+        said = re.sub(r'\s+', ' ', page.inner_text('#permissions-panel .perm-reload'))
+        page.click('#permissions-panel [data-reload]')
+        asked = None
+        t0 = time.time()
+        while time.time() - t0 < T(20) and asked is None:
+            try:
+                if page.is_visible('#permissions-panel .perm-confirm'): asked = page.inner_text('#permissions-panel .perm-confirm')
+                elif not page.evaluate('() => window.__beforePermReload === true'): asked = ''
+            except Exception: pass                              # the page going: reloaded
+            time.sleep(0.2)
+        if asked is None: raise RuntimeError('the panel neither asked nor reloaded')
+        if asked: return False, {'outside a workflow': outside, 'in the workflow': asked}
+        s = wait_state(page, lambda s: s.get('phase') == 'detected', T(60), 'the file chosen again after the reload')
+        step_is(page, 'lookup', 'current', 30)
+        d = D(page); r['page'] = page
+        ok = 'The file you chose (00-baseline-with-ids.csv)' in outside and asked == '' and s.get('phase') == 'detected' and d['current'] == 'lookup'
+        return ok, {'outside a workflow': outside, 'in the workflow': asked, 'the panel said': said, 'after': s.get('phase'), 'step': d['current']}
+    attempt('Map your data, the lookup: the reload that allows the gazetteer asks nothing about the file in a workflow, which keeps it and chooses it again; outside a workflow the same reload still says it would lose the file chosen', reload_keeps)
+
+    def review_on_top_and_guarded():
+        page = r.get('page')
+        if not page: page = fresh(grant=True); to_lookup(page, MYD_FIX / '00-baseline-with-ids.csv')
+        if not page.evaluate("() => document.getElementById('lookup').open"): page.click('#lookup > summary')
+        page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
+        page.wait_for_function("() => { const b = document.getElementById('lookup-send'); return !b.hidden && !b.disabled; }", timeout=T(60) * 1000)
+        at_lookup = D(page)
+        idle = page.evaluate(MYD_LEAVE)                          # nothing running, nothing decided: leaving is not asked about
+        hold['on'] = True
+        page.click('#lookup-send')
+        t0 = time.time()
+        while not held and time.time() - t0 < T(30): page.wait_for_timeout(100)
+        running = page.evaluate(MYD_LEAVE) if held else None     # the lookup is running, its answer not yet come
+        hold['on'] = False
+        for route in held: answer(route)
+        del held[:]
+        wait_state(page, lambda s: (s.get('lookup') or {}).get('running') is False and (s.get('work') or {}).get('candidates'), T(60), 'the lookup')
+        step_is(page, 'review', 'current', 30)
+        page.wait_for_timeout(600)
+        at_review = D(page)
+        undecided = page.evaluate(MYD_LEAVE)                     # the review open, nothing decided, the lookup's work held by the workflow
+        if page.is_visible('#review-name'): page.fill('#review-name', 'Door Reviewer'); page.press('#review-name', 'Enter')
+        page.locator('#review-place').focus(); page.keyboard.press('a')
+        wait_state(page, lambda s: any(c.get('decision') for c in (s.get('work') or {}).get('candidates') or []), T(15), 'a decision')
+        decided = page.evaluate(MYD_LEAVE)                       # one decision, in the page alone
+        # The harness's own reloads still go through with the guard armed (Playwright accepts the browser's question).
+        page.evaluate('() => { window.__before_guarded_reload = true; }')
+        page.reload()
+        s = wait_state(page, lambda s: s.get('phase') in ('ready', 'detected'), T(60), 'reloaded')
+        reloaded = page.evaluate('() => window.__before_guarded_reload !== true')
+        top = at_review['reviewTop']
+        ok = (at_lookup['lookupOpen'] and idle is False and running is True
+              and at_review['review'] and not at_review['lookupOpen'] and not at_review['matching'] and top is not None and 0 <= top < at_review['height'] / 2
+              and undecided is False and decided is True and reloaded)
+        return ok, {'at the lookup': {k: at_lookup[k] for k in ('lookupOpen', 'matching')}, 'at the review': {k: at_review[k] for k in ('review', 'lookupOpen', 'matching', 'reviewTop', 'height', 'current')},
+                    'leaving asked about': {'idle': idle, 'lookup running': running, 'review undecided': undecided, 'one decision': decided}, 'reload went through': reloaded}
+    attempt('Map your data, the review: when the lookup ends the lookup panel is closed, the ways to another match are put away and the review is at the top of the window; leaving the page is asked about while the lookup runs and once a decision is made, not before, and a reload still goes through', review_on_top_and_guarded)
+
+    def regions_offered():
+        page = fresh()
+        # Outside a workflow (the control): the offer of a region review is there, and is not the primary button.
+        choose(page, MYDATA_CSV)
+        wait_state(page, lambda s: ((s.get('columns') or {}).get('levels') or {}), T(30), 'columns')
+        page.evaluate("() => { const b = document.getElementById('base'); b.value = 'https://example.org/myd-door/'; b.dispatchEvent(new Event('input', { bubbles: true })); b.dispatchEvent(new Event('change', { bubbles: true })); }")
+        if not page.evaluate("() => document.getElementById('lookup').open"): page.click('#lookup > summary')
+        page.wait_for_function("() => !document.getElementById('regions-offer').hidden", timeout=T(60) * 1000)
+        outside = D(page)
+        # In the workflow, at its regions step, the converted dataset chosen: the offer is in view, its button the primary one.
+        page.click('#methodos-ask'); until(page, "!document.getElementById('methodos').hidden", 5)
+        page.check('input[name="methodos-have"][value="table"]'); page.check('input[name="methodos-want"][value="map"]')
+        for k, v in (('has-regions', 'yes'), ('will-draw', 'no'), ('will-publish', 'no')): page.check(f'input[name="methodos-ask-{k}"][value="{v}"]')
+        page.click('#methodos-start', timeout=T(15) * 1000)
+        until(page, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+        wait_state(page, lambda s: ((s.get('columns') or {}).get('levels') or {}) and s.get('columnsPending') is False, T(30), 'columns')
+        page.click('#methodos-done'); step_is(page, 'columns', 'done', 15)
+        run(page, '#check'); step_is(page, 'check', 'done')
+        page.select_option('#target', 'plato-json')
+        s = run(page, '#convert'); step_is(page, 'dataset', 'done')
+        step_is(page, 'regions', 'current', 15)
+        # The converted dataset, chosen at the regions step: by the tracker's "Use …" where it is offered, else saved and chosen by hand.
+        if page.is_visible('#methodos-use'): page.click('#methodos-use')
+        else:
+            n = next(o['name'] for o in (s.get('outputs') or []) if o['name'].endswith('.json'))
+            choose(page, download(page, n, out / n))
+        wait_state(page, lambda s: s.get('phase') == 'detected' and s.get('format') == 'plato-json', T(60), 'the converted dataset chosen')
+        page.wait_for_function("() => document.getElementById('lookup').open && !document.getElementById('regions-offer').hidden", timeout=T(60) * 1000)
+        page.wait_for_timeout(600)
+        inside = D(page)
+        ok = (outside['offer'] and not outside['primary'] and inside['offer'] and inside['primary'] and inside['current'] == 'regions'
+              and inside['offerTop'] >= 0 and inside['offerBottom'] <= inside['height'])
+        return ok, {'outside a workflow': {k: outside[k] for k in ('offer', 'primary')}, 'at the regions step': {k: inside[k] for k in ('offer', 'primary', 'offerTop', 'offerBottom', 'height', 'current')}}
+    attempt('Map your data, the regions: at the regions step, the dataset chosen, the offer of the region review is in view and "Review the regions level by level" is the primary button; outside a workflow it is offered, not as the primary one', regions_offered)
+
+    for ctx in made:
+        try: ctx.close()
+        except Exception: pass
     try: browser.close()
     except Exception: pass
 

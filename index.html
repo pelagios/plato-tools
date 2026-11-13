@@ -47,7 +47,7 @@
   <!-- The workflow rail: beside the steps from 60rem (src/styles.css), sticky, it holds the one line that opens Methodos's
        interview while no workflow is followed, and the tracker while one is; below 60rem its contents flow with the page. -->
   <div id="workflow-rail" class="workflow-rail">
-    <p id="methodos-banner" class="methodos-banner"><a href="#methodos" id="methodos-ask">Not sure where to start? Answer three questions</a><span class="banner-or">, or <button type="button" id="methodos-open-banner" class="link">open a project</button> saved before, or <button type="button" id="whg-open-banner" class="link">one kept in WHG</button>.</span></p>
+    <p id="methodos-banner" class="methodos-banner"><span class="banner-start"><strong>Have a list of place names? Map your data</strong>: find each place in a gazetteer, step by step. <button type="button" id="methodos-quick" class="primary">Start</button></span> <span class="banner-else">Something else? <a href="#methodos" id="methodos-ask">Answer two questions</a><span class="banner-or">, or <button type="button" id="methodos-open-banner" class="link">open a project</button> saved before, or <button type="button" id="whg-open-banner" class="link">one kept in WHG</button>.</span></span></p>
     <!-- A project (.platoproj, src/engine/methodos/project.js) chosen here or in the tracker; what came of it is said here while no workflow is shown. -->
     <input type="file" id="methodos-project-file" accept=".platoproj" hidden>
     <p id="methodos-project-said" class="methodos-project-said" role="status" hidden></p>

@@ -12,7 +12,9 @@
 import mapYourData from './map-your-data.js';
 import { BASE } from './asks.js';
 
-const ask = (k) => ({ ...mapYourData.asks[k] });
+// Without the default that is Map your data's own (13 November 2026: its three yes-or-no questions are No until answered,
+// so that it begins in one click): this workflow still asks its own, and its recipe, so its digest, is as it was.
+const ask = (k) => { const { default: dflt, ...q } = mapYourData.asks[k]; return dflt === undefined || ['has-regions', 'will-draw', 'will-publish'].includes(k) ? q : { ...q, default: dflt }; };
 
 export default {
   key: 'match-two-datasets',

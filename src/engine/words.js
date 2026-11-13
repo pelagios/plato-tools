@@ -1124,6 +1124,9 @@ export const LOOKUP_WORDS = {
   noManifest: "The service's manifest (what it says of itself) could not be read, so queries are sent to it without a type, and a candidate's id is made into a web address only by the template given, if any.",
   linksUnknown: 'The dataset was not read, so candidates it already links to a place, or says are different places, could not be left out.',
   noPlaces: 'No places to look up with this choice.',
+  /** Places the table gave no id (S2, robust-R-07): none can be looked up, or some are left out. "Number the rows" is the Columns panel's button. */
+  allNoIds: (n) => `None of your ${n === 1 ? 'place' : `${n.toLocaleString('en-GB')} places`} can be looked up yet: the table gave ${n === 1 ? 'it no id' : 'them no ids'}, and a match is recorded against a place's id. Go back to the columns and press “Number the rows”, or choose a column as the place id.`,
+  someNoIds: (n) => `${plural(n, 'more place has', 'more places have')} no id, and ${n === 1 ? 'is' : 'are'} left out: a match is recorded against a place's id. To include ${n === 1 ? 'it' : 'them'}, go back to the columns and press “Number the rows”, or choose a column as the place id.`,
   /** The preview, before anything is sent: how much is asked, and the first queries exactly. */
   preview(p, { perDay = null } = {}) {
     const lines = [`Would look up ${plural(p.places, 'place')} in ${p.service.title}: ${plural(p.queries, 'query', 'queries')} in ${plural(p.requests, 'request')}`

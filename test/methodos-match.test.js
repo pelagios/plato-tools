@@ -126,7 +126,10 @@ test('the recipe is well formed: the table read as Map your data reads it, the o
   // The question's two answers in words, and its default (into the dataset).
   assert.deepEqual([M.asks['into-dataset'].kind, M.asks['into-dataset'].answers, M.asks['into-dataset'].default], ['yes-no', ['Add them to my dataset', 'Keep them in a file of their own'], true]);
   assert.equal(M.asks['into-dataset'].question, 'Add the decisions to your dataset, or keep them in a file of their own about it?');
-  for (const k of ['will-publish', 'target', 'release', 'repo', 'maintainers']) assert.deepEqual(M.asks[k], MAP.asks[k], k);
+  for (const k of ['target', 'release', 'repo', 'maintainers']) assert.deepEqual(M.asks[k], MAP.asks[k], k);
+  // Publishing in Map your data's words, not with its default (No, 13 November 2026), which is its own: this workflow still asks.
+  assert.deepEqual(M.asks['will-publish'], { question: MAP.asks['will-publish'].question, kind: 'yes-no' });
+  assert.equal(MAP.asks['will-publish'].default, false);
   assert.deepEqual(M.asks.base, MAP.asks.base);
   // What it cannot do, in sentences; the other dataset's addresses among them.
   assert.ok(M.cannot.length >= 3 && M.cannot.every((c) => /\.$/.test(c)));
