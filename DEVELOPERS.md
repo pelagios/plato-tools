@@ -3586,7 +3586,9 @@ workflow beyond the tab (phase 2) and the page's interview and tracker (phase 3)
   `invalidate` does a step again and resets every step that took its outputs.
   Files chosen late are recorded by `supply(state, recipe, key, refs)` (by name, size and SHA-256, as the
   files chosen at the start are); until then `inputsOf` refuses, in words, the steps that take them, and
-  the state's `late` names them in the recipe's words. Once recorded, other files are refused until the
+  the state's `late` names them in the recipe's words (`inputsOf(state, id, { late: 'leave' })` leaves
+  their input out instead, so that the page can say, offer and choose again the step's other input, the
+  dataset a match takes, before the other dataset is chosen; `next()` never takes a step so). Once recorded, other files are refused until the
   ones recorded are forgotten (`forget`, `forgettable`), which is possible only while no step has been done
   with them; doing again the step they are chosen at (the first that takes them) resets every step that
   takes them. A step whose options say `problems: 'report'` (the check of a match's other dataset) is done
@@ -3699,7 +3701,12 @@ changing them.
   so (`keptWords()`): "Kept in this browser for the next steps: your file and 2 files the steps made
   (…). Nothing leaves this computer.", or, with working data off, "Nothing of yours is kept in this
   browser: …", where it used to promise "never your own files". On any reload, the step's file, the
-  user's own or a step's, is chosen again when it is kept (`currentInput()`).
+  user's own or a step's, is chosen again when it is kept (`currentInput()`). When the table is chosen
+  again (so, or by hand) after its columns' step is done, the matching that step kept (`columns.json`,
+  the step's result) is put back in the Columns panel through the host's `applyMapping()`, as a saved
+  matching loaded is, and the tracker says so (`restoreMatching()`): the page's guesses would otherwise
+  replace the user's matching without a word, and the steps after run on them. Where it is no longer
+  held, the tracker warns that the columns shown are guesses.
   A file dropped in step 1 gives a handle too where the browser can (`getAsFileSystemHandle`,
   feature-detected; a folder's handle, or a refusal, gives none and the drop goes on).
 
@@ -4615,7 +4622,11 @@ A push to `main` runs the tests, builds the site and publishes it to GitHub Page
   rail's contents flowing with the page (`display: contents`), and the tracker a strip held at the top
   of the window (`#methodos-strip`, "Step n of N: Tool, what it does ▾"), which opens to the whole
   tracker (`.open`, `aria-expanded`, controlling `#methodos-track`) and closes again when the workflow
-  comes to another step, when the page brings the next thing into view, and when the tracker goes. In the
+  comes to another step, when the page brings the next thing into view, and when the tracker goes.
+  Below 60rem only, the step's own buttons ("This step is done", "Choose the file", "Use …",
+  "Download …", "Open the review …") are also under the centre's title (`#methodos-here` in
+  `#workflow-head`, `.step-actions`; `stepButtons()` in `src/methodos/page.js`), each pressing the
+  tracker's own, as the folded strip hides those. In the
   rail the tracker is a flex column of which only the list of steps scrolls, so that the step's message
   and its buttons ("This step is done", Back, Leave) are always in view; how Methodos follows the tools
   is folded after the buttons (`details.track-about`). The grid has twelve rows for the centre's

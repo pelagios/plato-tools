@@ -3187,6 +3187,7 @@ def main():
             map_your_data_checks(pw, url, tmp)
             recipes_checks(pw, url, tmp)
             match_two_checks(pw, url, tmp)
+            tracker_review_checks(pw, url, tmp)
             release_workflow_checks(pw, url, tmp)
             project_checks(pw, url, tmp)
             whg_checks(pw, url, tmp)
@@ -5173,6 +5174,227 @@ def match_two_checks(pw, url, tmp):
     attempt('Match two datasets from a dataset already in a PLATO format: the same two questions, no columns or conversion but a check of it, matched as it is, reviewed, recorded and compared with it (one answer added)', from_plato)
     try: ctx.close(); browser.close()
     except Exception: pass
+
+# ---- The tracker, after the review of November 2026 (src/methodos/page.js; found 13 November 2026) -------------------
+# Five faults a first-time visitor met in a workflow, each followed here as they met it, in a browser of its own:
+# a reload that put the page's guesses in place of the columns the user had matched (and made another dataset of them);
+# Match two datasets, which could not pass its match without a file the user was never told to save; Agora's "Prepare"
+# run on another part than the step's, dropped without a word; nothing said before "Follow" of the WHG account a lookup
+# needs, nor to a visitor with "Nothing yet" of the example files and the box for a pasted list; and, below 60rem, no
+# button to say a step is done unless the tracker's strip is opened. Nothing goes to WHG or any other site. Each
+# absence is read beside a presence.
+TRACKER_CSV = ROOT / 'test/fixtures/generic/with-ids.csv'
+def tracker_review_checks(pw, url, tmp):
+    import re
+    base = url.rstrip('/') + '/'
+    out = tmp / 'tracker-review'; out.mkdir(exist_ok=True)
+    browser = pw.chromium.launch(headless=True, args=GL)
+    whg = []
+    def fresh(width=1440, height=900):
+        ctx = browser.new_context(accept_downloads=True, viewport={'width': width, 'height': height}, reduced_motion='reduce')
+        ctx.add_init_script('window.__plato_forceDownload = true;')
+        ctx.route(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'), lambda route: (whg.append(route.request.url), route.fulfill(status=404, body='{}')))
+        page = ctx.new_page(); page.set_default_timeout(T(15) * 1000)
+        page.goto(NOTOOLS if PROVE else base)
+        if wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready').get('phase') != 'ready': raise RuntimeError('the main page did not start')
+        return ctx, page
+    track = lambda page: page.evaluate(JOIN_STATE)
+    def step_is(page, step, state, timeout=60):
+        until(page, f"() => document.querySelector('#methodos-track li[data-step=\"{step}\"]')?.dataset.state === '{state}'", timeout)
+    def choose(page, fs):
+        page.set_input_files('#picker', [])
+        page.set_input_files('#picker', [str(f) for f in fs])
+        s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection')
+        if s.get('phase') != 'detected': raise RuntimeError(f'not detected: {s.get("phase")}')
+        return s
+    def run(page, button, timeout=180):
+        page.click(button)
+        return wait_state(page, lambda s: s.get('phase') in ('done', 'error'), T(timeout), 'run')
+    def interview(page, have, want, **answers):
+        page.click('#methodos-ask'); until(page, "!document.getElementById('methodos').hidden", 5)
+        page.check(f'input[name="methodos-have"][value="{have}"]'); page.check(f'input[name="methodos-want"][value="{want}"]')
+        for k, v in answers.items(): page.check(f'input[name="methodos-ask-{k.replace("_", "-")}"][value="{v}"]')
+    def follow(page):
+        until(page, "() => !document.getElementById('methodos-start').hidden", 5)
+        page.click('#methodos-start'); until(page, "['pending', 'idle'].includes(document.getElementById('methodos-tracker').dataset.status)", 10)
+    def map_your_data(page):
+        interview(page, 'table', 'map', has_regions='no', will_draw='no', will_publish='no')
+        follow(page)
+        choose(page, [TRACKER_CSV])
+        until(page, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+        until(page, "() => window.__plato?.columns?.headers && !document.getElementById('methodos-done').hidden", 30)
+    CHOSEN = "() => [...document.querySelectorAll('#chosen li .name')].map((e) => e.textContent)"
+    MAPPING = "() => { const c = window.__plato?.columns; return c && c.headers ? Object.fromEntries(c.headers.map((h) => [h, c.mapping[h]])) : null; }"
+
+    # ---- A reload keeps the columns as the user matched them (P0-08)
+    def columns_kept():
+        ctx, page = fresh()
+        try:
+            map_your_data(page)
+            guessed = page.evaluate(MAPPING)
+            # Two of the guesses changed: the kind of place not carried over, the description read as another name.
+            for column, label in (('type', "Don't carry over"), ('description', 'Alternative names')):
+                page.locator('#columns tbody tr', has_text=column).locator('select[data-column]').select_option(label=label)
+            mine = page.evaluate(MAPPING)
+            page.click('#methodos-done'); step_is(page, 'columns', 'done', 15)
+            page.reload()
+            if wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'the table chosen again').get('phase') != 'detected': raise RuntimeError('the table was not chosen again after the reload')
+            step_is(page, 'check', 'current', 30)
+            # The matching shown after the reload: the user's, once the page has it (the guesses come first, and are replaced).
+            try: until(page, f"() => JSON.stringify(({MAPPING})()) === {json.dumps(json.dumps(mine))}", 20)
+            except Exception: pass
+            after = page.evaluate(MAPPING); t = track(page)
+            loaded = page.evaluate("() => document.getElementById('columns-messages')?.textContent || ''")
+            # And the dataset is made of it: "Roman baths", the description, is a name, not a note, and no place has a kind.
+            checked = run(page, '#check').get('phase'); step_is(page, 'check', 'done')
+            page.select_option('#target', 'plato-json')
+            s = run(page, '#convert'); step_is(page, 'dataset', 'done')
+            n = next((o['name'] for o in (s.get('outputs') or []) if o['name'].endswith('.json')), None)
+            doc = json.loads(download(page, n, out / n).read_text()) if n else {}
+            bath = next((e for e in doc.get('spatialEntities') or [] if e.get('@id', '').endswith('bath')), {})
+            names = sorted(x.get('toponym') for a in bath.get('attestations') or [] for x in a.get('names') or [])
+            text = json.dumps(doc)
+            ok = (guessed and mine and guessed != mine and guessed.get('type') != mine.get('type') and guessed.get('description') != mine.get('description')
+                  and after == mine and 'The columns are matched as you left them at the step “' in t['message'] and 'columns.json' in loaded
+                  and checked == 'done' and names == ['Aquae Sulis', 'Roman baths'] and 'description: Roman baths' not in text and 'fortress' not in text)
+            return ok, {'guessed': guessed, 'mine': mine, 'after the reload': after, 'message': t['message'], 'columns say': loaded, 'steps': t['steps'], 'Bath named': names,
+                        'a note of the description': 'description: Roman baths' in text, 'a kind': 'fortress' in text}
+        finally: ctx.close()
+    attempt('Tracker: a reload after the columns are matched shows the matching the user made, not the guesses (two columns changed; said in the tracker and the Columns panel), and the dataset then made is of it', columns_kept)
+
+    # ---- Match two datasets, never saving a file by hand (P0-09)
+    def match_without_saving():
+        ctx, page = fresh()
+        try:
+            B, _ = match_two_files(out)
+            page.evaluate("() => { const b = document.getElementById('base'); b.value = %s; b.dispatchEvent(new Event('change')); }" % json.dumps(MATCH_BASE))
+            interview(page, 'table', 'match', will_publish='no')
+            follow(page)
+            choose(page, [MATCH_CSV])
+            until(page, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+            until(page, "() => window.__plato?.columns?.headers && !document.getElementById('methodos-done').hidden", 30)
+            page.click('#methodos-done'); step_is(page, 'columns', 'done', 15)
+            run(page, '#check'); step_is(page, 'check', 'done')
+            page.select_option('#target', 'plato-json')
+            run(page, '#convert'); step_is(page, 'dataset', 'done')
+            # At the match, the table still chosen: the dataset the step before made is offered, by name, from the tracker.
+            at = track(page); before = page.evaluate(CHOSEN)
+            # The page started again there: that dataset is chosen again by itself (nothing clicked), and so not offered.
+            page.reload()
+            try: until(page, f"() => JSON.stringify(({CHOSEN})()) === '[\"match-mine.json\"]'", 30)
+            except Exception: pass
+            wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(30), 'detection')
+            again = page.evaluate(CHOSEN); re_at = track(page)
+            # The table chosen in its place, as the visitor of 13 November had it: offered again, and used.
+            choose(page, [MATCH_CSV])
+            until(page, "() => !document.getElementById('methodos-use').hidden", 15)
+            offered = track(page)['use']
+            page.click('#methodos-use')
+            until(page, f"() => JSON.stringify(({CHOSEN})()) === '[\"match-mine.json\"]'", 30)
+            wait_state(page, lambda s: s.get('phase') == 'detected', T(30), 'detection')
+            page.set_input_files('#others', [str(B)])
+            s = wait_state(page, lambda s: s.get('phase') in ('reviewing', 'error') or (s.get('action') == 'match' and s.get('phase') == 'done'), T(120), 'matching')
+            step_is(page, 'match', 'done', 30)
+            t = track(page)
+            late = page.evaluate("() => [...document.querySelectorAll('#methodos-late p.track-late')].map((p) => p.textContent)")
+            use = 'Use match-mine.json (made by the step “Make a PLATO dataset of it”)'
+            ok = (at['steps'].get('match') == 'current' and before == ['match-mine.csv'] and at['use'] == use
+                  and again == ['match-mine.json'] and re_at['steps'].get('match') == 'current' and re_at['use'] is None
+                  and offered == use and s.get('phase') in ('reviewing', 'done') and t['steps'].get('match') == 'done' and t['steps'].get('check-other') == 'current'
+                  and 'not the files the step' not in t['message'] and late and late[0].startswith('The other dataset: match-other.json.') and whg == [])
+            return ok, {'at the match': at['steps'], 'chosen there': before, 'offered': at['use'], 'chosen after a reload': again, 'offered then': re_at['use'],
+                        'offered with the table chosen': offered, 'match': s.get('phase'), 'steps': t['steps'], 'message': t['message'][:200], 'late': late, 'whg': whg}
+        finally: ctx.close()
+    attempt('Tracker: Match two datasets from a table, with no file saved by hand: at the match the dataset made is offered by name, is chosen again by itself after a reload, and, used from the tracker, the match with the other dataset is the step\'s', match_without_saving)
+
+    # ---- Agora's "Prepare" on another part than the step's is said (P0-07)
+    def other_part():
+        ctx, page = fresh()
+        try:
+            customs = sorted((PLATO / 'schemas/tables/examples/customs').glob('*.csv'))
+            interview(page, 'plato', 'publish')
+            follow(page)
+            choose(page, customs)
+            until(page, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+            run(page, '#check'); step_is(page, 'check', 'done')
+            parts = page.evaluate("() => Object.fromEntries([...document.getElementById('part').options].map((o) => [o.value, o.textContent]))")
+            # The list put on the report, by hand, at the step that mints: the run is not the step's, and the tracker says which part is.
+            page.select_option('#part', 'report')
+            wrong = run(page, '#publish').get('phase')
+            until(page, "() => /another part/.test(document.getElementById('methodos-message').textContent)", 10)
+            t = track(page)
+            warned = page.evaluate("() => document.getElementById('methodos-message').classList.contains('warn')")
+            # The step's own part, chosen as the words say: the step is done, and the words are gone.
+            page.select_option('#part', 'mint')
+            right = run(page, '#publish').get('phase'); step_is(page, 'mint', 'done')
+            t2 = track(page)
+            said = f'it prepared another part, “{parts.get("report")}”. Choose “{parts.get("mint")}” in the list beside “Prepare”, and press Prepare again.'
+            ok = (wrong == 'done' and t['steps'].get('mint') == 'current' and t['message'].startswith('This run is not counted as the step “Give every place and source a permanent address”: ' + said) and warned
+                  and right == 'done' and t2['steps'].get('mint') == 'done' and t2['steps'].get('report') == 'current' and 'another part' not in t2['message'])
+            return ok, {'parts': parts, 'the report run': wrong, 'steps then': t['steps'], 'said': t['message'], 'a warning': warned, 'the mint run': right, 'steps after': t2['steps'], 'said after': t2['message'][:160]}
+        finally: ctx.close()
+    attempt('Tracker: at Publish a dataset\'s minting step, "Prepare" run on the report is not counted and the tracker says so, naming both parts in the list\'s own words; run on the step\'s part, the step is done', other_part)
+
+    # ---- Said before "Follow": the WHG account a lookup needs; and, with nothing to hand, the example files and the pasted list (P0-13)
+    def before_follow():
+        ctx, page = fresh()
+        try:
+            NEEDS = "() => { const p = document.querySelector('#methodos-plan .track-needs-whg'); return p && !p.closest('[hidden]') ? { words: p.textContent, href: p.querySelector('a')?.href || null, target: p.querySelector('a')?.target || null } : null; }"
+            interview(page, 'table', 'map', has_regions='no', will_draw='no', will_publish='no')
+            until(page, "() => !document.getElementById('methodos-start').hidden", 5)
+            lookup = page.evaluate(NEEDS)
+            steps = page.eval_on_selector_all('#methodos-plan li.track-step', 'ls => ls.map((l) => l.dataset.step)')
+            # A workflow that asks no gazetteer says nothing of an account (the absence, beside its plan shown).
+            page.check('input[name="methodos-have"][value="plato"]'); page.check('input[name="methodos-want"][value="publish"]')
+            until(page, "() => document.getElementById('methodos').dataset.recipe === 'publish-a-dataset' && !document.getElementById('methodos-start').hidden", 5)
+            publish = page.evaluate(NEEDS)
+            planned = page.eval_on_selector_all('#methodos-plan li.track-step', 'ls => ls.length')
+            # "Nothing yet": the example files (the address step 1 gives them at) and the box for a pasted list, opened with the focus in it.
+            page.check('input[name="methodos-have"][value="nothing"]'); page.check('input[name="methodos-want"][value="map"]')
+            until(page, "() => /There is no workflow for this yet/.test(document.getElementById('methodos-verdict').textContent)", 5)
+            nothing = page.evaluate("""() => { const p = document.querySelector('#methodos-plan .track-nothing'); return p ? { words: p.textContent, zip: p.querySelector('#methodos-try')?.href || null,
+              download: p.querySelector('#methodos-try')?.hasAttribute('download') || false, step1: document.getElementById('try-files')?.href || null } : null; }""")
+            was_open = page.evaluate("() => document.getElementById('paste').open")
+            page.click('#methodos-paste')
+            until(page, "() => document.getElementById('paste').open && document.activeElement?.id === 'paste-text'", 5)
+            pasted = page.evaluate("() => ({ open: document.getElementById('paste').open, focus: document.activeElement?.id || null })")
+            # Something to hand, and no workflow for it: neither is offered (the absence, beside the same verdict).
+            page.check('input[name="methodos-have"][value="text"]')
+            until(page, "() => /There is no workflow for this yet/.test(document.getElementById('methodos-verdict').textContent) && !document.querySelector('#methodos-plan .track-nothing')", 5)
+            other = page.evaluate("() => ({ verdict: document.getElementById('methodos-verdict').textContent.slice(0, 40), offered: !!document.querySelector('#methodos-plan .track-nothing') })")
+            ok = ('lookup' in steps and lookup and lookup['href'] == 'https://whgazetteer.org/' and lookup['target'] == '_blank'
+                  and 'needs an account with the World Historical Gazetteer, and its token' in lookup['words'] and 'free' in lookup['words']
+                  and publish is None and planned == 5
+                  and nothing and nothing['zip'] and nothing['zip'] == nothing['step1'] and nothing['download'] and 'paste a list of place names' in nothing['words']
+                  and was_open is False and pasted == {'open': True, 'focus': 'paste-text'} and other['offered'] is False and whg == [])
+            return ok, {'steps': steps, 'before a lookup': lookup, 'before publishing': publish, 'publishing steps': planned, 'nothing yet': nothing, 'paste before': was_open, 'paste after': pasted, 'a text': other, 'whg': whg}
+        finally: ctx.close()
+    attempt('Tracker: before "Follow", a workflow with a lookup says it needs a WHG account and token, with the link (one without says nothing of it); "Nothing yet" offers the example files and opens the box for a pasted list', before_follow)
+
+    # ---- Below 60rem, the step's button under the centre's title (P0-14)
+    def narrow_button():
+        ctx, page = fresh()
+        try:
+            SEEN = """() => { const box = (e) => { if (!e) return null; const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden'; };
+              const here = document.querySelector('#workflow-head #methodos-here button[data-presses="methodos-done"]');
+              return { here: box(here), words: here?.textContent || null, tracker: box(document.getElementById('methodos-done')), strip: box(document.getElementById('methodos-strip')),
+                open: document.getElementById('methodos-tracker').classList.contains('open'), after: !!here && !!(document.getElementById('workflow-title').compareDocumentPosition(here) & 4) }; }"""
+            map_your_data(page)
+            wide = page.evaluate(SEEN)
+            # A phone's width: the tracker is its strip, folded, its own button inside; the step's button is under the centre's title, and does the step.
+            page.set_viewport_size({'width': 390, 'height': 844})
+            until(page, "() => document.getElementById('methodos-strip').getBoundingClientRect().width > 0", 5)
+            narrow = page.evaluate(SEEN)
+            page.click('#methodos-here button[data-presses="methodos-done"]'); step_is(page, 'columns', 'done', 15)
+            t = track(page)
+            gone = page.evaluate("() => document.getElementById('methodos-here').hidden && !document.querySelector('#methodos-here button')")
+            ok = (wide == {'here': False, 'words': 'This step is done', 'tracker': True, 'strip': False, 'open': False, 'after': True}
+                  and narrow == {'here': True, 'words': 'This step is done', 'tracker': False, 'strip': True, 'open': False, 'after': True}
+                  and t['steps'].get('columns') == 'done' and t['steps'].get('check') == 'current' and gone)
+            return ok, {'at 1440': wide, 'at 390': narrow, 'steps': t['steps'], 'no button at the check': gone}
+        finally: ctx.close()
+    attempt('Tracker: below 60rem "This step is done" is under the centre\'s title as well, the tracker\'s own folded in its strip, and pressing it does the step; at a desk\'s width only the tracker\'s is shown', narrow_button)
+    browser.close()
 
 # ---- Release a new version (src/engine/methodos/recipes/release-a-new-version.js; plan #34, item 10; Issue #23) ----
 # The workflow followed as a visitor follows it, on two small constructed files: the previous release (published, every

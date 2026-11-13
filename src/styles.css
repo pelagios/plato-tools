@@ -744,6 +744,9 @@ code.code-chip { font-family: var(--font-mono); font-size: .85em; padding: 0 .3e
 #files.folded > :not(.chosen-line) { display: none; }
 .more-lede { display: none; }
 .track-strip { display: none; }
+/* The step's own buttons under the centre's title (src/methodos/page.js, stepButtons): only below 60rem, where the
+   tracker's are inside its folded strip. */
+.step-actions { display: none; }
 /* In a workflow, one numbering: the page's own numbers are hidden, the centre's title is the step's. A run's
    Working and Result join step 2's panel, below a dashed line, as part of the step at hand. */
 body[data-workflow] main .step { display: none; }
@@ -819,6 +822,7 @@ body[data-workflow] #action:not([hidden]) + #progress:not([hidden]):has(+ #resul
   .methodos-tracker:not(.open) > :not(.track-strip, #methodos-said, .track-message.warn, .track-shared:not([hidden])) { display: none; }
   .methodos-tracker.open { max-height: 85vh; overflow-y: auto; }
   .methodos-tracker .track-where { display: none; }   /* the strip says it */
+  .workflow-head .step-actions:not([hidden]) { display: flex; margin-top: .6rem; }
   .track-strip { display: flex; width: 100%; align-items: baseline; gap: .5rem; padding: .35rem 0; border: 0; background: none; color: var(--fg); text-align: left; font-weight: 700; }
   .track-strip .strip-where { flex: 1; min-width: 0; }
   .track-strip .strip-mark { color: var(--accent); transition: transform .12s; }

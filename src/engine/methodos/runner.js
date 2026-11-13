@@ -125,18 +125,27 @@ export const forgettable = (state, key) => !!state.files?.[key] && !usedBy(state
 const upperFirst = (w) => w.charAt(0).toUpperCase() + w.slice(1);
 const lowerFirst = (w) => w.charAt(0).toLowerCase() + w.slice(1);
 
-/** The references each input of a step resolves to, from the files chosen and the steps done; an input from a skipped step is left out. */
-export function inputsOf(state, stepId) {
+/**
+ * The references each input of a step resolves to, from the files chosen and the steps done; an input from a skipped step is left out.
+ * Files chosen late and not chosen yet stop it, in words, unless `{ late: 'leave' }`, which leaves their input out: the step's
+ * other inputs (the dataset an earlier step made, which a match takes with the other dataset) can then be said, and offered,
+ * before the late files are chosen. A step is never taken with an input left out so: next() reads its inputs without it.
+ */
+export function inputsOf(state, stepId, { late = 'refuse' } = {}) {
+  if (late !== 'refuse' && late !== 'leave') no(`"${late}" is not a way to treat files not yet chosen: it is 'refuse' or 'leave'.`);
   const s = stepOf(state, stepId);
   const op = OPERATIONS[s.op];
   const inputs = {};
   for (const [slot, ref] of Object.entries(s.from)) {
-    let got;
+    let got, left = false;
     for (const a of alternatives(ref)) {
       if (a.startsWith('$')) {
         got = state.files[a.slice(1)]; if (got) break;
-        // Files chosen late, not chosen yet: the step waits for them, said in the recipe's words.
-        if (Object.hasOwn(state.late || {}, a.slice(1))) no(`The step ${titleOf(s)} cannot be done yet: ${lowerFirst(state.late[a.slice(1)])} is not chosen. Choose it at this step.`);
+        // Files chosen late, not chosen yet: the step waits for them, said in the recipe's words (or, if asked, their input is left out).
+        if (Object.hasOwn(state.late || {}, a.slice(1))) {
+          if (late === 'leave') { left = true; continue; }
+          no(`The step ${titleOf(s)} cannot be done yet: ${lowerFirst(state.late[a.slice(1)])} is not chosen. Choose it at this step.`);
+        }
         continue;
       }
       const [id, out] = a.split('.');
@@ -144,7 +153,7 @@ export function inputsOf(state, stepId) {
       if (p.state === 'done') { got = p.outputs[out]; break; }
       if (p.state !== 'skipped') no(`The step ${titleOf(s)} takes "${slot}" from ${titleOf(p)}, which is not done.`);
     }
-    if (got === undefined) { if (!op.takes[slot].optional) no(`The step ${titleOf(s)} has nothing for "${slot}": every step it could take it from was skipped.`); continue; }
+    if (got === undefined) { if (!left && !op.takes[slot].optional) no(`The step ${titleOf(s)} has nothing for "${slot}": every step it could take it from was skipped.`); continue; }
     inputs[slot] = checkHandoff(got, op.takes[slot].types, `"${slot}" of the step ${titleOf(s)}`);
   }
   return inputs;

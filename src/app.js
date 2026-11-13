@@ -1222,9 +1222,8 @@ methodos = mountMethodos({
     ready: () => whenReady,
     output: async (name) => (await (await (await navigator.storage.getDirectory()).getDirectoryHandle('outputs')).getFileHandle(name)).getFile(),
     mapping: () => (isTable(input) && columns && !columns.error ? columnOptions() : null),
-    // A matching of the columns kept as a step's result (columns.json), put back in the Columns panel as "Use a saved
-    // matching…" puts a file's: for a workflow taken up again after a reload, whose table is otherwise read by the guesses.
-    useMapping: (f) => loadMatching(f),
+    // The matching a workflow's step kept, shown again for the table chosen, as "Use a saved matching…" shows one: not while the file is still being looked at.
+    applyMapping: (m, name) => { if (!isTable(input) || state.phase === 'detecting') return false; requestColumns(m, name); return true; },
     review: () => (work ? { text: serialiseWork(work), name: workName } : null),
     reviewShown: () => !!work && !$('review').hidden,
     openWork: (f) => resume(f),

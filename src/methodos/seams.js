@@ -27,7 +27,8 @@ export function stepAt(state) {
 export function currentInput(state, s = stepAt(state)) {
   const slot = s && (MAIN[s.op] || SHOWN[s.op]);
   if (!slot) return null;
-  try { return runner.inputsOf(state, s.id)[slot] || null; } catch { return null; }
+  // Without the files chosen at the step (a match's other dataset, not chosen yet): the dataset the match takes is chosen again all the same.
+  try { return runner.inputsOf(state, s.id, { late: 'leave' })[slot] || null; } catch { return null; }
 }
 
 /** The user's own files: those the workflow began with (step 1's), and any chosen at a step (a match's other dataset), as references. */

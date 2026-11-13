@@ -179,6 +179,30 @@ test('the interview: a table of places, and a match of two datasets, leads to th
 });
 
 // ---- the other dataset, chosen late --------------------------------------------------------------------------
+// Found 13 November 2026: at the match, with the other dataset not yet chosen, the page could not say which dataset
+// the match takes (the one the step before made, held only by the browser), so never offered it, and the step could
+// not be passed without a file the user was never told to save.
+test('at the match, before the other dataset is chosen, the dataset the match takes can be read (the late files left out), and is the file to choose again; the step is never taken so', async () => {
+  const { currentInput } = await import('../src/methodos/seams.js');
+  let s = runner.start(M, ANSWERS, { files: await refsOf([TABLE()], 'files') });
+  const give = (w) => runner.complete(w, w.current, Object.fromEntries(Object.entries(OPERATIONS[w.steps.find((x) => x.id === w.current).op].gives).map(([k, t]) => [k, [{ type: t, name: `${k}.json`, size: 1, sha256: 'a'.repeat(64) }]])));
+  for (const id of ['columns', 'check', 'dataset']) { s = runner.next(s); assert.equal(s.current, id); s = give(s); }
+  const made = s.steps.find((x) => x.id === 'dataset').outputs.dataset;
+  assert.equal(made.length, 1);
+  // As it was, and still is unless asked: refused, naming what the step waits for.
+  assert.throws(() => runner.inputsOf(s, 'match'), /the other dataset is not chosen/);
+  // Asked to leave the late files out: the dataset alone, with no slot for the other; and nothing at all for a step that takes only them.
+  assert.deepEqual(runner.inputsOf(s, 'match', { late: 'leave' }), { subjects: made });
+  assert.deepEqual(runner.inputsOf(s, 'check-other', { late: 'leave' }), {});
+  assert.deepEqual(currentInput(s), made, 'the file chosen again when the page starts again at the match');
+  // The step itself is not taken without the other dataset, and no other word is a way to treat it.
+  assert.throws(() => runner.next(s), /the other dataset is not chosen/);
+  assert.throws(() => runner.inputsOf(s, 'match', { late: 'skip' }), /^TransitionError: "skip" is not a way to treat files not yet chosen/);
+  // A step before it that is not done still stops it, late files left out or not (the presence: only the late files are excused).
+  const back = runner.invalidate(s, 'dataset');
+  assert.throws(() => runner.inputsOf(back, 'match', { late: 'leave' }), /which is not done/);
+});
+
 test('the other dataset is chosen at the match: the workflow begins without it, the match is refused in words until it is chosen, and it is kept by its hash from then on', async () => {
   const table = await refsOf([TABLE()], 'files'), others = await refsOf([OTHERS()], 'files'), changed = await refsOf([OTHERS({ ...otherDoc(), spatialEntities: otherDoc().spatialEntities.slice(1) })], 'files');
   let s = runner.start(M, ANSWERS, { files: table });

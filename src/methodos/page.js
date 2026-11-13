@@ -39,6 +39,10 @@ function problemOf(r) {
   return { words: items.slice(0, 3).map((i) => i.message).join(' ') || 'The data could not be read to the end, so nothing was written.', errors };
 }
 
+// Agora's parts, each in the words of its entry in the page's list beside "Prepare" (index.html, #part): what began()
+// says when a run prepared another part than the step's. The browser checks read the two together.
+const PARTS = { 'publish.report': 'Report on its description, and write the deposit metadata', 'publish.mint': 'Give every attestation a permanent address',
+  'publish.site': 'Make a website for GitHub Pages', 'publish.w3id': 'Write the w3id redirect rules' };
 // Each operation's tool on this page: the key of #tool=<key> (src/app.js, TOOLS), or null where the
 // step is done elsewhere (Hermes's columns, at the drop zone; Chora, on the map, at #chora).
 const PAGE_TOOL = {
@@ -52,6 +56,11 @@ const TOOL_LINKS = {
   publish: ['Agora', '#tool=publish', 'prepare it for publishing'], match: ['Krisis', '#tool=match', 'match it with another dataset, or a gazetteer'],
   chora: ['Chora', '#chora', 'see it on the map, and draw places'],
 };
+// The steps that ask the World Historical Gazetteer, which answers only queries that carry an account's token; its site; and
+// the example files the page offers in step 1 (index.html, #try-files: the browser checks read the two addresses together).
+const WHG_STEPS = new Set(['lookup', 'lookup.levels']);
+const WHG_SITE = 'https://whgazetteer.org/';
+const EXAMPLES = './try/plato-tools-try-files.zip';
 /**
  * One step of a list, as a row: a disabled checkbox (ticked when done, marked when current: layout.js,
  * stepMark), labelled by the step, whose state is also said in words, visually hidden, for a screen reader.
@@ -104,6 +113,8 @@ function stepList(list, steps, at, done, notes = []) {
  *   pick()           open step 1's file picker;           output(name)   a File the last run wrote;
  *   ready()          a promise, settled when the engine is ready for a file;
  *   mapping()        the matching of columns shown, or null;
+ *   applyMapping(m, name)  show the matching `m` (as mapping() gave it, kept under `name`) for the table chosen, as a saved
+ *                    matching loaded is; false when the file chosen is not a table, or is not recognised yet;
  *   review()         the review open, as { text, name }, or null;   reviewShown()  whether it is on the page;
  *   openWork(file)   open a Krisis work file, as "Resume a review" does;  pickWork()  choose one;
  *   ownTarget()      the format of the files chosen, as a conversion's target key, or null;
@@ -214,7 +225,15 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
         const a = el('a', { href, textContent: name }); a.dataset.methodosTool = k;
         ul.append(el('li', {}, a, `: ${act}`));
       }
-      planEl.append(ul, el('p', { className: 'feedback-line' }, fb, ': a new issue on GitHub, where a workflow for it can be asked for.'));
+      planEl.append(ul);
+      // "Nothing yet": two ways to begin at once, with files that are not theirs, or with a few names typed.
+      if (picked('methodos-have') === 'nothing') {
+        const zip = el('a', { id: 'methodos-try', href: EXAMPLES, download: '', textContent: 'download the example files' });
+        const paste = el('button', { type: 'button', id: 'methodos-paste', className: 'link', textContent: 'paste a list of place names' });
+        planEl.append(el('p', { className: 'track-note track-nothing' }, 'Nothing to hand? To try the tools at once, ', zip,
+          ' (a zip, with what each should show), or ', paste, ', one name on each line. With either, answer “A list of place names” to the first question, and follow the workflow it leads to.'));
+      }
+      planEl.append(el('p', { className: 'feedback-line' }, fb, ': a new issue on GitHub, where a workflow for it can be asked for.'));
       planEl.hidden = false; return;
     }
     const recipe = RECIPES[choice.recipe];
@@ -235,6 +254,15 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     if (p.cannot.length) planEl.append(el('p', { className: 'track-left', textContent: 'What it cannot carry from your files:' }), el('ul', { className: 'track-note track-cannot' }, ...cannotItems(p.cannot)));
     // What is to be known before it is followed (the recipe's `before`, under these answers): a gazetteer's daily cap.
     for (const w of p.before) planEl.append(el('p', { className: 'track-note track-before', textContent: w }));
+    // A workflow that looks places up in the World Historical Gazetteer needs an account there, and its token: said here,
+    // before it is followed, not first at the lookup, three steps in. In the page's words, not the recipe's: a recipe's
+    // words are in its digest (recipe.js), and changing them would stop every workflow under way as "changed".
+    if (runs(p).some((s) => WHG_STEPS.has(s.op))) {
+      const a = el('a', { href: WHG_SITE, target: '_blank', rel: 'noopener noreferrer', textContent: 'whgazetteer.org' });
+      a.append(el('span', { className: 'visually-hidden', textContent: ' (opens in a new tab)' }));
+      planEl.append(el('p', { className: 'track-note track-before track-needs-whg' }, 'Looking the places up needs an account with the World Historical Gazetteer, and its token: the account is free, at ', a,
+        ', and the token is on your profile there. The steps before the lookup need neither, and nothing is sent to the gazetteer until you allow it.'));
+    }
     startB.textContent = `Follow “${p.title}”`; startB.hidden = false;
     planEl.hidden = false;
   }
@@ -255,6 +283,12 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   // A tool named meanwhile is chosen as its card chooses it (src/app.js: step 2 narrowed, focus on step 1);
   // Chora's is a link to #chora, which opens the map (src/app.js, openChora).
   planEl.addEventListener('click', (e) => {
+    // "paste a list of place names": the box under the drop zone (index.html, #paste), opened, the focus in it.
+    if (e.target.closest('#methodos-paste')) {
+      const box = document.getElementById('paste');
+      if (box) { box.open = true; box.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'center' }); box.querySelector('textarea')?.focus({ preventScroll: true }); }
+      return;
+    }
     const a = e.target.closest('a[data-methodos-tool]');
     if (!a || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;
     const card = tools.querySelector(`.tool-link[data-tool="${a.dataset.methodosTool}"]`);
@@ -374,11 +408,16 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   /** The step the workflow is at: the one running or waiting, else the one that stopped, failed or was cancelled, else the next to do. */
   const atStep = (state = wf) => stepAt(state);
   const followed = (state) => state.steps.filter((s) => s.state !== 'skipped');
-  /** The references the step at hand takes from the files chosen in step 1 (its main input), or null; throws in words if an earlier step is not done. */
+  /**
+   * The references the step at hand takes from the files chosen in step 1 (its main input), or null; throws in words if an
+   * earlier step is not done. Worked out without the files chosen at the step itself (a match's other dataset, not chosen
+   * yet: runner.inputsOf, late 'leave'), so that the dataset the match takes, which an earlier step made and only this
+   * browser holds, is offered ("Use …") and chosen again before the other one is.
+   */
   function mainInput(state, s) {
     const slot = MAIN[s.op];
     if (!slot) return null;
-    return runner.inputsOf(state, s.id)[slot] || null;
+    return runner.inputsOf(state, s.id, { late: 'leave' })[slot] || null;
   }
   async function keep() {
     if (!wf || !atBoundary(wf)) return;
@@ -400,6 +439,11 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       // sent while a finishing runs) is not, and must not make the first one's end go unheard.
       if (active || !wf || changed) return;
       const s = atStep();
+      // Agora's "Prepare" run on another part than the step's (its list, beside the button, left where it was): said, in
+      // the list's own words, as a run on other files is; never dropped without a word.
+      if (s && PARTS[s.op] && PARTS[run.op] && s.op !== run.op) {
+        say(`This run is not counted as the step “${s.title}”: it prepared another part, “${PARTS[run.op]}”. Choose “${PARTS[s.op]}” in the list beside “Prepare”, and press Prepare again.`, true); render(false); return;
+      }
       if (!s || runOf(s.op) !== run.op || OPERATIONS[s.op].kind !== 'automatic') return;
       let w = ['stopped', 'failed', 'cancelled'].includes(s.state) ? runner.invalidate(wf, s.id) : wf;
       // The files chosen at this step (the other dataset of a match, chosen in Krisis's "Match with another
@@ -511,6 +555,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       if (!files.length) return;
       if (handleFile && files[0] !== handleFile) { handle = null; handleFile = null; }
       chosenRefs = await refsOf(files, 'files');
+      matchingDue = true;   // once they are recognised (detected()), a matching of columns a step kept for them is shown again
       if (pending && !wf && fileKey(RECIPES[pending.key])) {
         const recipe = RECIPES[pending.key];
         // Its Scope, if one was given before the file (src/engine/krisis/scope.js), goes into the record.
@@ -554,6 +599,32 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     showKept();
   }
   let ownMissed = [];   // the user's own files that could not be kept in this browser, and why
+
+  /**
+   * The table chosen again (after a reload, or by hand) once its columns' step is done: the matching that step kept
+   * (columns.json, its result: resultOf) is put back in the Columns panel, as "Use a saved matching…" would, where the
+   * page would otherwise show its guesses afresh and the steps after it run on them without a word (found 13 November
+   * 2026: a reload made another dataset than the one the user specified). Once for each choice of the file, when it is
+   * recognised; said in the tracker. Where the matching is no longer held (working data not kept, and the tab reloaded),
+   * that is said instead, as a warning: the columns shown are then guesses, and a run takes the matching shown.
+   */
+  let matchingDue = false;
+  async function restoreMatching() {
+    if (!matchingDue || !wf || changed || viewing) return;
+    const made = wf.steps.find((x) => x.op === 'read.columns' && x.state === 'done');
+    let table = null;
+    try { table = made ? runner.inputsOf(wf, made.id).files : null; } catch { table = null; }
+    if (!table || !sameRefs(table, chosenRefs)) return;
+    const [ref] = made.outputs?.mapping || [];
+    let kept;
+    try { const f = ref && (heldFor(ref) || await outs.get(ref)); kept = f ? JSON.parse(await f.text()) : undefined; } catch { kept = undefined; }
+    const lost = `The matching of columns made at the step “${made.title}” is no longer held in this browser, so the columns shown are guessed afresh: put them right in the Columns panel before a step is run, as a run takes the matching shown.`;
+    if (!kept || typeof kept !== 'object' || Array.isArray(kept)) { matchingDue = false; say([note?.words, lost].filter(Boolean).join(' '), true); return; }
+    // Not yet (the file is still being looked at): tried again when it is recognised. Never, for a file that is no table.
+    if (!page.applyMapping?.(kept, ref.name)) return;
+    matchingDue = false;
+    say([note?.words, `The columns are matched as you left them at the step “${made.title}” (${ref.name}, kept with the workflow), not guessed afresh.`].filter(Boolean).join(' '), !!note?.warn);
+  }
 
   /**
    * A workflow let go (Leave, or another followed): the user's own file it holds goes on being kept, as
@@ -712,6 +783,22 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     if (!atStep()) q(tracker, '#methodos-leave').focus();
   }));
   const leaveB = q(tracker, '#methodos-leave'), keptEl = q(tracker, '#methodos-kept'), clearB = q(tracker, '#methodos-clear-kept');
+  // Below 60rem the tracker is a strip, folded, and its buttons are inside it: the step's own buttons ("This step is done",
+  // "Choose the file", "Use …", "Download …", "Open the review …") are shown under the centre's title as well (styles.css,
+  // .step-actions: at that width only), each pressing the tracker's own, so that there is one of each to keep right.
+  // "Open Chora" is there already, in the step's words (#for-tool).
+  const head = document.getElementById('workflow-head');
+  const hereEl = el('p', { id: 'methodos-here', className: 'methodos-buttons step-actions', hidden: true });
+  head?.append(hereEl);
+  hereEl.addEventListener('click', (e) => { const b = e.target.closest('button[data-presses]'); if (b) q(tracker, `#${CSS.escape(b.dataset.presses)}`)?.click(); });
+  function stepButtons() {
+    const focused = hereEl.contains(document.activeElement) ? document.activeElement.dataset.presses : null;
+    const now = tracker.hidden ? [] : [pickB, useB, downloadB, reviewB, asIsB, doneB].filter((b) => !b.hidden);
+    hereEl.replaceChildren(...now.flatMap((b) => { const c = el('button', { type: 'button', className: b.className, textContent: b.textContent }); c.dataset.presses = b.id; return [c, ' ']; }));
+    hereEl.hidden = !now.length;
+    if (head && head.lastElementChild !== hereEl) head.append(hereEl);   // after the step's words, which the host puts there
+    if (focused) hereEl.querySelector(`[data-presses="${CSS.escape(focused)}"]`)?.focus();
+  }
   /** What of the workflow's files this browser keeps (the user's own and the steps'), said beside a way to clear it; or that nothing is kept. */
   let keptAsked = 0;
   function showKept() {
@@ -888,7 +975,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     // A workflow shared from WHG (viewShared) is shown in place of this browser's own, read-only, until closed or copied.
     const shown = viewing ? viewing.read.record : wf || changed?.record;
     const own = viewing ? null : changed;   // what the version rule said of this browser's own workflow, if it is shown
-    if (!pending && !shown) { tracker.hidden = true; delete tracker.dataset.status; closeStrip(); stripAt = null; onStep(null); sharedEl.hidden = true; return; }
+    if (!pending && !shown) { tracker.hidden = true; delete tracker.dataset.status; closeStrip(); stripAt = null; onStep(null); sharedEl.hidden = true; stepButtons(); return; }
     tracker.hidden = false;
     let steps, at, rows;
     if (!shown) {
@@ -987,6 +1074,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     }
     showKept();
     projectShow();
+    stepButtons();
     // Focus on the tracker's heading, or, at a phone's width, where the heading is not shown, on its strip.
     if (focus) show(strip.offsetParent ? strip : q(tracker, 'h2'));
   }
@@ -1084,7 +1172,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     return true;
   }
   // The files chosen are recognised (their format known): what the step at hand offers may change with it.
-  const detected = () => chain(async () => { if (wf) render(false); });
+  const detected = () => chain(async () => { if (wf) { await restoreMatching(); render(false); } });
   // following(): a workflow is followed, begun or about to begin with the files chosen (pending): what is
   // chosen is the workflow's, so the main page does not choose its kept file over it on a return (src/app.js, keptAtStart).
   // takenUp(): settled once a workflow kept from before is taken up (and its file chosen again), or found to be none.
