@@ -56,8 +56,11 @@ function differences(doc) {
   if (doc.dataSets?.length !== 1) out.push(`${doc.dataSets?.length} data sets`);
   else {
     for (const k of ['title', 'description']) if (gotSet[k] !== wantSet[k]) out.push(`data set ${k}: ${gotSet[k]}`);
-    // The structure: the same components in the same order (the addresses are the example's, the base being the same).
-    if (JSON.stringify(gotSet.structure.components) !== JSON.stringify(wantSet.structure.components)) out.push(`structure ${JSON.stringify(gotSet.structure.components)}`);
+    // The structure: the same components in the same order (the addresses are the example's, the base being the same),
+    // but for the date. The example declares sdmx-dimension:refPeriod; the reader leaves that to the cube export,
+    // which alone knows, once every row is read, whether every figure has a year or a day (the test of periods below).
+    const REF_PERIOD = 'http://purl.org/linked-data/sdmx/2009/dimension#refPeriod';
+    if (JSON.stringify(gotSet.structure.components) !== JSON.stringify(wantSet.structure.components.filter((c) => c.dimension !== REF_PERIOD))) out.push(`structure ${JSON.stringify(gotSet.structure.components)}`);
     if (gotSet.isPartOf !== doc.spatialEntities[0].attestations[0].citations[0].source['@id']) out.push('the data set is not part of the source the figures cite');
   }
   const ts = doc.spatialEntities[0].attestations.flatMap((a) => a.timespans || []);
@@ -252,11 +255,14 @@ test('the periods of a table, and the share with a place on the cube\'s time axi
   assert.equal(item(r, 'figures-period-invalid').count, 1); assert.match(item(r, 'figures-period-invalid').examples[0], /row 5, column "Period": circa 1850/);
   assert.equal(item(r, 'figures-period-span').count, 1);
   assert.equal(item(r, 'figures-no-period').count, 1);
-  // On the cube: two of the five have a year or a day for refPeriod; the others fail IC-11 over a structure that declares it.
+  // On the cube: two of the five have a year or a day for refPeriod, so the structure does not declare
+  // it (the export declares it only where every figure has one), and IC-11 has nothing to fail.
   const c = await go([csv('period-forms.csv')], 'convert', 'ntriples', { columns: m, base: BASE, cube: true });
   const nt = outText(c.e, 'period-forms.nt');
   assert.equal(nt.split('\n').filter((l) => /dimension#refPeriod> "/.test(l)).length, 2);
-  assert.deepEqual(integrity(nt).find((x) => x.ic === 'IC-11').violations.length, 3);
+  assert.ok(!/cube#dimension> <[^>]*dimension#refPeriod>/.test(nt), 'refPeriod is not declared');
+  assert.equal(item(c, 'cube-period-partial').count, 1);
+  assert.deepEqual(integrity(nt).find((x) => x.ic === 'IC-11').violations.length, 0);
 });
 test('a period every figure shares is given once in the table\'s description; start and end columns work as for places', async () => {
   const m = { columns: { Id: 'id', Place: 'name', Persons: { field: 'value', measure: 'persons' } }, table: { period: '1851-03-30' } };

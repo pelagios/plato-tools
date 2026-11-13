@@ -152,6 +152,16 @@ the commit of PLATO the tools are checked against is pinned in `package.json`.
   return; a lookup preview made before the dataset's language was refused
   never covers the refusal; a header's problems reported once when the input
   is read through the store; a digest taken two to five times faster.
+- Command line: a conversion whose output would replace one of its own
+  inputs is refused, with or without `--overwrite` (it emptied the input and
+  then removed it); `--out` with a new folder of one character no longer
+  runs for ever; `revise --date 2026-10-17`, a plain date, is taken as the
+  start of that day instead of failing the schema; the help names
+  `--clusters` for `preview` and all five roles of a table of figures.
+- A table of figures whose periods are spans (1851-1861), or some of them
+  blank, no longer declares `sdmx-dimension:refPeriod` in its structure and
+  then fails IC-11: the cube export declares it where every figure has a
+  year or a day, as its report says.
 
 ## [0.9.0-alpha.2] - 2026-10-04
 

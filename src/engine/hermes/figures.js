@@ -49,7 +49,7 @@ import { LOSS_TEXT } from '../report.js';
 import { tableIds } from '../../formats/tables.js';
 import { sha256 } from '../../lib/sha256.js';
 import { iri, literal, tripleNT } from '../../lib/ntriples.js';
-import { REF_AREA, REF_PERIOD, OBS_STATUS, SDMX_ATTRIBUTE, QB } from '../../formats/cube.js';
+import { REF_AREA, OBS_STATUS, SDMX_ATTRIBUTE, QB } from '../../formats/cube.js';
 import { RDF } from '../../lib/context.js';
 
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -264,7 +264,6 @@ export async function* figuresSource(input, rep, options = {}, defaultBase = 'ht
   for (const d of allDims) { const s = dimSlug.get(d); if (dimTaken.has(s) && dimTaken.get(s) !== d) faults.push(`the dimensions "${dimTaken.get(s)}" and "${d}" would have one address`); dimTaken.set(s, d); }
   for (const d of Object.keys(table.dimensions || {})) if (!allDims.includes(d)) report('figures-mapping-table', `the table describes a dimension "${d}", which no column or coordinate gives`);
   const dimIri = (d) => dimension(d).iri || `${b}dim/${dimSlug.get(d)}`;
-  const hasPeriod = !!(periodCol || table.period || (fields.includes('start') && fields.includes('end')));
   const stem = file.name.replace(/\.gz$/i, '').replace(/\.[^.]+$/, '');
   const tableSlug = slug(table.id || table.title || stem) || 'table';
   const several = measures.size > 1;
@@ -276,9 +275,12 @@ export async function* figuresSource(input, rep, options = {}, defaultBase = 'ht
     title: sourceTitle, authorityType: 'source', ...(isWeb(sourceTitle) ? { uri: sourceTitle.trim() } : {}),
   };
   const title = table.title || `Figures in ${file.name}`;
+  // The date is not declared here. A period column may hold spans (1851-1861) or blanks, which have no
+  // place on the cube's time axis, and a dimension declared must have a value on every figure (IC-11).
+  // The cube export declares sdmx-dimension:refPeriod itself, where every figure of the table has one.
   const dataSets = [...measures.values()].map((m) => ({
     '@id': m.iri, title: several ? `${title}: ${m.label}` : title, ...(table.description ? { description: table.description } : {}), isPartOf: source['@id'],
-    structure: { '@id': `${m.iri}/structure`, components: [{ dimension: REF_AREA }, ...(hasPeriod ? [{ dimension: REF_PERIOD }] : []), ...m.dims.map((d) => ({ dimension: dimIri(d) })), { measure: measureIri(m) },
+    structure: { '@id': `${m.iri}/structure`, components: [{ dimension: REF_AREA }, ...m.dims.map((d) => ({ dimension: dimIri(d) })), { measure: measureIri(m) },
       // An attribute outside SDMX's namespace is declared, or reading the figures back would take it for a dimension.
       ...attrNames.map(attrIri).filter((i) => !i.startsWith(SDMX_ATTRIBUTE)).map((i) => ({ attribute: i }))] },
   }));

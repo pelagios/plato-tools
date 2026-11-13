@@ -366,7 +366,8 @@ a second file; totals only where marked; plain numbers only) are the design.
   entries) and `table` (as given). The reader's routing is `readsFigures(options.columns)` in
   `sourceFor` (`pipeline.js`): a table is one only when its mapping has a figure role, never from a guess.
 - **Events.** A header with `dataSets` (a data set for each measure: `<base>table/<slug>[-<measure>]`,
-  its structure `refArea`, `refPeriod` when a period is mapped, the dimensions, the measure); an
+  its structure `refArea`, the dimensions, the measure; never `refPeriod`, which the cube export declares
+  where every figure has a year or a day, since a period column may hold spans or blanks); an
   `attestation` for each row, about its place; a `record` (`newEntity`) for each place that is not a
   web address the row gave; last, a `codes` event the pipeline keeps and writes as `NAME.codes.nt`
   (`codesToNTriples`) for `plato-json`, `plato-jsonl` and `ntriples` conversions. The attestation-centric

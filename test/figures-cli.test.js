@@ -31,11 +31,40 @@ test('convert --columns with figures --to ntriples --cube writes the cube, and d
   assert.match(d.out, /IC-11 {2}passes, 20 evaluated/);
   assert.match(d.out, /IC-12 {2}passes, 5 evaluated/);
 });
+test('periods that are spans, or a mixture, are not declared as the cube\'s date: the cube is well formed, and the report says so truly', () => {
+  // County=name, Year=period, Occupation=dimension, Persons=value. A dimension declared must have a
+  // value on every figure (IC-11), and a span (1851-1861) or a blank has no place on the time axis.
+  const dir = scratch(), columns = join(dir, 'columns.json');
+  writeFileSync(columns, JSON.stringify({ columns: { County: 'name', Year: 'period', Occupation: { field: 'dimension', dimension: 'occupation' }, Persons: { field: 'value', measure: 'persons' } } }));
+  const declared = (nt) => nt.split('\n').filter((l) => /cube#dimension> <[^>]*dimension#refPeriod>/.test(l)).length;
+  const table = (name, rows) => {
+    writeFileSync(join(dir, `${name}.csv`), 'County,Year,Occupation,Persons\n' + rows.join('\n') + '\n');
+    const c = cli('convert', '--to', 'ntriples', '--cube', '--base', 'https://example.org/c/', '--columns', columns, '--out', dir, join(dir, `${name}.csv`));
+    assert.equal(c.code, 0, c.out + c.err);
+    const d = cli('datacube', '--codes', join(dir, `${name}.codes.nt`), join(dir, `${name}.nt`));
+    return { c, d, nt: readFileSync(join(dir, `${name}.nt`), 'utf8') };
+  };
+  const span = table('span', ['Kent,1851-1861,Farmer,100', 'Kent,1851-1861,Miner,7', 'Surrey,1851-1861,Farmer,5']);
+  assert.equal(declared(span.nt), 0, 'no figure has a year or a day, so refPeriod is not declared');
+  assert.equal(span.d.code, 0, span.d.out);
+  assert.match(span.d.out, /IC-11 {2}passes, 6 evaluated/);
+  const mixed = table('mixed', ['Kent,1851,Farmer,100', 'Kent,1851,Miner,7', 'Surrey,1851-61,Farmer,5', 'Sussex,,Farmer,9']);
+  assert.equal(declared(mixed.nt), 0, 'some figures have no year or day, so refPeriod is not declared');
+  assert.match(mixed.c.out.replace(/\s+/g, ' '), /so sdmx-dimension:refPeriod is not declared in its structure/);
+  // The integrity constraints pass. (The figures' own P-3 still names the two figures that have a year, a
+  // date the table does not declare, which is true of them; so the exit status is not asked for here.)
+  assert.match(mixed.d.out, /IC-11 {2}passes, 8 evaluated/); assert.match(mixed.d.out, /IC-12 {2}passes, 4 evaluated/);
+  // Control: where every figure has a year the export declares it, and the checks count it.
+  const years = table('years', ['Kent,1851,Farmer,100', 'Kent,1861,Farmer,7', 'Surrey,1851,Farmer,5']);
+  assert.equal(declared(years.nt), 1);
+  assert.equal(years.d.code, 0, years.d.out);
+  assert.match(years.d.out, /IC-11 {2}passes, 9 evaluated/);
+});
 test('the report says what became of every cell, in the summary, beside the places and attestations', () => {
   const out = scratch();
   const c = cli('convert', '--to', 'plato-json', '--columns', COLUMNS, '--base', BASE, '--out', out, TABLE);
   assert.equal(c.code, 0, c.out);
-  assert.match(c.out, /Read 5 rows, 1 place, 5 attestations, 127 triples\. 5 cells of figures: 4 figures, 1 printed dash, 0 blank, 0 left out\./);
+  assert.match(c.out, /Read 5 rows, 1 place, 5 attestations, 125 triples\. 5 cells of figures: 4 figures, 1 printed dash, 0 blank, 0 left out\./);
   assert.match(c.out, /the total looked for, has no figure for occupation Miner/);
   assert.match(c.out, /Warnings\./);
 });
