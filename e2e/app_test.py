@@ -476,7 +476,7 @@ def within_checks(page, tmp):
     doc = reading_doc(page, r, tmp, 'split.json')
     p0 = (doc.get('spatialEntities') or [{}])[0]
     check('column table: "split into levels" shows its controls only once chosen; with the first part the name and levels 2, 1 the place is Rotherhithe within England > Surrey',
-          d1 and row(d1, 'Place').get('split') is None and row(d1, 'Place').get('field') == 'note'
+          d1 and row(d1, 'Place').get('split') is None and row(d1, 'Place').get('field') == 'name'   # "Place" is read as the name (columns.js, WEAK_NAME)
           and d2 and row(d2, 'Place').get('split') == {'separator': ', ', 'levels': '3, 2, 1', 'name': False, 'nameLabel': "The first part is the place's name"}
           and done is True and st.get('splits', {}).get('Place') == {'separator': ', ', 'levels': [2, 1], 'firstIsName': True}
           and r.get('phase') == 'done' and p0.get('label') == 'Rotherhithe'
