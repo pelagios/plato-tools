@@ -24,7 +24,8 @@ jobs:
   # Which browser runs this push needs. Both, always: the proof became cheap enough (4 October 2026) to
   # run on every branch. Kept as a job so that a run can be narrowed here again if ever it must.
   plan:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest is now Ubuntu 26.04, which Playwright 1.59 refuses; upgrading to Playwright 1.62 or later lifts the pin.
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       modes: ${{ steps.modes.outputs.modes }}
@@ -35,7 +36,8 @@ jobs:
           echo 'modes=["e2e","prove-it-fails"]' >> "$GITHUB_OUTPUT"
 
   unit:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest is now Ubuntu 26.04, which Playwright 1.59 refuses; upgrading to Playwright 1.62 or later lifts the pin.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -88,7 +90,8 @@ jobs:
   e2e:
     name: ${{ matrix.mode }}
     needs: plan
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest is now Ubuntu 26.04, which Playwright 1.59 refuses; upgrading to Playwright 1.62 or later lifts the pin.
+    runs-on: ubuntu-24.04
     timeout-minutes: ${{ matrix.mode == 'prove-it-fails' && 20 || 45 }}
     strategy:
       fail-fast: false
@@ -162,7 +165,8 @@ jobs:
   same-checks:
     needs: [plan, e2e]
     if: ${{ always() && contains(needs.plan.outputs.modes, 'prove-it-fails') }}
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest is now Ubuntu 26.04, which Playwright 1.59 refuses; upgrading to Playwright 1.62 or later lifts the pin.
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/download-artifact@v4
