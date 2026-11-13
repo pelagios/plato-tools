@@ -388,7 +388,9 @@ self.onmessage = async ({ data }) => {
       const subjects = await detect(data.subjects);
       // Not recognised, or recognised and refused with its reason (a IIIF Georeference Annotation): readable(), as for every other command.
       if (!readable(subjects)) { postMessage({ type: 'places', subjects: null, places: null, reason: subjects.reason }); return; }
-      const { env, tidy } = await runEnv();
+      // It writes nothing, and is asked for by the lookup's panel as it opens (by itself, at a workflow's lookup step): the
+      // outputs of the run before are left where they are, or its "Save …" buttons, still on the page, would find nothing.
+      const { env, tidy } = await runEnv({ clearOutputs: false });
       let result;
       try { result = await gather({ subjects, options: data.options || {} }, env); } finally { tidy(); }
       // Krisis: region review. The regions the places lie in, for the page to seed its work file with (regions.js seedRegions).

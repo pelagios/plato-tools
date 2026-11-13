@@ -758,6 +758,25 @@ export const POOL_BUSY = 'Another tab of PLATO tools in this browser is working 
 export const CANCEL_RELEASING = "The cancelled run's files are still being released; try again in a moment.";
 /** This tab could not let go of the working files it was granted in part (worker.js, letGo). */
 export const POOL_STUCK = 'PLATO tools could not free its storage in this tab. Reload the page and try again.';
+/**
+ * The browser refuses the page its private file storage (navigator.storage.getDirectory(), which every run
+ * writes its working files to: src/engine/worker.js): Firefox in a private window, and any browser without
+ * it. Said by the main page as it loads, in place of the run buttons, and by Chora; the browser's own
+ * words name an API, not a remedy.
+ */
+export const NO_STORAGE = 'This browser window does not let the page keep working files, so the tools cannot run here: use an ordinary window, not a private one.';
+/** Whether an error's words are that refusal: Firefox's, SQLite's (no storage at all), and a browser's for a `navigator.storage` that is not there. */
+export const storageRefused = (message) =>
+  /Security error when calling GetDirectory|Missing required OPFS APIs|navigator\.storage|reading 'getDirectory'|Storage directory access is denied/.test(String(message ?? ''));
+/** The engine's own files (its script, SQLite's WebAssembly, PLATO's schemas, all from this site) did not arrive: the connection, not the data. Nothing is stuck. */
+export const NOT_DOWNLOADED = 'The tools could not be downloaded: check the connection and press the button again.';
+/**
+ * Whether an error's words are a failed download of those files: SQLite's abort when its WebAssembly does
+ * not arrive ("Aborted(NetworkError: … Failed to load '…/sqlite3-….wasm'.). Build with -sASSERTIONS for more
+ * info."), a module that could not be fetched, and each browser's words for a fetch that got no answer.
+ */
+export const downloadFailed = (message) =>
+  /\.wasm\b.*(Failed to load|failed|NetworkError)|(Failed to load|failed to asynchronously prepare|NetworkError)[^\n]*\.wasm\b|both async and sync fetching of the wasm failed|dynamically imported module|Importing a module script failed|NetworkError when attempting to fetch resource|^(TypeError: )?(Failed to fetch|Load failed)\.?$/i.test(String(message ?? '').trim());
 /** How a drawing traced from a historical map was made; it follows georefNote's fixed template, after it (src/engine/chora/trace.js). */
 export const choraTracingNote = ({ zoom } = {}) =>
   `Traced by hand from a georeferenced historical map${Number.isFinite(zoom) ? ` at zoom ${Math.round(zoom)}` : ''} in PLATO tools (Chora).`;

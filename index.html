@@ -128,6 +128,9 @@
   <!-- Scope's editor, in the centre column (the area drawn needs the width): while it is open the rest of the centre is
        hidden (body.scope-editing), and Done goes back to the step. Filled by src/scope-page.js. -->
   <section id="scope-editor" class="scope-editor" aria-labelledby="scope-editor-h" hidden></section>
+  <!-- The browser refuses the page its file storage, so nothing can run (a Firefox private window), said as the page loads; or, once a
+       file is chosen, allows it too little for that file (src/app.js, storageProbe and storageCheck). Above step 1, where it is seen first. -->
+  <p id="storage-warning" class="warn" role="status" hidden></p>
   <section id="files" aria-labelledby="files-h">
     <h2 id="files-h" tabindex="-1"><span class="step">1</span> Choose your data</h2>
     <p id="for-tool" class="for-tool" hidden></p>
@@ -229,7 +232,8 @@
     </div>
     <!-- Krisis: gazetteer lookup (online, optional). Runs on the page's thread (src/app.js), never in the worker. -->
     <details id="lookup" class="lookup" data-tools="match">
-      <summary>Look up in a gazetteer (online, optional)</summary>
+      <!-- "(online, optional)" is not said while a workflow's step is the lookup itself (src/app.js, LOOKUP_STEPS). -->
+      <summary>Look up in a gazetteer <span id="lookup-optional">(online, optional)</span></summary>
       <p class="lookup-how">What is found is added to the review below, if one is open, for you to decide on as any other match; otherwise a new review begins. Nothing is accepted for you.</p>
       <fieldset class="lookup-service">
         <legend>Service</legend>
@@ -466,8 +470,6 @@
       </fieldset>
     </div>
   </section>
-
-  <p id="storage-warning" class="warn" hidden></p>
 
   <!-- The tools, after the steps, so that step 2 follows step 1, in groups under plain headings (docs/plans/methodos.md, 11.2): Methodos first and Peripleo last, both planned and not links: choosing one narrows step 2 to what it does (src/app.js, #tool=…); Chora's opens the map in the centre (#chora). -->
   <nav id="toolbox" class="tools-bare" aria-labelledby="tools-h">

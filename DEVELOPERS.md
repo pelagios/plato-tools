@@ -3007,7 +3007,12 @@ same work file as a local match, for the same review. `src/engine/krisis/lookup.
 talking to the service is the shared gazetteer module's (`src/engine/gazetteer/`, owned by the Chora
 work, used here and never changed). The command line is `plato-tools lookup` (with `--dry-run` to see
 what would be sent); on the page it is the panel "Look up in a gazetteer (online, optional)" beside
-matching (below). This sends each place's name to the gazetteer, and its coordinates only with `--near`.
+matching (below). At a workflow's step that is the lookup itself (`lookup`, `lookup.levels`:
+`LOOKUP_STEPS` in `src/app.js`) the panel is opened as the workflow comes to the step, and again after a
+reload, "(online, optional)" is not said, step 2 is headed for the lookup, and the buttons that match
+with another dataset are hidden. Opened, the panel reads the places for its preview (the worker's
+`places`), which writes nothing and leaves the outputs of the run before where they are, for that
+run's "Save …" buttons. This sends each place's name to the gazetteer, and its coordinates only with `--near`.
 To WHG it also sends each name's language (whg.js A13): the name's own tag, mapped to its primary subtag
 (two letters where the language has them: `eng` as `en`), else the dataset's language (`--lang`, or the
 panel's language field, either refused when it is not a code), else none, never `und`. A name tagged
@@ -4347,8 +4352,28 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
 
 ## Limits
 
-- **Private windows** keep the browser's file storage in memory and allow it very little, so large
-  files fail there. The page warns when the storage allowance looks too small.
+- **Private windows.** Every run writes its working files to the browser's private file storage
+  (`navigator.storage.getDirectory()`, in `src/engine/worker.js`), and so does Chora. **Firefox refuses
+  it in a private window** ("Security error when calling GetDirectory"), so nothing runs there, whatever
+  the file's size: no check, no conversion, no map. The page asks for the storage once as it loads
+  (`storageProbe()` in `src/app.js`; `window.__plato.storage` is `ok` or `refused`), and when it is
+  refused, or not there at all, says so above step 1 (`#storage-warning`: "This browser window does not
+  let the page keep working files, so the tools cannot run here: use an ordinary window, not a private
+  one", `NO_STORAGE` in `src/engine/words.js`) and leaves the run buttons off; a run that meets the
+  refusal anyway, and Chora, say the same words (`storageRefused()`), never the browser's. Measured in
+  Firefox 148 (November 2026; the browser checks open a real private window). A private window that
+  does allow the storage keeps it in memory and allows very little, so large files fail there (as this
+  paragraph said before; not measured again): the page warns, in the same place, when the allowance
+  looks too small for the file chosen (`storageCheck()`). Safari is not measured (Playwright's WebKit
+  on Linux has no `navigator.storage` and says nothing of it).
+- **A dropped connection.** The engine's own files (SQLite's WebAssembly, asked for at the first run)
+  not arriving is said as that, "check the connection and press the button again" (`NOT_DOWNLOADED`,
+  `downloadFailed()`), and the button pressed again runs. Natural Earth's style or data not arriving is
+  said in the basemap's panel under the map, opened, with "Try again" (`localFailed()` in
+  `src/chora/app.js`). Chora's module not arriving asks for a reload, which comes back to the map; while
+  it is on its way the map's box says "Loading the map…". An engine whose script itself did not arrive
+  is not covered: by the code it is said as "The engine stopped", and nothing starts it again but a
+  reload (read, not measured).
 - **Tracing with assistance** (`src/engine/chora/ink/`; measured on the synthetic maps of
   `test/chora-ink-lines.test.js`, 2026-10-01, in working pixels):
   - **A line 3 px wide running near 45° thins short**: the 3×3 median leaves it two pixels wide on the
@@ -4522,7 +4547,11 @@ without its policy is found unprotected by the canary and asks nothing; and that
 my working data" clears Chora's drawings, and the historical maps it keeps, at the next load; that a
 pasted basemap written into storage as allowed and chosen is not used, and its site asked nothing,
 until a click; that a page framed by another origin hides itself; that a link carries the origin at
-most, and a data link nothing; and that a planted ORCID is dropped on load.
+most, and a data link nothing; and that a planted ORCID is dropped on load. `page_shell_checks` open a
+real Firefox private window (the refusal of the file storage is the browser's own, with an ordinary
+Firefox window beside it that runs), stop SQLite's WebAssembly and Natural Earth's files on their way,
+hold Chora's module back to read what its box says meanwhile, and follow two workflows to a lookup step
+and through Agora's parts without choosing "What to prepare" by hand.
 
 Chora's historical maps are checked against a real second origin: `e2e/iiif_fixture_server.py`
 serves `test/fixtures/chora-iiif/` on three free ports, A (the image server allowed), B (never to
@@ -4598,7 +4627,9 @@ A push to `main` runs the tests, builds the site and publishes it to GitHub Page
   `workflowMode()` in `src/app.js` from `onStep`), there is one numbering: the page's own section
   numbers are hidden, and the centre is titled with the tracker's current step (`#workflow-title`
   in `#workflow-head`, the same words as the tracker's line, `whereWords()`), with `#for-tool` moved
-  under it. Once its file is chosen and recognised, step 1 folds to one line (`#files.folded`,
+  under it. As the workflow comes to a step (`onStep`, which asks Methodos's `step()` for the step's
+  operation), what the step's run needs is set once, so that the user may still change it: Agora's
+  "What to prepare" (`#part`) to the step's part, and the lookup's panel opened at a lookup step. Once its file is chosen and recognised, step 1 folds to one line (`#files.folded`,
   `#chosen-line`: the file's name, size and format, and "Change", which opens it again); a workflow
   followed with its file already recognised folds it as it begins. A run's Working and Result join step
   2's panel. When the workflow goes on to a later step (`wentOn()`), the last run's result stays in view,

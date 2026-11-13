@@ -3179,6 +3179,7 @@ def main():
             front = pw.chromium.launch(headless=True)
             try: front_page_checks(front, url); cube_check_checks(front, url); card_chosen_checks(front, url, pw); theme_checks(front, url); methodos_page_checks(front, url); layout_checks(front, url)
             finally: front.close()
+            page_shell_checks(pw, url, tmp)
             methodos_checks(pw, url, tmp)
             chora_layout_checks(pw, url)
             chora_checks(pw, url, tmp)
@@ -3217,6 +3218,241 @@ def main():
         print('PROVE-IT-FAILS:', 'every check failed, as it must' if len(failed) == len(results) else f'{len(results) - len(failed)} check(s) passed against a page with no tools: they cannot fail')
         sys.exit(0 if len(failed) == len(results) else 1)
     print('RESULT:', 'ALL PASS' if not failed else f'{len(failed)} FAILED'); sys.exit(1 if failed else 0)
+
+# ---- The page's shell: what a first-time visitor meets (the review of November 2026) --------------------
+# A browser window that refuses the page its file storage (a Firefox private window, a real one here: the
+# refusal is the browser's own); the engine's files or the basemap's not arriving; the map's box while its
+# module loads; and, in a workflow, the lookup's step and Agora's part. Each absence has its presence
+# beside it (an ordinary Firefox window that runs, the module really held back, the failure seen in the
+# page's own state, the page outside a workflow), and each was seen to fail on the page as it was before.
+NO_STORAGE_WORDS = 'This browser window does not let the page keep working files, so the tools cannot run here: use an ordinary window, not a private one.'
+NOT_DOWNLOADED_WORDS = 'The tools could not be downloaded: check the connection and press the button again.'
+SHELL_CSV = ROOT / 'test/fixtures/generic/with-ids.csv'
+SHELL_STATE = """() => { const $ = (id) => document.getElementById(id), v = (e) => !!e && !e.closest('[hidden]') && !!(e.offsetWidth || e.offsetHeight), p = window.__plato || {};
+  return { phase: p.phase || null, storage: p.storage || null, error: p.error || null, said: p.said || null, warning: v($('storage-warning')) ? $('storage-warning').textContent : null,
+    off: ['check', 'convert', 'publish', 'match'].filter((id) => $(id)?.disabled), summary: v($('summary')) ? $('summary').textContent.trim() : null }; }"""
+# In the page's thread only, the browser's storage answers (with a folder that holds nothing), so that the page's
+# own asking passes and the refusal is met where a run meets it, in the engine's worker, which this does not reach.
+SHELL_PROBE_PASSES = """(() => { const none = () => { throw new DOMException('nothing kept', 'NotFoundError'); };
+  const dir = { kind: 'directory', name: '', getDirectoryHandle: none, getFileHandle: none, removeEntry: none, entries: () => ({ [Symbol.asyncIterator]() { return this; }, next: () => ({ done: true }) }) };
+  StorageManager.prototype.getDirectory = () => dir; })();"""
+SHELL_LOOKUP = """() => { const $ = (id) => document.getElementById(id), v = (e) => !!e && !e.closest('[hidden]') && !!(e.offsetWidth || e.offsetHeight);
+  return { open: $('lookup').open, panel: v($('lookup')), summary: [...$('lookup').querySelector('summary').childNodes].filter((n) => n.nodeType === 3 || v(n)).map((n) => n.textContent).join('').trim(),
+    match: v($('match')), resume: v($('resume')), heading: $('action-what').textContent, title: v($('workflow-title')) ? $('workflow-title').textContent : null }; }"""
+def page_shell_checks(pw, url, tmp):
+    import re
+    base = url.rstrip('/') + '/'
+    def firefox(private, init=None):
+        ff = pw.firefox.launch(headless=True, firefox_user_prefs={'browser.privatebrowsing.autostart': True} if private else {})
+        ctx = ff.new_context(viewport={'width': 1280, 'height': 900})
+        if init and not PROVE: ctx.add_init_script(init)   # not on the page with no tools, which it could not change
+        page = ctx.new_page(); page.set_default_timeout(T(8) * 1000)
+        page.goto(NOTOOLS if PROVE else base)
+        return ff, page
+    state = lambda p: p.evaluate(SHELL_STATE)
+    loaded = lambda p: wait_state(p, lambda s: s.get('phase') == 'ready' and s.get('storage'), T(30), 'ready')
+    def detect(p, *fs):
+        p.set_input_files('#picker', [str(f) for f in fs])
+        return wait_state(p, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection').get('phase') == 'detected'
+    ran = lambda p, timeout=120: wait_state(p, lambda s: s.get('phase') in ('done', 'error'), T(timeout), 'run')
+
+    def private_window():
+        got = {}
+        ff, p = firefox(True)
+        try:
+            loaded(p); got['private, loaded'] = state(p)
+            got['private, a file'] = detect(p, FRONT_FILE); got['private, with it'] = state(p)
+            got['private, the browser'] = p.evaluate("() => navigator.storage.getDirectory().then(() => 'allowed', (e) => e.name + ': ' + e.message)")
+        finally: ff.close()
+        ff, p = firefox(False)
+        try:
+            loaded(p); got['ordinary, loaded'] = state(p)
+            got['ordinary, a file'] = detect(p, FRONT_FILE)
+            p.click('#check'); ran(p); got['ordinary, checked'] = state(p)
+        finally: ff.close()
+        a, b, o, c = got['private, loaded'], got['private, with it'], got['ordinary, loaded'], got['ordinary, checked']
+        ok = (got['private, the browser'].startswith('SecurityError') and a['storage'] == 'refused' and a['warning'] == NO_STORAGE_WORDS
+              and got['private, a file'] and b['warning'] == NO_STORAGE_WORDS and b['off'] == ['check', 'convert', 'publish', 'match'] and b['phase'] == 'detected'
+              and o['storage'] == 'ok' and o['warning'] is None and got['ordinary, a file'] and c['phase'] == 'done' and c['warning'] is None and c['off'] == [])
+        return ok, got
+    attempt('Page shell: in a Firefox private window, which refuses the page its file storage, the page says so in plain words as it loads, and Check, Convert, Prepare and Match are off once a file is chosen; in an ordinary Firefox window it says nothing, and Check runs', private_window)
+
+    def refused_at_the_run():
+        ff, p = firefox(True, SHELL_PROBE_PASSES)
+        try:
+            loaded(p); before = state(p)
+            if not detect(p, FRONT_FILE): return False, {'before': before, 'detected': False}
+            p.click('#check'); ran(p); after = state(p)
+        finally: ff.close()
+        ok = (before['storage'] == 'ok' and before['warning'] is None and after['phase'] == 'error' and 'GetDirectory' in (after['error'] or '')
+              and after['summary'] == NO_STORAGE_WORDS and after['said'] == NO_STORAGE_WORDS)
+        return ok, {'before': before, 'after': after}
+    attempt('Page shell: a run that meets the refusal itself (a Firefox private window whose page was answered, its engine refused: "Security error when calling GetDirectory") says the same plain words, not the browser\'s', refused_at_the_run)
+
+    def chora_private():
+        ff, p = firefox(True)
+        try:
+            loaded(p)
+            p.goto('about:blank'); p.goto(NOTOOLS if PROVE else base + '#chora')
+            until(p, "window.__chora && ['error', 'ready', 'loaded'].includes(window.__chora.phase)", 60)
+            got = p.evaluate("() => ({ phase: window.__chora.phase, error: window.__chora.error || null, says: document.getElementById('chora-phase').textContent })")
+        finally: ff.close()
+        return got['phase'] == 'error' and 'GetDirectory' in (got['error'] or '') and got['says'] == NO_STORAGE_WORDS, got
+    attempt('Page shell: Chora in a Firefox private window says the same plain words of the refusal', chora_private)
+
+    browser = pw.chromium.launch(headless=True, args=GL)
+    def fresh(**kw):
+        ctx = browser.new_context(accept_downloads=True, viewport={'width': 1400, 'height': 900}, reduced_motion='reduce', **kw)
+        page = ctx.new_page(); page.set_default_timeout(T(8) * 1000)
+        page.goto(NOTOOLS if PROVE else base)
+        if wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready').get('phase') != 'ready': raise RuntimeError('the main page did not start')
+        return ctx, page
+    try:
+        def engine_not_downloaded():
+            # SQLite's WebAssembly, asked for at the first run, does not arrive; then it does, and the same button runs.
+            ctx = None
+            try:
+                ctx, p = fresh()
+                wasm = re.compile(r'\.wasm(\?|$)'); stopped = []
+                ctx.route(wasm, lambda route: (stopped.append(route.request.url), route.abort()))
+                if not detect(p, FRONT_FILE): return False, {'detected': False}
+                p.click('#check'); ran(p); failed = state(p)
+                ctx.unroute(wasm)
+                p.click('#check'); ran(p); again = state(p)
+            finally: ctx and ctx.close()
+            ok = (bool(stopped) and failed['phase'] == 'error' and '.wasm' in (failed['error'] or '') and failed['summary'] == NOT_DOWNLOADED_WORDS
+                  and again['phase'] == 'done' and again['error'] is None and NOT_DOWNLOADED_WORDS not in (again['summary'] or NOT_DOWNLOADED_WORDS))
+            return ok, {'stopped': [u.rsplit('/', 1)[-1] for u in stopped][:3], 'failed': failed, 'again': again}
+        attempt('Page shell: the engine\'s files not arriving (SQLite\'s WebAssembly stopped on its way) is said as a download that failed, "check the connection and press the button again"; and, the connection back, the button pressed again runs', engine_not_downloaded)
+
+        def chora_loading():
+            # Chora's module and the map libraries held back on their way, as a slow connection holds them.
+            ctx = None
+            try:
+                ctx, p = fresh()
+                chunks = re.compile(r'/assets/(app|map)-[^/]*\.js(\?|$)'); held = []; let_through = []
+                ctx.route(chunks, lambda route: route.continue_() if let_through else held.append(route))
+                p.click('#toolbox a.tool-link[href="#chora"]')
+                said = soon(p, "() => document.querySelector('#chora-root > p[role=status]')?.textContent === 'Loading the map…'", 10)
+                p.wait_for_timeout(1500)   # still said, the module still on its way
+                waiting = p.evaluate("""() => { const e = document.querySelector('#chora-root > p[role=status]');
+                  return { says: e ? e.textContent : null, seen: !!e && e.getBoundingClientRect().height > 0, box: document.getElementById('chora-root').textContent.trim(), mounted: !!window.__chora }; }""")
+                n = len(held); let_through.append(True)
+                for route in held: route.continue_()
+                until(p, 'window.__chora && window.__chora.mapReadyCount >= 1', 90)
+                after = p.evaluate("() => ({ says: document.querySelector('#chora-root > p[role=status]')?.textContent || null, map: !!document.querySelector('#chora-root #chora-map canvas') })")
+            finally: ctx and ctx.close()
+            ok = (said and n >= 1 and waiting['says'] == 'Loading the map…' and waiting['seen'] and not waiting['mounted'] and after['says'] is None and after['map'])
+            return ok, {'held back': n, 'while waiting': waiting, 'once arrived': after}
+        attempt('Page shell: while Chora\'s module is on its way (held back) the map\'s box says "Loading the map…" as a status, not nothing; once it arrives the map takes its place', chora_loading)
+
+        def basemap_not_downloaded():
+            # Natural Earth, this site's own: first nothing of it arrives (its style), then its style but none of its data.
+            ctx = None
+            try:
+                ctx, p = fresh()
+                everything, data = re.compile(r'/basemap/'), re.compile(r'/basemap/[^?]*\.geojson(\?|$)')
+                stopped = []
+                stop_ = lambda route: (stopped.append(route.request.url.rsplit('/', 1)[-1]), route.abort())
+                BM = """() => { const c = window.__chora || {}, w = document.querySelector('#chora-basemap-options p.warn'), r = document.getElementById('chora-basemap-retry'), m = window.__chora_map;
+                  return { error: c.basemapError || null, says: w ? w.textContent : null, seen: !!w && w.getBoundingClientRect().height > 0, retry: !!r && r.getBoundingClientRect().height > 0,
+                    open: document.getElementById('chora-basemaps').open, land: m && m.getSource('land') ? m.isSourceLoaded('land') && m.querySourceFeatures('land').length : null }; }"""
+                ctx.route(everything, stop_)
+                p.goto('about:blank'); p.goto(NOTOOLS if PROVE else base + '#chora')
+                until(p, 'window.__chora && !!window.__chora.basemapError', 60)
+                no_style = p.evaluate(BM); n_style = len(stopped)
+                ctx.unroute(everything); ctx.route(data, stop_)
+                p.click('#chora-basemap-retry')
+                until(p, "() => !!window.__chora.basemapError && !!window.__chora_map.getSource('land')", 60)
+                no_data = p.evaluate(BM); n_data = len(stopped) - n_style
+                ctx.unroute(data)
+                p.click('#chora-basemap-retry')
+                until(p, "() => !window.__chora.basemapError && !!window.__chora_map.getSource('land') && window.__chora_map.isSourceLoaded('land') && window.__chora_map.querySourceFeatures('land').length > 0", 90)
+                back = p.evaluate(BM)
+            finally: ctx and ctx.close()
+            told = lambda x: (x['error'] or '').startswith('The basemap, Natural Earth, could not be downloaded from this site (') and 'check the connection' in x['error'] and x['error'] in (x['says'] or '') and x['seen'] and x['retry'] and x['open']
+            ok = (n_style >= 1 and told(no_style) and no_style['land'] is None and n_data >= 1 and told(no_data) and not no_data['land']
+                  and back['error'] is None and back['says'] is None and not back['retry'] and back['land'] > 0)
+            return ok, {'style stopped': n_style, 'said': no_style, 'data stopped': n_data, 'said then': no_data, 'the connection back': back}
+        attempt('Page shell: the map\'s own basemap not arriving (its style, then its data) is said under the map with "Try again", where the map was left empty without a word; tried again with the connection back, Natural Earth is drawn and nothing is said', basemap_not_downloaded)
+
+        def lookup_step():
+            ctx = None
+            try:
+                ctx, p = fresh()
+                step_is = lambda step, st, timeout=60: until(p, f"() => document.querySelector('#methodos-track li[data-step=\"{step}\"]')?.dataset.state === '{st}'", timeout)
+                # Outside a workflow, Krisis chosen: the panel folded, called optional, under the buttons that match with another dataset.
+                if not detect(p, SHELL_CSV): return False, {'detected': False}
+                p.click('#toolbox .tool-link[data-tool="match"]'); p.wait_for_timeout(300)
+                outside = p.evaluate(SHELL_LOOKUP)
+                # Map your data, with no regions, no drawing and no publishing: columns, check, dataset, then the lookup.
+                p.goto('about:blank'); p.goto(NOTOOLS if PROVE else base)
+                wait_state(p, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+                p.evaluate("() => { const b = document.getElementById('base'); b.value = %s; b.dispatchEvent(new Event('change')); }" % json.dumps(MYDATA_BASE))
+                p.click('#methodos-ask'); until(p, "!document.getElementById('methodos').hidden", 5)
+                p.check('input[name="methodos-have"][value="table"]'); p.check('input[name="methodos-want"][value="map"]')
+                for k in ('has-regions', 'will-draw', 'will-publish'): p.check(f'input[name="methodos-ask-{k}"][value="no"]')
+                p.click('#methodos-start'); until(p, "['pending', 'idle'].includes(document.getElementById('methodos-tracker').dataset.status)", 10)
+                if not detect(p, SHELL_CSV): return False, {'detected in the workflow': False}
+                until(p, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+                wait_state(p, lambda s: (s.get('columns') or {}).get('mapping'), T(30), 'columns')
+                p.click('#methodos-done'); step_is('columns', 'done', 15)
+                p.click('#check'); ran(p); step_is('check', 'done')
+                p.click('#convert'); ran(p); step_is('dataset', 'done')
+                at = p.evaluate(JOIN_STATE)
+                # The panel, opened by the step, has read the places for its preview: the conversion's output is still there
+                # for the "Save …" button of its result, still on the page.
+                until(p, "() => /Would look up/.test(document.getElementById('lookup-preview').textContent)", 30)
+                made = p.evaluate("() => [...document.querySelectorAll('#saves button')].map((b) => b.textContent)")
+                kept_ = opfs_names(p, 'outputs')
+                p.click('#methodos-use'); wait_state(p, lambda s: s.get('phase') == 'detected', T(60), 'detection')
+                until(p, "() => /the file this step takes/.test(document.getElementById('methodos-message').textContent)", 30)
+                there = p.evaluate(SHELL_LOOKUP)
+                # A reload (which allowing WHG in Permissions asks for) comes back to the step, its panel open again.
+                p.reload(); wait_state(p, lambda s: s.get('phase') in ('ready', 'detecting', 'detected'), T(30), 'ready')
+                until(p, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 15)
+                wait_state(p, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection')
+                until(p, "() => !document.getElementById('action').hidden && !!document.getElementById('workflow-title').textContent", 15)
+                reloaded = p.evaluate(SHELL_LOOKUP)
+            finally: ctx and ctx.close()
+            plain = lambda x: (not x['open'] and x['panel'] and x['summary'] == 'Look up in a gazetteer (online, optional)' and x['match'] and x['resume'] and x['heading'] == 'Match it with another dataset')
+            step = lambda x: (x['open'] and x['panel'] and x['summary'] == 'Look up in a gazetteer' and not x['match'] and not x['resume'] and x['heading'] == 'Look its places up in a gazetteer'
+                              and 'look the places up' in (x['title'] or ''))
+            ok = (plain(outside) and at['steps'].get('lookup') == 'current' and (at['use'] or '').startswith('Use ') and step(there) and step(reloaded)
+                  and any(b.startswith('Save with-ids.jsonl') for b in made) and 'with-ids.jsonl' in kept_)
+            return ok, {'outside a workflow': outside, 'steps': at['steps'], 'use': at['use'], 'save offered': made, 'outputs kept': kept_, 'at the step': there, 'after a reload': reloaded}
+        attempt('Page shell: at a workflow\'s lookup step the lookup\'s panel is open, not called optional, the centre titled for it and the buttons that match with another dataset hidden, and so again after a reload, and the output of the conversion before is still there to save; outside a workflow the panel is folded and optional, under those buttons', lookup_step)
+
+        def publish_part():
+            # Publish a dataset (PLATO's customs tables, whose about sheet gives the address the minting needs), every
+            # step by its one button: "What to prepare" is never chosen by hand here.
+            ctx = None
+            try:
+                ctx, p = fresh()
+                step_is = lambda step, st, timeout=60: until(p, f"() => document.querySelector('#methodos-track li[data-step=\"{step}\"]')?.dataset.state === '{st}'", timeout)
+                part = lambda: p.evaluate("() => document.getElementById('part').value")
+                got = {'at first': part()}
+                p.click('#methodos-ask'); until(p, "!document.getElementById('methodos').hidden", 5)
+                p.check('input[name="methodos-have"][value="plato"]'); p.check('input[name="methodos-want"][value="publish"]')
+                p.click('#methodos-start'); until(p, "['pending', 'idle'].includes(document.getElementById('methodos-tracker').dataset.status)", 10)
+                if not detect(p, *sorted((PLATO / 'schemas/tables/examples/customs').glob('*.csv'))): return False, {**got, 'detected': False}
+                until(p, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+                p.click('#check'); ran(p); step_is('check', 'done')
+                got['steps'] = p.evaluate(JOIN_STATE)['steps']; got['at the minting'] = part()
+                if got['at the minting'] != 'mint': return False, got   # Prepare would run another part, which is not the step's
+                p.click('#publish'); got['minting run'] = ran(p).get('phase'); step_is('mint', 'done')
+                got['at the report'] = part()
+                p.click('#methodos-use'); wait_state(p, lambda s: s.get('phase') == 'detected', T(60), 'detection')
+                until(p, "() => /the file this step takes/.test(document.getElementById('methodos-message').textContent)", 30)
+                p.click('#publish'); got['report run'] = ran(p).get('phase'); step_is('report', 'done')
+                got['at the site'] = part(); got['steps after'] = p.evaluate(JOIN_STATE)['steps']
+            finally: ctx and ctx.close()
+            ok = (got['at first'] == 'report' and got['steps'].get('mint') == 'current' and got['at the minting'] == 'mint' and got['minting run'] == 'done'
+                  and got['at the report'] == 'report' and got['report run'] == 'done' and got['at the site'] == 'site' and got['steps after'].get('site') == 'current')
+            return ok, got
+        attempt('Page shell: in "Publish a dataset" each step sets "What to prepare" to its own part (minting, the report, the site), so that Prepare alone does the step and the workflow goes on', publish_part)
+    finally:
+        browser.close()
 
 # ---- Methodos: saving and resuming (phase 2) ----------------------------------------------------------
 # The page's Methodos panel (phase 3) is driven by methodos_page_checks; these check phase 2, the record

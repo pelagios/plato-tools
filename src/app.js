@@ -9,7 +9,7 @@ import { pastedListFile } from './engine/hermes/pasted.js';
 // Hermes: grouping similar spellings for lookup, a panel of its own (src/hermes-spellings.js).
 import { spellingsPanel } from './hermes-spellings.js';
 import { splitMatching } from './engine/hermes/cluster.js';
-import { review as W, POOL_BUSY, POOL_STUCK, PREVIEW_WORDS, CANCEL_RELEASING, CHORA_HANDOVER } from './engine/words.js';
+import { review as W, POOL_BUSY, POOL_STUCK, PREVIEW_WORDS, CANCEL_RELEASING, CHORA_HANDOVER, NO_STORAGE, storageRefused, NOT_DOWNLOADED, downloadFailed } from './engine/words.js';
 const REVIEW_WORDS = W;   // the review's words, where W names the words for the columns
 import { readable } from './engine/input.js';
 import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions, flag, noteOn, setRowState, kindOfCandidate, acceptedFor } from './engine/krisis/work.js';
@@ -166,8 +166,24 @@ function onDetected({ input: inp, targets: t }) {
   storageCheck();
   if ($('lookup').open) refreshPreview();   // Krisis: gazetteer lookup
 }
+// The browser's private file storage, which every run writes its working files to (src/engine/worker.js),
+// asked for once as the page loads. Refused (Firefox in a private window: "Security error when calling
+// GetDirectory") or not there at all, nothing can run: the page says so at once, in plain words, above
+// step 1, and the run buttons stay off, where a visitor used to choose a file, see it recognised, and
+// meet the browser's own words at every Check and Convert. fail() says the same of a run that meets the
+// refusal anyway, and Chora of its own (src/chora/app.js). window.__plato.storage is 'ok' or 'refused'.
+let noStorage = false;
+async function storageProbe() {
+  try { await navigator.storage.getDirectory(); } catch { noStorage = true; }
+  state.storage = noStorage ? 'refused' : 'ok';
+  if (!noStorage) return;
+  const w = $('storage-warning');
+  w.textContent = NO_STORAGE; w.hidden = false;
+  buttons(true);
+}
 async function storageCheck() {
   const w = $('storage-warning');
+  if (noStorage) return;   // the refusal is said there already, and no allowance is the matter
   try {
     const { quota } = await navigator.storage.estimate();
     const need = storageNeed(input, files);   // room for the working database and the output, generously
@@ -176,11 +192,11 @@ async function storageCheck() {
   } catch { w.hidden = true; }
 }
 
-const buttons = (disabled) => { for (const id of ['check', 'check-candidates', 'datacube', 'convert', 'compare', 'revise', 'publish', 'match', 'resume', 'finish', 'preview', 'regions-start']) $(id).disabled = disabled; if (!disabled) gateOnColumns(); };
+const buttons = (disabled) => { for (const id of ['check', 'check-candidates', 'datacube', 'convert', 'compare', 'revise', 'publish', 'match', 'resume', 'finish', 'preview', 'regions-start']) $(id).disabled = disabled || noStorage; if (!disabled) gateOnColumns(); };
 // Krisis: a table of places is matched, and its review finished, by the matching of its columns: until
 // the worker's answer about them arrives, Match and Finish wait, or the table would be read by the guess.
 const columnsPending = () => isTable(input) && !columns && !state.columns?.error;
-function gateOnColumns() { if (busy) return; const wait = columnsPending(); $('match').disabled = wait; $('finish').disabled = wait; state.columnsPending = wait; gatePreview(); }
+function gateOnColumns() { if (busy) return; const wait = columnsPending(); $('match').disabled = wait || noStorage; $('finish').disabled = wait || noStorage; state.columnsPending = wait; gatePreview(); }
 function start(action, earlier) {
   if (busy || looking || !input?.format || input.reason !== undefined) return;   // Krisis: nor while a lookup runs
   if (hermesChosen) chooseTool(null);   // a file's action chosen: Hermes has done its part, and its card is no longer marked
@@ -312,6 +328,10 @@ async function save(name) {
 }
 window.__plato_save = save;
 function fail(message, words) {
+  // Two faults that are not the data's, in plain words (words.js): the browser's refusal of its file storage, said as
+  // the page says it at load (storageProbe), and the engine's own files not arriving (on a dropped connection SQLite
+  // said "Build with -sASSERTIONS for more info"): nothing is stuck, and the button pressed again runs.
+  words ||= storageRefused(message) ? NO_STORAGE : downloadFailed(message) ? NOT_DOWNLOADED : undefined;
   busy = false;
   engineReady(false);
   if (runOp) { methodos.ended({ op: runOp, error: words || message }); runOp = null; }
@@ -725,7 +745,7 @@ function gatePreview() {
   b.textContent = PREVIEW_WORDS.button(PREVIEW_N);
   b.setAttribute('data-tip', PREVIEW_WORDS.tip);
   b.closest('.previewing').hidden = !previewable();
-  b.disabled = busy || !!looking || !!state.previewPending || !previewReady();   // Krisis: nor while a lookup runs
+  b.disabled = busy || noStorage || !!looking || !!state.previewPending || !previewReady();   // Krisis: nor while a lookup runs
   state.previewReady = !b.disabled;
 }
 function clearPreview() {
@@ -918,12 +938,16 @@ const TOOLS = {
   match: { name: 'Krisis', what: 'match review', heading: 'Match it with another dataset', guide: ['match-review', 'How to review matches'] },
 };
 const EVERY_ACTION = $('action-what').textContent;
+// A workflow's steps whose action is the lookup's panel (#lookup, among Krisis's parts of step 2), and step 2's heading
+// at each: the step's own action is then what the centre shows, the panel open (onStep) and not called optional, and
+// the buttons that match with another dataset, which are not the step's, hidden.
+const LOOKUP_STEPS = { lookup: 'Look its places up in a gazetteer', 'lookup.levels': 'Identify the regions its places are in' };
 let tool = null;
 // Hermes chosen: it narrows nothing, and is not kept in the address, but its card is marked and #for-tool
 // says what it reads, until another card or a file's action is chosen.
 let hermesChosen = false;
 const HERMES = 'For <strong>Hermes</strong>, the readers: your file is read when you drop it, whether annotations from Recogito, a TEI edition, a CSV file or workbook, or GeoJSON. Then choose what to do with it.';
-let workflowStep = null;   // the step of a Methodos workflow the user is at, if they follow one: { id, n, title, tool, text, link }
+let workflowStep = null;   // the step of a Methodos workflow the user is at, if they follow one: { id, n, title, tool, text, link, op }
 // The result of the run that did an earlier step, once the workflow has gone on (workflowMode): `lingering`
 // while it is still shown, labelled as that step's, until the user first acts on the new step; then `parked`,
 // put away and summed up in its step's row of the tracker. Each { step, words, label }.
@@ -946,9 +970,12 @@ function chooseTool(key) {
     const for_ = el.dataset.tools.split(' ');
     el.hidden = !!tool && !for_.includes(shownFor) && !(asCheck && for_.includes('cube-check'));
   }
+  const looksUp = (tool === 'match' && LOOKUP_STEPS[workflowStep?.op]) || null;
+  if (looksUp) document.querySelector('#action .actions.matching').hidden = true;
+  $('lookup-optional').hidden = !!looksUp;
   // Convert stands alone when Check is not shown, and is then the step's main button.
   $('convert').classList.toggle('primary', shownFor === 'convert' || shownFor === 'figures');
-  $('action-what').textContent = asCheck ? 'Check it: it is already N-Triples' : tool ? TOOLS[tool].heading : EVERY_ACTION;
+  $('action-what').textContent = asCheck ? 'Check it: it is already N-Triples' : looksUp || (tool ? TOOLS[tool].heading : EVERY_ACTION);
   $('action').classList.toggle('narrowed', !!tool);
   for (const a of document.querySelectorAll('#toolbox .tool-link[data-tool]')) {
     if (a.dataset.tool === (hermesChosen ? 'read' : tool)) a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current');
@@ -1058,6 +1085,9 @@ async function openChora() {
   const top = [$('workflow-head'), $('files'), $('chora')].find((e) => !e.hidden && e.getClientRects().length);
   top.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
   $('chora-h').focus({ preventScroll: true });
+  // Said where the map will be while its module and the map libraries arrive (some 20 s on a slow connection, the box
+  // empty until then): the mount replaces it, or the failure below.
+  if (!chora) { const p = document.createElement('p'); p.setAttribute('role', 'status'); p.textContent = 'Loading the map…'; $('chora-root').replaceChildren(p); }
   try {
     choraLoading ??= import('./chora/app.js').then((m) => (chora = m.mountChora($('chora-root'), {
       files: () => files,
@@ -1182,7 +1212,8 @@ const methodosStore = workflowStore();
 // Authorization header and nowhere else.
 const whgWorkbench = workbench({ fetch: (url, init) => permissions.fetch(url, { cat: 'collaborate', subj: 'whg', ...init }), token: () => permissions.token.get() });
 let scopeUi = null;   // Scope (Issue #33; src/scope-page.js), mounted below, once Methodos is
-const methodos = mountMethodos({
+let methodos = null;   // null while it is being mounted: onStep, below, may be called before it is returned
+methodos = mountMethodos({
   banner: $('methodos-banner'), interview: $('methodos'), tracker: $('methodos-tracker'), tools: $('toolbox'), store: methodosStore,
   page: {
     files: () => files,
@@ -1191,6 +1222,9 @@ const methodos = mountMethodos({
     ready: () => whenReady,
     output: async (name) => (await (await (await navigator.storage.getDirectory()).getDirectoryHandle('outputs')).getFileHandle(name)).getFile(),
     mapping: () => (isTable(input) && columns && !columns.error ? columnOptions() : null),
+    // A matching of the columns kept as a step's result (columns.json), put back in the Columns panel as "Use a saved
+    // matching…" puts a file's: for a workflow taken up again after a reload, whose table is otherwise read by the guesses.
+    useMapping: (f) => loadMatching(f),
     review: () => (work ? { text: serialiseWork(work), name: workName } : null),
     reviewShown: () => !!work && !$('review').hidden,
     openWork: (f) => resume(f),
@@ -1227,8 +1261,18 @@ const methodos = mountMethodos({
     workflowMode(step);
     if (!step && !workflowStep) return;
     const was = workflowStep;
-    workflowStep = step;
+    // The step's operation, from Methodos (step(): of a workflow followed; a plan not yet begun has none).
+    const at = step ? methodos?.step() : null;
+    workflowStep = step && { ...step, op: at?.id === step.id ? at.op : null };
     chooseTool(step?.tool ?? null); setHash(step?.tool ?? null);
+    // Come to a step (gone on, gone back, or taken up again after a reload), what the step's run needs is set as the
+    // step says, once, so that the user may still change it: Agora's part ("What to prepare", which stayed at its
+    // first entry, so that Prepare ran the report whatever the step); and the lookup's panel, opened.
+    if (workflowStep?.op && (workflowStep.id !== was?.id || !was.op)) {
+      const part = /^publish\.(.+)$/.exec(workflowStep.op)?.[1];
+      if (part && [...$('part').options].some((o) => o.value === part)) $('part').value = part;
+      if (LOOKUP_STEPS[workflowStep.op]) $('lookup').open = true;
+    }
     // Back at the step a result was of (Back a step): it is that step's result again, shown, unlabelled.
     if (step && (lingering?.step === step.id || parked?.step === step.id)) { $('result').hidden = false; lingering = parked = null; resultOf(null); }
     // Gone on to the next step: the last run's result stays in view, labelled as the step's it was, until the
@@ -2573,3 +2617,4 @@ $('regions').addEventListener('keydown', (e) => { if (e.key === 'Escape' && regi
 { const sel = $('region-identity'); sel.innerHTML = ['closeMatch', 'exactMatch'].map((t) => `<option value="${t}">${escapeHtml(RP.identity[t])}</option>`).join(''); }
 { const sel = $('region-certainty'); sel.innerHTML = certaintyChoices().map((c) => `<option value="${c.value}"${c.value === CERTAINTY_DEFAULT ? ' selected' : ''}>${escapeHtml(c.text)}</option>`).join(''); }
 startWorker();
+storageProbe();

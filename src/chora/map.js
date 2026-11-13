@@ -38,10 +38,11 @@ const kindOf = (e) => (e?.tile ? 'a tile' : e?.sourceId ? 'a source' : 'the styl
 /**
  * The map in `container`. `state` is window.__chora: blocked, blockedOrigins and mapReadyCount are
  * kept up to date on it. `onPlaceClick(id)` is called when a place on the map is clicked, and
- * `onStyleError(why)` when a basemap's style (not a tile of it) cannot be loaded. `polygonValidation`, if
+ * `onStyleError(why)` when a basemap's style (not a tile of it) cannot be loaded, `onSourceError(id, why)` when the
+ * data of one of a style's sources (not a tile; Natural Earth's are GeoJSON files) cannot be. `polygonValidation`, if
  * given, is Terra Draw's validation for the polygons drawn (Scope's area: src/scope-page.js); Chora gives none.
  */
-export function createMap(container, { state, onPlaceClick, onStyleError, polygonValidation = null }) {
+export function createMap(container, { state, onPlaceClick, onStyleError, onSourceError, polygonValidation = null }) {
   let subjects = [];   // the permissions of the basemap shown, [category, subject] pairs
   state.blocked = 0; state.blockedOrigins = [];
   const guard = transformRequest(() => subjects, { onBlocked: (origin) => {
@@ -77,6 +78,8 @@ export function createMap(container, { state, onPlaceClick, onStyleError, polygo
     const why = redact(e?.error?.message || e?.error || 'unknown error');
     if (styleLoading && !e?.sourceId && !e?.tile) { styleLoading = false; onStyleError?.(why); }
     if (tiles && e?.sourceId === 'basemap' && e?.tile && !/Refused a request to /.test(why)) { tiles.failed++; tiles.why ||= why; }
+    // A source's data (not a tile of it) that did not arrive: the page knows whether the source is its basemap's.
+    if (e?.sourceId && !e.tile && !/Refused a request to /.test(why)) onSourceError?.(e.sourceId, why);
     // MapLibre emits 'idle' only from a frame it draws, and none is asked for once the last tile has failed (on a slow
     // machine, with all of a basemap's tiles failing, the map is loaded, nothing is dirty, and it waits for a pan): one is
     // asked for, so that the idle above comes and the fallback to Natural Earth is not left waiting for it.

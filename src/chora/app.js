@@ -5,7 +5,7 @@
 // id it makes starts with `chora-` (the adoption panel's with `adopt-`), so that none clashes with the
 // page's. The engine is the same worker as the main page's (src/engine/worker.js, its chora-* commands),
 // a worker of its own. It publishes its state on window.__chora for automated tests; nothing else reads it.
-import { fmtBytes, formatName, progressText, summary, choraDrawingNote, choraSaveText, choraSavedFormat, choraSaveProgress, choraStorageWarning, choraProblemText, CHORA_TEXT } from '../engine/words.js';
+import { fmtBytes, formatName, progressText, summary, choraDrawingNote, choraSaveText, choraSavedFormat, choraSaveProgress, choraStorageWarning, choraProblemText, CHORA_TEXT, NO_STORAGE, storageRefused } from '../engine/words.js';
 import { sizeRead, loadNeed, saveNeed, storageShort } from '../engine/chora/storage.js';
 import { detect } from '../engine/input.js';
 import { newGeometryAttestation, checkGeoJSON, wrapLongitudes, DrawError, ROLES, PRECISIONS } from '../engine/chora/draw.js';
@@ -1254,6 +1254,7 @@ async function saveFile(file, name) {
 // once the user has chosen it in this load, by a click (basemaps.automatic). Until then the map is on
 // Natural Earth, and one line names it as the remembered choice, with a button to use it.
 let basemapError = null;   // why the basemap chosen could not be used
+let basemapRetry = false;  // that it is Natural Earth, this site's own, that did not arrive: said with "Try again"
 let chosenHere = null;     // the pasted basemap the user chose in this load, as it was then: the only one that may be used
 let listed = new Map();    // the basemaps as listed, by id: a click chooses what was shown, not what storage holds by then
 const currentNow = () => basemaps.current({ chosen: chosenHere });
@@ -1274,7 +1275,7 @@ function renderBasemaps() {
   // What is typed in the paste box survives the list being drawn again (a permission changed, say).
   const typed = $('paste')?.value || '';
   // The line asking for permission goes first, where it is seen without scrolling the list.
-  $('basemap-options').innerHTML = (basemapError ? `<p class="warn" role="status">${esc(basemapError)}</p>` : '')
+  $('basemap-options').innerHTML = (basemapError ? `<p class="warn" role="status">${esc(basemapError)}${basemapRetry ? ' <button type="button" class="link" id="chora-basemap-retry">Try again</button>' : ''}</p>` : '')
     + (remembered ? `<p class="needs-permission" id="chora-basemap-remembered">${esc(REMEMBERED_BASEMAP.line(remembered.name))} <button type="button" class="link" id="chora-use-remembered">${esc(REMEMBERED_BASEMAP.use)}</button></p>` : '')
     + '<div id="chora-basemap-needs"></div>' + [...groups].map(([g, bs]) => `<fieldset><legend>${esc(g)}</legend>${bs.map((b) => `<label class="${b.disabled ? 'disabled' : ''}">
       <input type="radio" name="basemap" value="${esc(b.id)}"${b.id === (waiting || cur).id ? ' checked' : ''}${b.disabled ? ' disabled' : ''}> ${esc(b.name)}${b.disabled ? ` <small>(${esc(b.disabled)})</small>` : ''}${b.note ? ` <small class="basemap-note">${esc(b.note)}</small>` : ''}
@@ -1335,6 +1336,7 @@ function basemapChanged(e) {
   if (b && !b.disabled) want(b);
 }
 function basemapClicked(e) {
+  if (e.target.id === 'chora-basemap-retry') { basemapError = state.basemapError = null; basemapRetry = false; useBasemap(basemaps.byId('natural-earth')); return; }
   if (e.target.id === 'chora-use-remembered') { const w = listed.get(state.basemapRemembered); if (w) want(w); return; }
   if (e.target.dataset.unpaste) {
     const id = e.target.dataset.unpaste;
@@ -1353,14 +1355,14 @@ function basemapPasted(e) {
 }
 async function useBasemap(b) {
   if (!b.local) {
-    basemapError = state.basemapError = null;
+    basemapError = state.basemapError = null; basemapRetry = false;
     // Where the page's policy was not shown to be enforced, no other site is asked (src/lib/csp.js).
     if (!(await permissions.enforced())) { unprotected(b); b = basemaps.byId('natural-earth'); }
   }
   mapApi.use(basemaps.subjectsOf(b));
   let style;
   try { style = await basemaps.styleFor(b); } catch (e) {
-    if (b.local) { console.warn(e); return; }
+    if (b.local) { console.warn(e); return localFailed(e.message); }
     return styleFailed(e.message, b);
   }
   // A pasted style says which sites it asks only once it has been read: those not yet allowed are
@@ -1378,6 +1380,7 @@ async function useBasemap(b) {
   }
   if (!b.local || basemaps.wanted()?.local) basemaps.choose(b);
   state.basemap = b.id;
+  localSources = new Set(b.local ? Object.keys(style.sources || {}) : []);
   applyRelief();   // before the style loads: the relief goes in with it, on Natural Earth only
   mapApi.setStyle(style);
   renderBasemaps();
@@ -1649,7 +1652,8 @@ function inAnotherTab() {
   Object.assign(state, { phase: 'in-another-tab' });
 }
 function fail(message) {
-  $('phase').innerHTML = `<span class="warn">Something went wrong: ${esc(message)}</span>`;
+  // The browser's refusal of its file storage (a Firefox private window), in the main page's words for it (words.js).
+  $('phase').innerHTML = `<span class="warn">${esc(storageRefused(message) ? NO_STORAGE : `Something went wrong: ${message}`)}</span>`;
   Object.assign(state, { phase: 'error', error: message });
 }
 const n = (x) => (x || 0).toLocaleString('en-GB');
@@ -1667,6 +1671,19 @@ function styleFailed(why, b = basemaps.byId(state.basemap)) {
   $('basemaps').open = true;
   basemaps.choose(basemaps.byId('natural-earth'));
   useBasemap(basemaps.byId('natural-earth'));
+}
+
+// Natural Earth, this site's own, whose style or data did not arrive (a dropped connection): there is no other
+// basemap to fall back to, and the map was left a plain blue-grey with nothing said. Said under the map, in the
+// basemap's panel, opened, with a way to try again (the style and its data are asked for afresh). The
+// sources of the style on the map that are Natural Earth's are kept in `localSources` (src/chora/map.js says which failed).
+let localSources = new Set();
+function localFailed(why) {
+  if (basemapRetry) return;
+  basemapError = state.basemapError = `The basemap, Natural Earth, could not be downloaded from this site (${why}), so the map may be empty: check the connection.`;
+  basemapRetry = true;
+  $('basemaps').open = true;
+  renderBasemaps();
 }
 
 // ---- The map's key: how well a location is known (src/chora/vague.js) ------------------------------
@@ -1776,7 +1793,7 @@ export function mountChora(rootEl, context = {}) {
 
   // The map, its key, its drawing and its historical maps.
   listenForTileErrors();
-  mapApi = createMap($('map'), { state, onPlaceClick: (id) => selectPlace(id), onStyleError: styleFailed });
+  mapApi = createMap($('map'), { state, onPlaceClick: (id) => selectPlace(id), onStyleError: styleFailed, onSourceError: (id, why) => { if (localSources.has(id)) localFailed(why); } });
   renderKey();
   mapApi.onDraw({
     finish: onFinish,
