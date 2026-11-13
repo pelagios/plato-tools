@@ -46,7 +46,7 @@ Usage:
                                             other, across the sets, and against a dataset's
                                             answers to them (promotedFrom) and its candidateSets
   plato-tools convert --to TARGET [--out DIR] [options] INPUT...
-  plato-tools preview [--limit N] [--columns FILE] [--split …] [--sheet NAME] [reading options] INPUT
+  plato-tools preview [--limit N] [--columns FILE] [--split …] [--clusters FILE] [--sheet NAME] [reading options] INPUT
                                             show the first N records (default ${PREVIEW_LIMIT}) of a table of
                                             places (CSV, plain GeoJSON, a sheet of a workbook), a
                                             TEI edition or W3C Web Annotations, as they would be
@@ -124,6 +124,7 @@ Usage:
                                             (warns), P-3 coordinates are declared, P-4 values are
                                             numbers. Exit 1 if any fails, or any integrity
                                             constraint had nothing to evaluate; a warning does not
+                                            change the exit status.
   plato-tools project info [--json] FILE    list what a PLATO tools project (.platoproj, saved
                                             by Methodos on the page) holds, and check the size
                                             and SHA-256 of every part; exit 1 if it is refused
@@ -177,11 +178,11 @@ Options:
                     county, a country…) is {"field": "within", "level": N}, 1 the widest:
                     such columns are guessed from their headings, widest first.
                     A table of figures (a census, a return) is described the same way, with
-                    the roles period, dimension, value and figure for its columns and the
-                    table's own description beside them: {"columns": {…}, "table": {"title":
-                    "…", "source": "…", "dimensions": {"occupation": {"total": "All"}}}}.
-                    Convert it to N-Triples with --cube for a Data Cube; the code lists are
-                    written to a second file, NAME.codes.nt.
+                    the roles period, dimension, value, attribute and figure for its columns
+                    and the table's own description beside them: {"columns": {…}, "table":
+                    {"title": "…", "source": "…", "dimensions": {"occupation": {"total":
+                    "All"}}}}. Convert it to N-Triples with --cube for a Data Cube; the code
+                    lists are written to a second file, NAME.codes.nt.
   --split COLUMN=SEP[:LEVELS]
                     check, convert, preview: a table of places' column of several regions in
                     one cell, narrowest first ("Rotherhithe, Surrey, England"), split on SEP
@@ -850,7 +851,9 @@ async function reviseCommand(args, o, resources) {
     const xlsx = [input, got.input].some((i) => i?.container === 'workbook') ? await import('xlsx') : undefined;
     const { env, finish } = host.env(resources, { progress, xlsx });
     let result = null, failure = null;
-    const options = { reviewer, release: o.release, base: o.base, date: o.date, columns, name: items[0].name };
+    // A plain date is the start of that day: `created` is a date and time in the schema.
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(o.date ?? '') ? `${o.date}T00:00:00Z` : o.date;
+    const options = { reviewer, release: o.release, base: o.base, date, columns, name: items[0].name };
     try { result = await revise({ earlier: got.input, later, options }, env); } catch (e) { failure = e; }
     if (live) process.stderr.write('\r\x1b[K');
     // Nothing is written unless the checks passed: a revision with errors takes its output back.

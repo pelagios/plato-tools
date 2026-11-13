@@ -6,9 +6,9 @@ import { PLATO_REPO } from './paths.js';
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, readdirSync, mkdtempSync, mkdirSync, copyFileSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, mkdtempSync, mkdirSync, copyFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { unzipSync, strFromU8 } from 'fflate';
 import * as XLSX from 'xlsx';
@@ -97,6 +97,11 @@ test('usage problems exit 2, with a message on stderr and nothing on stdout', ()
   // Which formats are read only says so by name (three formats came before "these two"), and --json's
   // columns (a list) is told apart from the object --columns takes; the README says the same.
   const flat = h.out.replace(/\s+/g, ' ');
+  // The usage lines and the options agree: preview takes --clusters; a table of figures has five roles;
+  // and datacube's sentence on its exit status is whole.
+  assert.match(h.out, /\n  plato-tools preview .*\[--clusters FILE\]/);
+  assert.match(flat, /the roles period, dimension, value, attribute and figure for its columns/);
+  assert.match(flat, /constraint had nothing to evaluate; a warning does not change the exit status\. plato-tools project info/);
   assert.match(flat, /or a TEI XML edition \(annotations and TEI are read, not written\)/);
   assert.doesNotMatch(flat, /these two/);
   assert.match(flat, /--json print one JSON object per input.*?Its "columns", for a table of places, is a list of \{column, field, reason\}, with pattern, level, or separator, levels and firstIsName where the field has them; --columns takes the object printed without --json instead\./);
@@ -196,6 +201,46 @@ test('convert never replaces an existing file unasked (exit 2, file untouched); 
   const o = cli('convert', '--to', 'plato-jsonl', '--out', out, '--overwrite', `${EX}/place-centric-constantinople.json`);
   assert.equal(o.code, 0, o.out + o.err);
   assert.match(readFileSync(target, 'utf8'), /^\{"\$schema"/);
+});
+test('convert refuses an output that would replace one of its inputs, with or without --overwrite (exit 2, the input untouched)', () => {
+  // The output's name is the input's, in the folder the input is in: by its own path, by another
+  // spelling of it, and through a symbolic link. Before, --overwrite emptied the file and then removed it.
+  const dir = scratch(), self = join(dir, 'self.json'), text = readFileSync(`${EX}/place-centric-constantinople.json`, 'utf8');
+  writeFileSync(self, text);
+  mkdirSync(join(dir, 'sub')); symlinkSync(self, join(dir, 'sub', 'self.json'));
+  for (const [given, out] of [[self, dir], [join(dir, 'sub', '..', 'self.json'), dir], [self, join(dir, 'sub')]]) {
+    for (const flags of [['--overwrite'], []]) {
+      const r = cli('convert', '--to', 'plato-json', '--out', out, ...flags, given);
+      assert.equal(r.code, 2, r.out + r.err);
+      // Without --overwrite the refusal may be either: that the file exists, or that it is the input.
+      if (flags.length) assert.match(r.out, /is one of the files being read, and writing the output there would replace it; give --out for somewhere else\./);
+      assert.doesNotMatch(r.out, /fault in the tools/);
+      assert.equal(readFileSync(self, 'utf8'), text, `${given} to ${out} ${flags}`);
+    }
+  }
+  // Control: the same input, --overwrite, and somewhere else to write, where a file of that name already is.
+  const other = scratch(); writeFileSync(join(other, 'self.json'), 'mine\n');
+  const ok = cli('convert', '--to', 'plato-json', '--out', other, '--overwrite', self);
+  assert.equal(ok.code, 0, ok.out + ok.err);
+  assert.match(readFileSync(join(other, 'self.json'), 'utf8'), /^\{/);
+  assert.equal(readFileSync(self, 'utf8'), text);
+});
+test('--out with a new folder of one character, or one inside it, converts and ends (it ran for ever, deaf to Ctrl-C)', () => {
+  // Relative names, so run in a folder of the test's own. A hard kill after 60 s: nothing gentler stopped it.
+  const input = resolve(`${EX}/place-centric-constantinople.json`);
+  for (const out of ['o', 'q/sub', './p', 'ab']) {
+    const cwd = scratch();
+    const r = spawnSync(process.execPath, [CLI, 'convert', '--to', 'plato-jsonl', '--out', out, input], { encoding: 'utf8', cwd, timeout: 60000, killSignal: 'SIGKILL' });
+    assert.equal(r.signal, null, `--out ${out} did not end`);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.deepEqual(readdirSync(join(cwd, out)), ['place-centric-constantinople.jsonl']);
+  }
+  // A run that fails takes back the folders it made, and no more: the folder it ran in is still there.
+  const cwd = scratch(), cut = join(scratch(), 'cut.json');
+  writeFileSync(cut, readFileSync(input, 'utf8').slice(0, 1500));
+  const f = spawnSync(process.execPath, [CLI, 'convert', '--to', 'plato-jsonl', '--out', 'q/sub', cut], { encoding: 'utf8', cwd, timeout: 60000, killSignal: 'SIGKILL' });
+  assert.equal(f.signal, null); assert.equal(f.status, 1, f.stdout + f.stderr);
+  assert.deepEqual(readdirSync(cwd), []);
 });
 test('a conversion that fails part-way leaves no partial output behind', () => {
   const out = scratch(), p = join(scratch(), 'cut.json');

@@ -1,7 +1,7 @@
 // The engine in Node, as src/engine/worker.js is the engine in the browser: the same pipeline,
 // given a triple store in a file on disk, outputs written straight to disk, and PLATO's vendored
 // files read from public/plato/. Also how command-line arguments become inputs.
-import { openAsBlob, mkdirSync, mkdtempSync, openSync, writeSync, closeSync, rmSync, rmdirSync, existsSync } from 'node:fs';
+import { openAsBlob, mkdirSync, mkdtempSync, openSync, writeSync, closeSync, rmSync, rmdirSync, existsSync, statSync } from 'node:fs';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -62,10 +62,16 @@ export async function gatherInputs(args) {
   return out;
 }
 
+// Every file this process has opened to read, as device and inode: the same file by another path
+// (./x.json, a symbolic link, a hard link) is still the same file. An output is never one of them.
+const inputs = new Set();
+const fileKey = (p) => { const s = statSync(p, { throwIfNoEntry: false }); return s ? `${s.dev}:${s.ino}` : null; };
+
 /** Files as the engine expects them (name, size, slice, stream, text), read from disk lazily. */
 export async function openFiles(paths) {
   return Promise.all(paths.map(async (p) => {
     const blob = await openAsBlob(p);
+    inputs.add(fileKey(p));
     Object.defineProperty(blob, 'name', { value: basename(p) });
     return blob;
   }));
@@ -149,9 +155,17 @@ export class NodeHost {
       },
     };
     function create(path, name) {
-      const made = mkdirSync(dirname(path), { recursive: true });
+      // An input is read lazily, so opening it to write would empty it before it was read, and the
+      // failure that followed would remove it as a partial output. Refused whatever --overwrite says.
+      const key = fileKey(path);
+      if (key && inputs.has(key)) throw Object.assign(new Error(`${path} is one of the files being read, and writing the output there would replace it; give --out for somewhere else.`), { code: 'EINPUT', path });
       // mkdirSync gives the first folder it had to make: that one and those below it are this run's.
-      if (made) for (let d = dirname(path); d.length >= made.length; d = dirname(d)) run.dirs.add(d);
+      // Both made absolute, since a relative path ends at ".", whose parent is "." again, for ever.
+      const made = mkdirSync(dirname(path), { recursive: true });
+      if (made) for (let d = resolve(dirname(path)), top = resolve(made); d.length >= top.length; d = dirname(d)) {
+        run.dirs.add(d);
+        if (dirname(d) === d) break;
+      }
       const fd = openSync(path, host.overwrite ? 'w' : 'wx');   // wx: never replace a file unasked
       run.created.push(path);
       let size = 0;

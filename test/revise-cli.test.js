@@ -46,6 +46,14 @@ test('revise writes the revised dataset the engine writes, and exits 0; --json c
   const e = env();
   const same = await revise({ earlier: await detect([textFile(JSON.stringify(v1), 'v1.json')]), later: await detect([textFile(JSON.stringify(v2), 'v2.json')]), options: { reviewer: { name: 'R. Viewer' }, release: 'v2', date: DATE } }, e);
   assert.equal(readFileSync(join(d, 'v2-revised.json'), 'utf8'), outText(e, same.outputs[0].name));
+  // A plain date, the first form the help gives, is the start of that day (created is a date and time).
+  const plain = scratch();
+  const day = cli('revise', p2, '--previous', p1, '--reviewer', 'R. Viewer', '--release', 'v2', '--date', '2026-10-17', '--out', plain, '--json');
+  assert.equal(day.code, 0, day.out + day.err);
+  assert.equal(JSON.parse(day.out).errors, 0, day.out);
+  const dated = JSON.parse(readFileSync(join(plain, 'v2-revised.json'), 'utf8')).spatialEntities.flatMap((s) => s.attestations).map((a) => a.created);
+  assert.ok(dated.includes('2026-10-17T00:00:00Z'), dated.join(' '));
+  assert.ok(!dated.includes('2026-10-17'), dated.join(' '));
   // The words, without --json, say what was done and what was written.
   const again = cli('revise', p2, '--previous', p1, '--reviewer', 'R. Viewer', '--release', 'v2', '--out', d);
   assert.equal(again.code, 2, again.out + again.err);
