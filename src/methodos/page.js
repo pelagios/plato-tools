@@ -15,7 +15,7 @@ import { writeProject, readProject, projectName, ProjectError, blobSource, newer
 import { fmtBytes } from '../engine/words.js';
 import { outputStore } from './outputs.js';
 import { stepAt, currentInput, startFiles, keptBy, keptWords, distinct, projectWords, notKept } from './seams.js';
-import { regionsSettled, notReviewed, relateProblem, unexported, reviewDiffers, writesItself } from '../engine/methodos/containment.js';
+import { regionsSettled, notReviewed, relateProblem, unexported, reviewDiffers, writesItself, columnsProblem } from '../engine/methodos/containment.js';
 import { stepMark, whereWords, lower } from './layout.js';
 import { whyWords, shareLink, ENROL, WorkbenchError, WORDS, capWords } from '../engine/workbench.js';
 import { stateOf, fromSnapshot } from './whg.js';
@@ -23,7 +23,7 @@ import { stateOf, fromSnapshot } from './whg.js';
 // The input of each automatic operation that the page's run takes from the files chosen in step 1: a
 // run is the step's only if those files are the ones the step takes (by size and SHA-256).
 const MAIN = { check: 'files', 'check.cube': 'dataset', convert: 'files', compare: 'later', revise: 'later', 'publish.report': 'dataset', 'publish.mint': 'dataset', 'publish.site': 'dataset',
-  'publish.w3id': 'dataset', match: 'subjects', lookup: 'subjects', apply: 'subjects', 'relate.containment': 'subjects' };
+  'publish.w3id': 'dataset', match: 'subjects', lookup: 'subjects', 'lookup.levels': 'subjects', apply: 'subjects', 'relate.containment': 'subjects' };
 // The page's run that does a step whose operation is not a run of its own: recording the decisions with
 // the region each place is in is Krisis's Finish (its 'apply' run), on a review whose candidates are exported.
 const RUN_OF = { 'relate.containment': 'apply' };
@@ -37,6 +37,28 @@ function problemOf(r) {
   if (!errors && !r?.incomplete) return null;
   const items = (r.report?.items || []).filter((i) => i.severity === 'error');
   return { words: items.slice(0, 3).map((i) => i.message).join(' ') || 'The data could not be read to the end, so nothing was written.', errors };
+}
+
+// The button that runs each automatic step, in its own words on the page (index.html): what the tracker says to press.
+const PRESS = { check: 'Check', 'check.cube': 'Check the Data Cube', convert: 'Convert', compare: 'Compare with the earlier version…', revise: 'Revise against the earlier version…',
+  match: 'Match with another dataset…', apply: 'Finish', 'relate.containment': 'Finish', 'publish.report': 'Prepare', 'publish.mint': 'Prepare', 'publish.site': 'Prepare', 'publish.w3id': 'Prepare' };
+// The steps that record a review's decisions: the review they take is offered again ("Open the review") when it is not open (robust R-08).
+const RECORDS = new Set(['apply', 'relate.containment']);
+// The formats that cannot hold all a review decided (rich R1), by the name each has in the list beside Convert.
+const LOSSY = { lpf: 'Linked Places Format', 'lpf-seq': 'Linked Places Format', tables: 'The spreadsheet tables' };
+/** How many attestations of a PLATO JSON file say which places are the same (each has "identities"), read as a stream. */
+async function identitiesIn(file) {
+  const reader = file.stream().pipeThrough(new TextDecoderStream()).getReader();
+  let n = 0, tail = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    const text = tail + value;
+    n += (text.match(/"identities"\s*:/g) || []).length;
+    // A key cut by the end of a chunk is counted with the next: what is kept back is too short to hold a whole one.
+    tail = text.slice(-12);
+  }
+  return n;
 }
 
 // Agora's parts, each in the words of its entry in the page's list beside "Prepare" (index.html, #part): what began()
@@ -113,6 +135,9 @@ function stepList(list, steps, at, done, notes = []) {
  *   pick()           open step 1's file picker;           output(name)   a File the last run wrote;
  *   ready()          a promise, settled when the engine is ready for a file;
  *   mapping()        the matching of columns shown, or null;
+ *   numbered()       optional: whether the rows of the table are numbered for ids ("Number the rows"), no column being the id;
+ *   target()         the format chosen to convert to, as a conversion's target key;
+ *   compareWith(files)  run the version check of the files chosen against `files`, as "Compare with the earlier version…" does once they are chosen;
  *   applyMapping(m, name)  show the matching `m` (as mapping() gave it, kept under `name`) for the table chosen, as a saved
  *                    matching loaded is; false when the file chosen is not a table, or is not recognised yet;
  *   review()         the review open, as { text, name }, or null;   reviewShown()  whether it is on the page;
@@ -388,6 +413,43 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   // (the check of a match's other dataset, between the match and its review), on the dataset it was made of.
   const reviewB = el('button', { type: 'button', id: 'methodos-open-review', hidden: true });
   reopenB.after(' ', reviewB);
+  // The comparison a step asks for, with the file an earlier step made, which the workflow holds: one press, no file to find (simple S5).
+  const compareB = el('button', { type: 'button', id: 'methodos-compare', className: 'primary', hidden: true });
+  useB.after(' ', compareB);
+  /** The file(s) the compare step at hand compares with, when an earlier step made them and this browser holds every one; or null. */
+  function compareInput(s) {
+    if (!s || s.op !== 'compare' || !wf || changed || viewing || s.state === 'running') return null;
+    let refs;
+    try { refs = runner.inputsOf(wf, s.id, { late: 'leave' }).earlier; } catch { return null; }
+    return refs?.length && refs.every((r) => !!heldFor(r)) && fromWhere(wf, s, refs) ? refs : null;
+  }
+  compareB.addEventListener('click', () => {
+    const s = wf && !changed ? atStep() : null, refs = compareInput(s);
+    if (!refs) return;
+    let main = null;
+    try { main = mainInput(wf, s); } catch { main = null; }
+    if (main && !sameRefs(main, chosenRefs)) { say(`Choose ${names(main)} first (“Use ${names(main)}”): it is the file this step compares with ${names(refs)}.`, true); render(false); return; }
+    page.compareWith?.(refs.map(heldFor));
+  });
+  // What is said of the format chosen (rich R1) follows the choice, in the list beside Convert.
+  document.getElementById('target')?.addEventListener('change', () => { if (wf && !changed) render(false); });
+  const identityCounts = new Map();   // a dataset's SHA-256 to the number of its attestations that say which places are the same; null while it is counted
+  /** That number for the files `refs` (a step's dataset, held), or null while it is not known: counted once, and the tracker drawn again. */
+  function identitiesOf(refs) {
+    let n = 0;
+    for (const r of refs) {
+      if (!identityCounts.has(r.sha256)) {
+        const f = heldFor(r);
+        if (!f) return null;
+        identityCounts.set(r.sha256, null);
+        identitiesIn(f).then((k) => { identityCounts.set(r.sha256, k); render(false); }, () => identityCounts.set(r.sha256, 0));
+      }
+      const k = identityCounts.get(r.sha256);
+      if (k === null) return null;
+      n += k;
+    }
+    return n;
+  }
   let wf = null;            // the runner's state, as a record ({ id, name, created, saved, ...state })
   let wfScope = null;       // the workflow's Scope (Issue #33), kept beside the runner's state and written with it (keep())
   let changed = null;       // a record the version rule would not carry on: { record, words } (reconcile's 'changed' or 'refuse')
@@ -464,6 +526,16 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       const main = mainInput(w, s);
       const differ = main ? await refsDiffer(main, [...(run.files || [])]) : [];
       if (differ.length) { say(notTheFiles(s, main, differ), true); render(false); return; }
+      // A comparison is the step's only against the file the step takes as the earlier one (simple S5): the one an
+      // earlier step made, which the tracker offers by name ("Compare with …"), or the same file chosen from disk.
+      if (s.op === 'compare') {
+        let earlier = null;
+        try { earlier = runner.inputsOf(w, s.id).earlier || null; } catch { earlier = null; }
+        const given = [...(run.earlier || [])];
+        if (earlier && (await refsDiffer(earlier, given)).length) {
+          say(`This run is not counted as the step “${s.title}”: it compared with ${given.map((f) => f.name).join(', ') || 'no file'}, which is not ${names(earlier)}${fromWhere(w, s, earlier)}, the file this step compares with (the size or SHA-256 differs). ${earlier.every((r) => !!heldFor(r)) ? `Press “Compare with ${names(earlier)}”.` : `Compare with ${names(earlier)}, as it was.`}`, true); render(false); return;
+        }
+      }
       // A Finish counts as recording the decisions only if it makes what the workflow keeps them in, and, when the
       // workflow publishes, on a review whose suggestions are exported (each answer then names its candidate).
       if (s.op === 'apply' && s.options && 'intoDataset' in s.options) {
@@ -642,12 +714,15 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     if (s.op === 'read.columns') {
       const m = page.mapping();
       if (!m) throw new Error('Choose the table in step 1 and match its columns first: there is no matching of columns yet.');
+      // A table the steps after could not use is told so here, with the remedy, not three steps on (simple S1, robust R-07).
+      const why = columnsProblem(m, { recipe: wf.recipe?.key, numbered: !!page.numbered?.() });
+      if (why) throw new Error(why);
       return { mapping: await refsHeld([new File([JSON.stringify(m, null, 2)], 'columns.json', { type: 'application/json' })], 'mapping') };
     }
     if (s.op === 'lookup.levels') {
       // The region review open on the page, of the dataset this step takes, with every region settled.
       const r = page.review();
-      if (!r) throw new Error('There is no review open: begin the region review ("Review the regions level by level", in step 5) on the dataset, and settle every region first.');
+      if (!r) throw new Error('There is no review open: begin the region review (press "Review the regions level by level", below) on the dataset, and settle every region first.');
       const work = JSON.parse(r.text);
       const other = notReviewed(work, runner.inputsOf(wf, s.id).subjects || []);
       if (other.length) throw new Error(`The review open was not made of ${other.join(', ')}, the dataset this step takes: choose it in step 1, and begin the region review on it.`);
@@ -793,7 +868,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   hereEl.addEventListener('click', (e) => { const b = e.target.closest('button[data-presses]'); if (b) q(tracker, `#${CSS.escape(b.dataset.presses)}`)?.click(); });
   function stepButtons() {
     const focused = hereEl.contains(document.activeElement) ? document.activeElement.dataset.presses : null;
-    const now = tracker.hidden ? [] : [pickB, useB, downloadB, reviewB, asIsB, doneB].filter((b) => !b.hidden);
+    const now = tracker.hidden ? [] : [pickB, useB, compareB, downloadB, reviewB, asIsB, doneB].filter((b) => !b.hidden);
     hereEl.replaceChildren(...now.flatMap((b) => { const c = el('button', { type: 'button', className: b.className, textContent: b.textContent }); c.dataset.presses = b.id; return [c, ' ']; }));
     hereEl.hidden = !now.length;
     if (head && head.lastElementChild !== hereEl) head.append(hereEl);   // after the step's words, which the host puts there
@@ -898,7 +973,10 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   }
   /** The work file the review step at hand takes, kept in this browser, or null. */
   function reviewInput(s = wf && !changed && !viewing ? atStep() : null) {
-    if (viewing || !s || !['review', 'wikidata.items'].includes(s.op) || !['pending', 'waiting'].includes(s.state)) return null;
+    // At a step that records the decisions too (robust R-08): the review the step takes, decisions and all, which a
+    // reload put away, so that Finish is there to press again; also after a Finish that was not counted, or failed.
+    const records = !!s && RECORDS.has(s.op);
+    if (viewing || !s || !(records || ['review', 'wikidata.items'].includes(s.op)) || !(records ? s.state !== 'running' && s.state !== 'done' : ['pending', 'waiting'].includes(s.state))) return null;
     let ref;
     try { [ref] = runner.inputsOf(wf, s.id).work; } catch { return null; }
     return ref && heldFor(ref) ? ref : null;
@@ -913,7 +991,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     const all = subjects.length === made.length ? subjects : [];
     if (all.length && !sameRefs(chosenRefs, made)) page.choose(all);
     await page.openReview?.(f, all);
-    say(`${f.name} is open again${all.length ? `, on ${names(made)}` : ''}: decide on the candidates, and say when the step is done.`); render(false);
+    const records = RECORDS.has(atStep()?.op);
+    say(`${f.name} is open again${all.length ? `, on ${names(made)}` : ''}${records ? ', with the decisions you made: press Finish, below the review, to record them.' : ': decide on the candidates, and say when the step is done.'}`); render(false);
   }));
   reopenB.addEventListener('click', () => {
     const s = atStep();
@@ -1017,16 +1096,32 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     try { main = s && wf && !viewing ? mainInput(wf, s) || (s.op === 'read.columns' ? runner.inputsOf(wf, s.id).files : null) : null; } catch { main = null; }
     // Written out in the format it already has: ready to download as it is, and done once downloaded.
     const ready = !!(s && wf && !changed && !run && writesItself(s, page.ownTarget?.()) && main && sameRefs(main, chosenRefs));
+    const partial = (s?.state === 'failed' || s?.state === 'cancelled') && s.partial ? Object.values(s.partial).flat()[0] : null;
+    // Offered when the review is put away, or the one open is not of the match the workflow recorded.
+    const openNow = page.review?.();
+    const toReview = !viewing && !partial && reviewInput(s) && (!page.reviewShown?.() || (openNow && notTheMatch(s, openNow))) ? reviewInput(s) : null;
+    const toCompare = !run ? compareInput(s) : null;
     // What the tracker says now: what is to be done next, in words, then any word about the last thing done.
     const op = s && OPERATIONS[s.op];
     let next = '';
     if (viewing) next = '';
-    else if (!shown) next = fileKey(RECIPES[pending.key]) ? `Not started. Choose ${lower(RECIPES[pending.key].files[fileKey(RECIPES[pending.key])].words)} in step 1 to begin: Methodos starts when it is chosen. Or discard it.` : 'Not started.';
+    else if (!shown) {
+      const words = fileKey(RECIPES[pending.key]) ? RECIPES[pending.key].files[fileKey(RECIPES[pending.key])].words : null;
+      // A table may also be pasted, as a list of names (step 1's box): said where the workflow begins with one.
+      next = !words ? 'Not started.' : /^The table\b/.test(words) ? 'Not started. Choose your table to begin (or paste a list of names).' : `Not started. Choose ${lower(words)} to begin.`;
+    }
     // The map's step has no "This step is done": its download in Chora does it, and nothing else can.
     else if (s && op.kind === 'interactive') next = `This step is yours: it waits for ${op.waitsFor}.${s.op === 'map.export' ? ' Open Chora, frame the view, and make the map there (“Make a map”).' : ' Say when it is done.'}`;
     else if (ready) next = `Ready to download: ${names(main)} is already in the format this workflow writes, so it is not converted into itself. Download it, and the step is done.`;
-    else if (s && !run) next = `Run ${OPERATIONS[s.op].tool ? `${OPERATIONS[s.op].tool}'s` : 'its'} ${lower(OPERATIONS[s.op].title)}; the step is done when the run finishes.`;
-    const message = [note?.words, next].filter(Boolean).join(' ');
+    else if (toCompare && sameRefs(main, chosenRefs)) next = `Press “Compare with ${names(toCompare)}”: the workflow kept that file for you, so there is none to find.`;
+    else if (toReview && RECORDS.has(s.op)) next = `Press “Open the review (${toReview.name})”: the decisions you made are in it. Then press Finish, below the review.`;
+    else if (s && !run) next = PRESS[s.op] ? `Press ${PRESS[s.op]} below.` : `Run ${OPERATIONS[s.op].tool ? `${OPERATIONS[s.op].tool}'s` : 'its'} ${lower(OPERATIONS[s.op].title)}; the step is done when the run finishes.`;
+    // Written out in a format that cannot hold all the review decided: said before the run, with what does (rich R1).
+    const lossy = s && wf && !changed && !run && s.op === 'convert' && main?.every((r) => r.type === 'dataset') ? LOSSY[page.target?.()] : null;
+    const decided = lossy ? identitiesOf(main) : 0;
+    const lost = lossy && decided ? `${lossy}, the format chosen beside Convert, cannot hold everything in the ${decided} ${decided === 1 ? 'decision' : 'decisions'} this dataset records about which places are the same: each match is kept as a link, but not who decided it or from which candidate, and a place you said was not the same is left out. PLATO JSON keeps all of it.` : '';
+    tracker.dataset.lossy = String(!!lost);
+    const message = [note?.words, next, lost].filter(Boolean).join(' ');
     tMsg.textContent = message; tMsg.hidden = !message; tMsg.classList.toggle('warn', !!note?.warn);
     tSaid.textContent = [where, run, message].filter(Boolean).join(' ');
     // Not for the map's step: its download in Chora does it (mapped), and nothing chosen here could.
@@ -1047,12 +1142,10 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     pickB.textContent = keptHandle && wf ? `Open ${keptHandle.name} again` : 'Choose the file';
     const usable = main && !sameRefs(main, chosenRefs) && main.every((r) => !!heldFor(r)) ? main : null;
     useB.hidden = !usable || needStart; if (usable) useB.textContent = `Use ${names(usable)}${fromWhere(wf, s, usable)}`;
-    const partial = (s?.state === 'failed' || s?.state === 'cancelled') && s.partial ? Object.values(s.partial).flat()[0] : null;
     reopenB.hidden = !partial;
-    // Offered when the review is put away, or the one open is not of the match the workflow recorded.
-    const openNow = page.review?.();
-    const toReview = !viewing && !partial && reviewInput(s) && (!page.reviewShown?.() || (openNow && notTheMatch(s, openNow))) ? reviewInput(s) : null;
     reviewB.hidden = !toReview;
+    compareB.hidden = !toCompare || needStart || !!usable;
+    if (toCompare) compareB.textContent = `Compare with ${names(toCompare)}${fromWhere(wf, s, toCompare)}`;
     if (toReview) reviewB.textContent = `Open the review (${toReview.name})`;
     if (partial) reopenB.textContent = heldFor(partial) ? `Reopen ${partial.name}` : `Choose ${partial.name} again`;
     if (s && !changed && !viewing) {
@@ -1060,6 +1153,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       onStep({ id: s.id, n: i, title, tool: PAGE_TOOL[s.op] ?? null, text: `Methodos, ${p.title}.${op.kind === 'interactive' && op.waitsFor ? ` This step is yours: it waits for ${op.waitsFor}.` : ''}`,
         link: CHORA_STEPS.has(s.op) ? { href: '#chora', words: 'Open Chora' } : null });
     } else onStep(null);
+    // Ready to download as it is: Download is the one primary action, so Convert, beside it in the centre, is not marked as one (simple S12).
+    if (ready) document.getElementById('convert')?.classList.remove('primary');
     // The result of an earlier step's run, put away by the host as the workflow went on (src/app.js), is
     // summed up in that step's row, with a way to show it again.
     const parked = page.parked?.();
@@ -1069,7 +1164,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     sharedEl.hidden = !viewing;
     projectEl.hidden = !!viewing; backB.hidden = !!viewing; leaveB.hidden = !!viewing;
     if (viewing) {
-      for (const b of [doneB, asIsB, pickB, useB, reopenB, reviewB, restartB, downloadB, choraB]) b.hidden = true;
+      for (const b of [doneB, asIsB, pickB, useB, compareB, reopenB, reviewB, restartB, downloadB, choraB]) b.hidden = true;
       q(sharedEl, '#methodos-shared-words').textContent = `Read-only: “${viewing.title || shown.name || tTitle.textContent}”, shared with you through the World Historical Gazetteer, as it was last saved there (version ${viewing.version}). Nothing in it can be changed or run here: make your own copy to carry on with it, or download it as a project file.`;
     }
     showKept();

@@ -20,7 +20,7 @@ const op = (o) => ({ kind: 'automatic', networked: false, permissions: [], takes
 export const OPERATIONS = Object.fromEntries([
   op({ key: 'detect', title: 'Recognise the files', tool: null, takes: { files: { types: ANY } } }),
   op({ key: 'read.columns', title: 'Match the columns to PLATO', tool: 'Hermes', kind: 'interactive',
-    waitsFor: "the table's columns to be matched to PLATO, in the Columns panel",
+    waitsFor: 'you to check that each column of the table, listed below, is read as what it holds',
     takes: { files: { types: ['files'] } }, gives: { mapping: 'mapping' } }),
   op({ key: 'check', title: 'Check the data', tool: 'Elenchos', takes: { files: { types: ANY }, mapping: { types: ['mapping'], optional: true } } }),
   // Check the Data Cube (Arithmos; plan #34, item 11; src/engine/cubecheck.js): the cube export's integrity constraints (IC-1, 2, 11,
@@ -46,7 +46,7 @@ export const OPERATIONS = Object.fromEntries([
   op({ key: 'lookup', title: 'Look the places up in a gazetteer', tool: 'Krisis', networked: true, permissions: [['gazetteer', 'whg']],
     cancel: 'keeps-partial', takes: { subjects: { types: ANY }, work: { types: ['work.krisis'], optional: true } }, gives: { work: 'work.krisis' } }),
   op({ key: 'review', title: 'Decide which candidates are the same place', tool: 'Krisis', kind: 'interactive', cancel: 'keeps-partial',
-    waitsFor: 'the candidates to be reviewed, in step 5', takes: { work: { types: ['work.krisis'] } }, gives: { work: 'work.krisis' } }),
+    waitsFor: 'the candidates to be reviewed, in the review below', takes: { work: { types: ['work.krisis'] } }, gives: { work: 'work.krisis' } }),
   op({ key: 'apply', title: 'Record the decisions in the dataset', tool: 'Krisis',
     takes: { subjects: { types: ANY }, work: { types: ['work.krisis'] } }, gives: { dataset: 'dataset' } }),
   // Wikidata items for the places no gazetteer knows (Issue #36; src/engine/krisis/wikidata.js): in the review's
@@ -56,7 +56,7 @@ export const OPERATIONS = Object.fromEntries([
   // step that records the decisions then takes. Optional: a review with no place to mint is handed on as it is.
   op({ key: 'wikidata.items', title: 'Create Wikidata items for the places no gazetteer knows', tool: 'Krisis', kind: 'interactive', networked: true, permissions: [['gazetteer', 'wikidata']],
     cancel: 'keeps-partial',
-    waitsFor: 'the places with no match to be searched in Wikidata, the batch written and run by you in QuickStatements, and the new items\' Q-ids checked and recorded, in the review\'s panel "Wikidata items" (step 5); then say the step is done',
+    waitsFor: 'the places with no match to be searched in Wikidata, the batch written and run by you in QuickStatements, and the new items\' Q-ids checked and recorded, in the review\'s panel "Wikidata items", below; then say the step is done',
     takes: { subjects: { types: ANY }, work: { types: ['work.krisis'] } }, gives: { work: 'work.krisis' } }),
   // Chora, in the page, gives the dataset its save wrote to this step (src/methodos/page.js, placed): the
   // step is done with it. "This step is done" takes the dataset chosen in step 1, as for any interactive step.
@@ -86,7 +86,7 @@ export const OPERATIONS = Object.fromEntries([
   // regions.js). The reviewer settles every region; the step is done with the work file that holds them.
   op({ key: 'lookup.levels', title: 'Identify the containing regions, level by level', tool: 'Krisis', kind: 'interactive', networked: true, permissions: [['gazetteer', 'whg']],
     cancel: 'keeps-partial',
-    waitsFor: 'the regions to be identified level by level, the widest first, in the region review of step 5 ("Review the regions level by level"), until every region is settled',
+    waitsFor: 'the regions to be found in the gazetteer, the widest first: press "Review the regions level by level" below, and settle each one',
     takes: { subjects: { types: ANY } }, gives: { work: 'work.krisis' } }),
   // PLATO #23, option B: the source's half (each place ContainedIn the region minted from its row) is
   // Hermes's, written when the table is converted; this step writes the reviewer's half, an

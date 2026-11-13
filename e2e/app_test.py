@@ -3291,6 +3291,7 @@ def main():
             recipes_checks(pw, url, tmp)
             match_two_checks(pw, url, tmp)
             tracker_review_checks(pw, url, tmp)
+            myd_tracker_checks(pw, url, tmp)
             release_workflow_checks(pw, url, tmp)
             project_checks(pw, url, tmp)
             whg_checks(pw, url, tmp)
@@ -5641,6 +5642,219 @@ def tracker_review_checks(pw, url, tmp):
         finally: ctx.close()
     attempt('Tracker: below 60rem "This step is done" is under the centre\'s title as well, the tracker\'s own folded in its strip, and pressing it does the step; at a desk\'s width only the tracker\'s is shown', narrow_button)
     browser.close()
+
+# ---- Map your data, the tracker never leaves the user with nothing to press (13 November 2026, batch 2 "TRACK") ----
+# Four walks of Map your data as a newcomer follows it, each in a browser context of its own, WHG a stub: a table that
+# cannot be looked up is refused at its columns' step, with the remedy named (a table with ids is accepted); at the
+# regions step the dataset the step before made is offered by name, and no words point at a "step 5"; a reload after
+# the review is said done leaves "Open the review" and Finish; the comparison is one press, with the file the workflow
+# kept (a comparison with another file is not the step); and at "Write it out" the tracker says what Linked Places
+# Format cannot hold, and says nothing of it for PLATO JSON. Every absence here is asserted beside a presence.
+MYD = ROOT / 'test/fixtures/myd'
+MYD_BASELINE, MYD_ONE_COLUMN, MYD_REGIONS = MYD / '00-baseline-with-ids.csv', MYD / '14-one-column.csv', MYD / 'places-with-id.csv'
+# Each of the stub's records lies where the table puts its place, so that the bulk accept takes all four.
+MYD_TRACK_ANSWERS = {n: [mydata_answer(f'place:gn:80000{i:02d}', n, point)] for i, (n, point) in enumerate(
+    (('Aquae Sulis', [-2.3590, 51.3811]), ('Eboracum', [-1.0815, 53.9590]), ('Deva Victrix', [-2.8908, 53.1905]), ('Lindum Colonia', [-0.5406, 53.2307])), 1)}
+def myd_tracker_checks(pw, url, tmp):
+    import re
+    base = url.rstrip('/') + '/'
+    out = tmp / 'myd-tracker'; out.mkdir(exist_ok=True)
+    browser = pw.chromium.launch(headless=True, args=GL)
+    cors = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS', 'Access-Control-Allow-Headers': 'authorization, content-type, accept, user-agent'}
+    posts = []
+    def stub(route):
+        req = route.request
+        if req.method == 'OPTIONS': return route.fulfill(status=204, headers=cors)
+        reply = lambda body, status=200: route.fulfill(status=status, headers={**cors, 'Content-Type': 'application/json'}, body=json.dumps(body))
+        if req.method == 'GET': return reply({'detail': 'Not found'}, 404)
+        body = json.loads(req.post_data or '{}'); posts.append(body)
+        reply({'attribution': LOOKUP_ATTRIBUTION, **{k: {'result': MYD_TRACK_ANSWERS.get(q.get('query'), [])} for k, q in (body.get('queries') or {}).items()}})
+    def fresh():
+        ctx = browser.new_context(accept_downloads=True, viewport={'width': 1440, 'height': 900}, reduced_motion='reduce')
+        ctx.add_init_script('window.__plato_forceDownload = true;')
+        ctx.route(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'), stub)
+        page = ctx.new_page(); page.set_default_timeout(T(15) * 1000)
+        # WHG allowed and the reviewer named, as a visitor who has used the page before has them.
+        page.goto(NOTOOLS if PROVE else base)
+        page.evaluate("() => { localStorage.setItem('plato-tools.permissions', JSON.stringify({ version: 1, grants: { 'gazetteer:whg': { state: 'allowed', at: '2026-10-04T10:00:00Z' } } })); localStorage.setItem('plato-tools.reviewer', JSON.stringify({ name: 'Remembered Reviewer' })); }")
+        page.goto(NOTOOLS if PROVE else base)
+        if wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready').get('phase') != 'ready': raise RuntimeError('the main page did not start')
+        return ctx, page
+    track = lambda page: page.evaluate(JOIN_STATE)
+    def step_is(page, step, state, timeout=60):
+        until(page, f"() => document.querySelector('#methodos-track li[data-step=\"{step}\"]')?.dataset.state === '{state}'", timeout)
+    def choose(page, fs):
+        page.set_input_files('#picker', [])
+        page.set_input_files('#picker', [str(f) for f in fs])
+        s = wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection')
+        if s.get('phase') != 'detected': raise RuntimeError(f'not detected: {s.get("phase")}')
+    def run(page, button, timeout=180):
+        page.click(button)
+        return wait_state(page, lambda s: s.get('phase') in ('done', 'error'), T(timeout), 'run')
+    def begin(page, table, regions='no'):
+        page.click('#methodos-ask'); until(page, "!document.getElementById('methodos').hidden", 5)
+        page.check('input[name="methodos-have"][value="table"]'); page.check('input[name="methodos-want"][value="map"]')
+        for k, v in (('has-regions', regions), ('will-draw', 'no'), ('will-publish', 'no')): page.check(f'input[name="methodos-ask-{k}"][value="{v}"]')
+        until(page, "() => !document.getElementById('methodos-start').hidden", 5)
+        page.click('#methodos-start'); until(page, "['pending', 'idle'].includes(document.getElementById('methodos-tracker').dataset.status)", 10)
+        before = track(page)['message']
+        choose(page, [table])
+        until(page, "document.getElementById('methodos-tracker').dataset.status === 'idle'", 30)
+        until(page, "() => window.__plato?.columns?.headers && !document.getElementById('methodos-done').hidden", 30)
+        return before
+    CHOSEN = "() => [...document.querySelectorAll('#chosen li .name')].map((e) => e.textContent)"
+    SHOWN = "(id) => { const b = document.getElementById(id); return b && !b.hidden && !b.closest('[hidden]') ? b.textContent : null; }"
+    WARNED = "() => document.getElementById('methodos-message').classList.contains('warn')"
+    def use(page, name):
+        """The file the tracker offers ("Use …"), pressed, and chosen."""
+        until(page, f"() => (({SHOWN})('methodos-use') || '').startsWith('Use {name}')", 30)
+        said = page.evaluate(SHOWN, 'methodos-use')
+        page.click('#methodos-use')
+        until(page, f"() => JSON.stringify(({CHOSEN})()) === {json.dumps(json.dumps([name]))}", 30)
+        if wait_state(page, lambda s: s.get('phase') in ('detected', 'unrecognised'), T(60), 'detection').get('phase') != 'detected': raise RuntimeError(f'{name} was not recognised')
+        return said
+
+    # ---- A table that cannot be looked up is told so at its columns, with the remedy (simple S1 part 3, robust R-07)
+    def refused_at_the_columns():
+        ctx, page = fresh()
+        try:
+            before = begin(page, MYD_ONE_COLUMN)
+            page.click('#methodos-done')
+            until(page, "() => /Number the rows/.test(document.getElementById('methodos-message').textContent)", 15)
+            t = track(page); warned = page.evaluate(WARNED)
+            # The control, in the same browser: a table with an id column is accepted, and the workflow goes on.
+            page.click('#methodos-leave')
+            until(page, "() => document.getElementById('methodos-tracker').hidden", 10)
+            begin(page, MYD_BASELINE)
+            page.click('#methodos-done'); step_is(page, 'columns', 'done', 15)
+            t2 = track(page)
+            ok = (t['steps'].get('columns') == 'current' and t['steps'].get('check') == 'todo' and warned
+                  and 'a place needs an id for that: no column is read as the place\'s id. Press "Number the rows", or read a column as the Place id.' in t['message']
+                  and before == 'Not started. Choose your table to begin (or paste a list of names).'
+                  and t2['steps'].get('columns') == 'done' and t2['steps'].get('check') == 'current' and 'Number the rows' not in t2['message'] and t2['message'] == 'Press Check below.')
+            return ok, {'before the file': before, 'one column': t['steps'], 'said': t['message'], 'a warning': warned, 'with ids': t2['steps'], 'said then': t2['message']}
+        finally: ctx.close()
+    attempt('Map your data (tracker): a one-column table, which could not be looked up, is refused at its columns with "Number the rows" named, the step still current; a table with ids is accepted, and told "Press Check below."', refused_at_the_columns)
+
+    # ---- At the regions step the dataset made is offered, and nothing points at "step 5" (simple S4, rich R12)
+    def regions_step():
+        ctx, page = fresh()
+        try:
+            page.evaluate("() => { const b = document.getElementById('base'); b.value = 'https://example.org/lancashire/'; b.dispatchEvent(new Event('change')); }")
+            begin(page, MYD_REGIONS, regions='yes')
+            page.locator('#columns tbody tr:has(th code:text-is("place")) select[data-column]').select_option(label='Name')
+            page.click('#methodos-done'); step_is(page, 'columns', 'done', 15)
+            run(page, '#check'); step_is(page, 'check', 'done')
+            page.select_option('#target', 'plato-json')
+            run(page, '#convert'); step_is(page, 'dataset', 'done')
+            step_is(page, 'regions', 'current', 15)
+            t = track(page); before = page.evaluate(CHOSEN)
+            offered = use(page, 'places-with-id.json')
+            t2 = track(page)
+            ok = (before == ['places-with-id.csv'] and offered == 'Use places-with-id.json (made by the step “Make a PLATO dataset of it”)'
+                  and 'This step is yours: it waits for the regions to be found in the gazetteer' in t['message'] and 'press "Review the regions level by level" below' in t['message']
+                  and not re.search(r'step \d', t['message']) and t2['steps'].get('regions') == 'current' and t2['use'] is None)
+            return ok, {'chosen at the step': before, 'offered': offered, 'said': t['message'], 'steps': t2['steps'], 'offered once used': t2['use']}
+        finally: ctx.close()
+    attempt('Map your data (tracker): at the regions step the dataset the step before made is offered by name and chosen in one press, and the step\'s words name the button to press, with no "step 5"', regions_step)
+
+    # ---- One walk to the end: the review after a reload, the comparison in one press, and what the format cannot hold
+    ctx, page = fresh()
+    r = {}
+    def need(*keys):
+        missing = [k for k in keys if not r.get(k)]
+        if missing: raise RuntimeError(f'an earlier step did not finish ({", ".join(missing)})')
+    decided = lambda s: sum(1 for c in (s.get('work') or {}).get('candidates', []) if (c.get('decision') or {}).get('kind') == 'match')
+    def reviewed():
+        begin(page, MYD_BASELINE)
+        page.click('#methodos-done'); step_is(page, 'columns', 'done', 15)
+        run(page, '#check'); step_is(page, 'check', 'done')
+        page.select_option('#target', 'plato-json')
+        run(page, '#convert'); step_is(page, 'dataset', 'done')
+        use(page, '00-baseline-with-ids.json')
+        if not page.evaluate("() => document.getElementById('lookup').open"): page.click('#lookup > summary')
+        page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
+        until(page, "() => /^Send 4 queries to WHG$/.test(document.getElementById('lookup-send').textContent) && !document.getElementById('lookup-send').disabled", 60)
+        page.click('#lookup-send')
+        step_is(page, 'lookup', 'done', 90)
+        until(page, "() => !document.getElementById('bulk-accept').disabled", 30)
+        page.click('#bulk-accept')
+        n = decided(wait_state(page, lambda s: decided(s) == 4, T(15), 'accepted'))
+        page.click('#methodos-done'); step_is(page, 'review', 'done', 15)
+        t = track(page)
+        r['reviewed'] = n == 4 and t['steps'].get('apply') == 'current'
+        return r['reviewed'] and t['message'] == 'Press Finish below.', {'decided': n, 'steps': t['steps'], 'said': t['message'], 'lookups': len(posts)}
+    attempt('Map your data (tracker): four places looked up in the stub of WHG and accepted, the review said done: the next step says "Press Finish below."', reviewed)
+
+    def reload_at_the_record():
+        need('reviewed')
+        page.reload()
+        if wait_state(page, lambda s: s.get('phase') in ('ready', 'detected', 'unrecognised'), T(60), 'the page again').get('phase') not in ('ready', 'detected'): raise RuntimeError('the page did not start again')
+        step_is(page, 'apply', 'current', 30)
+        until(page, f"() => !!({SHOWN})('methodos-open-review')", 30)
+        offer = page.evaluate(SHOWN, 'methodos-open-review'); t = track(page)
+        finish_before = page.is_visible('#finish')
+        page.click('#methodos-open-review')
+        s = wait_state(page, lambda s: decided(s) == 4, T(30), 'the review open again')
+        until(page, "() => !document.getElementById('review').hidden && !document.getElementById('finish').disabled", 30)
+        total = len((s.get('work') or {}).get('candidates', []))
+        page.check('input[name="review-output"][value="dataset"]')
+        done = run(page, '#finish'); step_is(page, 'apply', 'done', 30)
+        n = next(o['name'] for o in (done.get('outputs') or []) if o['name'].endswith('.krisis-dataset.json'))
+        r['applied'] = download(page, n, out / n)
+        made = len(re.findall(r'"identities"\s*:', r['applied'].read_text()))
+        return (offer.startswith('Open the review (') and 'the decisions you made are in it. Then press Finish, below the review.' in t['message'] and finish_before is False
+                and decided(s) == 4 and total == 4 and made == 4 and track(page)['steps'].get('again') == 'current'), \
+            {'offered': offer, 'said': t['message'], 'Finish before': finish_before, 'decided': f'{decided(s)} of {total}', 'attestations written': made, 'steps': track(page)['steps']}
+    attempt('Map your data (tracker): a reload after the review is said done offers "Open the review" (no Finish before it); it opens with 4 of 4 decided, and Finish writes 4 attestations as the step', reload_at_the_record)
+
+    def compare_in_one_press():
+        need('applied')
+        use(page, r['applied'].name)
+        said = track(page)['message']
+        run(page, '#check'); step_is(page, 'again', 'done')
+        until(page, f"() => !!({SHOWN})('methodos-compare')", 30)
+        offer = page.evaluate(SHOWN, 'methodos-compare'); t = track(page)
+        # The control: compared with another file (the result itself), through the page's own button and its picker, it is not the step.
+        page.set_input_files('#earlier', [str(r['applied'])])
+        wait_state(page, lambda s: s.get('action') == 'compare' and s.get('phase') in ('done', 'error'), T(120), 'the other comparison')
+        until(page, "() => /is not counted as the step/.test(document.getElementById('methodos-message').textContent)", 15)
+        other = track(page)
+        # The step's own: one press in the tracker, and no file is asked for.
+        asked = []
+        page.on('filechooser', lambda c: asked.append(c))
+        page.click('#methodos-compare')
+        step_is(page, 'compare', 'done', 120)
+        s = wait_state(page, lambda s: s.get('action') == 'compare' and s.get('phase') in ('done', 'error'), T(60), 'the comparison')
+        r['compared'] = True
+        return (said.endswith(': the file this step takes. Press Check below.') and offer == 'Compare with 00-baseline-with-ids.json (made by the step “Make a PLATO dataset of it”)'
+                and 'Press “Compare with 00-baseline-with-ids.json”: the workflow kept that file for you' in t['message']
+                and other['steps'].get('compare') == 'current' and f'it compared with {r["applied"].name}, which is not 00-baseline-with-ids.json' in other['message']
+                and asked == [] and s.get('phase') == 'done' and (s.get('report') or {}).get('errors') == 0 and track(page)['steps'].get('out') == 'current'), \
+            {'at the check': said, 'offered': offer, 'said': t['message'], 'with another file': other['steps'].get('compare'), 'said of it': other['message'][:260], 'file choosers': len(asked),
+             'compare': s.get('phase'), 'errors': (s.get('report') or {}).get('errors'), 'steps': track(page)['steps']}
+    attempt('Map your data (tracker): the compare step offers "Compare with 00-baseline-with-ids.json", the file the workflow kept, and one press does the step with no file chooser; a comparison with another file is not counted', compare_in_one_press)
+
+    def write_it_out():
+        need('compared')
+        until(page, "() => !document.getElementById('methodos-download').hidden", 30)
+        LOSSY = "() => ({ said: document.getElementById('methodos-message').textContent, lossy: document.getElementById('methodos-tracker').dataset.lossy, convert: document.getElementById('convert').classList.contains('primary'), download: document.getElementById('methodos-download').classList.contains('primary') && !document.getElementById('methodos-download').hidden })"
+        plain = page.evaluate(LOSSY)
+        target = page.evaluate("() => { const t = document.getElementById('target'); return { options: [...t.options].map((o) => o.value), shown: !!t.offsetParent, disabled: t.disabled, value: t.value }; }")
+        if not (target['shown'] and not target['disabled'] and 'lpf' in target['options']): return False, {'the list of formats': target, 'said': plain}
+        page.select_option('#target', 'lpf')
+        until(page, "() => document.getElementById('methodos-tracker').dataset.lossy === 'true'", 30)
+        lpf = page.evaluate(LOSSY)
+        page.select_option('#target', 'plato-jsonl')
+        until(page, "() => document.getElementById('methodos-tracker').dataset.lossy === 'false'", 15)
+        back = page.evaluate(LOSSY)
+        sentence = 'Linked Places Format, the format chosen beside Convert, cannot hold everything in the 4 decisions this dataset records about which places are the same'
+        return (sentence in lpf['said'] and 'PLATO JSON keeps all of it.' in lpf['said'] and 'cannot hold' not in plain['said'] and 'cannot hold' not in back['said']
+                and plain['said'].startswith('Ready to download: ') and back['said'].startswith('Ready to download: ')
+                and plain['download'] is True and plain['convert'] is False), {'as it came': plain, 'LPF chosen': lpf, 'PLATO JSON Lines chosen': back}
+    attempt('Map your data (tracker): at "Write it out" Download is the one primary button; with Linked Places Format chosen the tracker says what it cannot hold of the 4 decisions, and with PLATO JSON Lines chosen it says nothing of it', write_it_out)
+    try: ctx.close(); browser.close()
+    except Exception: pass
 
 # ---- Release a new version (src/engine/methodos/recipes/release-a-new-version.js; plan #34, item 10; Issue #23) ----
 # The workflow followed as a visitor follows it, on two small constructed files: the previous release (published, every

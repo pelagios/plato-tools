@@ -1324,6 +1324,9 @@ methodos = mountMethodos({
     ready: () => whenReady,
     output: async (name) => (await (await (await navigator.storage.getDirectory()).getDirectoryHandle('outputs')).getFileHandle(name)).getFile(),
     mapping: () => (isTable(input) && columns && !columns.error ? columnOptions() : null),
+    // The format chosen beside Convert; and the version check run against files the workflow holds, as "Compare with the earlier version…" runs it on files chosen.
+    target: () => $('target').value,
+    compareWith: (earlier) => start('compare', earlier),
     // The matching a workflow's step kept, shown again for the table chosen, as "Use a saved matching…" shows one: not while the file is still being looked at.
     applyMapping: (m, name) => { if (!isTable(input) || state.phase === 'detecting') return false; requestColumns(m, name); return true; },
     review: () => (work ? { text: serialiseWork(work), name: workName } : null),

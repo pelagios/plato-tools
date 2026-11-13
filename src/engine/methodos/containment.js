@@ -9,7 +9,7 @@ import { CONTAINED_IN } from '../hermes/within.js';
 /** Whether every region of a review is settled: its progress, or a DataError in words (none at all, or which levels are open). */
 export function regionsSettled(work) {
   const p = regionProgress(work);
-  if (!p.total) throw new DataError('The review has no regions to identify: begin the region review ("Review the regions level by level", in step 5) on the dataset the table was converted to under a base address, whose places lie in regions.');
+  if (!p.total) throw new DataError('The review has no regions to identify: begin the region review (press "Review the regions level by level", below) on the dataset the table was converted to under a base address, whose places lie in regions.');
   const open = p.levels.filter((l) => l.settled < l.total);
   if (open.length) throw new DataError(`${p.total - p.settled} of the ${p.total} regions are not settled yet (${open.map((l) => `level ${l.level}: ${l.total - l.settled} of ${l.total}`).join('; ')}): decide each one, or say it has no match, and the step is done.`);
   return p;
@@ -101,4 +101,25 @@ export function baseDiffers(work, base) {
   const saved = work?.subjects?.uri, now = datasetAddress(base);
   if (work?.subjects?.uriFrom !== 'base' || typeof saved !== 'string' || !saved || !now || saved === now) return null;
   return `The base address in Options (${now}) is not the one this review was saved with (${saved}): Finish writes the attestations for ${saved}, the address its candidates were exported for. Set Options back to it if your places keep that address.`;
+}
+
+// ---- The table's columns, at the step that reads them (13 November 2026: simple S1, robust R-07) -------
+// A table that the steps after cannot use is told so at its columns' step, not three steps on with "0 places".
+// The button that numbers the rows is Hermes's, in the Columns panel; its label is quoted here and by the lookup.
+export const NUMBER_ROWS = 'Number the rows';
+// The recipes that look every place up in a gazetteer, by its address: a place needs an id for that.
+const NEEDS_IDS = new Set(['map-your-data']);
+const fieldOf = (v) => (v && typeof v === 'object' ? v.field : v);
+/**
+ * What stands in the way of going on from the columns' step with the matching `mapping` (as it is saved:
+ * each column's field, or { field, … }), in words that name the remedy, or null. No column read as the
+ * place's name or its web address: not one row would become a place. In a workflow that looks places up
+ * (`recipe`, its key), no column read as the place's id or its web address, and the rows not numbered
+ * (`numbered`): no place could be looked up.
+ */
+export function columnsProblem(mapping, { recipe = null, numbered = false } = {}) {
+  const fields = new Set(Object.values(mapping || {}).map(fieldOf));
+  if (!fields.has('name') && !fields.has('address')) return 'No column is read as the place\'s name yet, so not one row would become a place. Under "Read as", choose "Name" for the column that holds the names.';
+  if (NEEDS_IDS.has(recipe) && !fields.has('id') && !fields.has('address') && !numbered) return `This workflow looks each place up, and a place needs an id for that: no column is read as the place's id. Press "${NUMBER_ROWS}", or read a column as the Place id.`;
+  return null;
 }

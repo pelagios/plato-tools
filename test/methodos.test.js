@@ -498,3 +498,36 @@ test('building the site, cancelled while it writes the downloads, stops: no site
     }
   }
 });
+
+// ---- Map your data, 13 November 2026 (batch 2): the tracker's words, and the table refused at its columns' step ----
+test('no operation says "step 5" (or any step by number): the page\'s own numbers are hidden in a workflow', async () => {
+  const { regionsSettled } = await import('../src/engine/methodos/index.js');
+  const waits = Object.values(OPERATIONS).filter((o) => o.waitsFor);
+  // The presence: the interactive operations do say what they wait for, the region review by its button's name.
+  assert.ok(waits.length >= 6, `${waits.length} operations say what they wait for`);
+  assert.match(OPERATIONS['lookup.levels'].waitsFor, /press "Review the regions level by level" below/);
+  assert.match(OPERATIONS.review.waitsFor, /in the review below/);
+  assert.deepEqual(waits.filter((o) => /step \d/i.test(o.waitsFor)).map((o) => o.key), []);
+  // The refusal of a review with no regions names the button too, and no step.
+  assert.throws(() => regionsSettled({ regions: {} }), (e) => e instanceof DataError && /press "Review the regions level by level", below/.test(e.message) && !/step \d/.test(e.message));
+});
+
+test('a table the workflow cannot use is refused at its columns, in words that name the remedy; one it can use is not', async () => {
+  const { columnsProblem, NUMBER_ROWS } = await import('../src/engine/methodos/index.js');
+  assert.equal(NUMBER_ROWS, 'Number the rows');
+  const map = { recipe: 'map-your-data' };
+  // Neither a name nor a web address: not one row would become a place, in any workflow.
+  assert.match(columnsProblem({ place: 'note', lat: 'latitude' }, map), /^No column is read as the place's name yet.*choose "Name" for the column that holds the names\.$/);
+  assert.match(columnsProblem({ place: 'note' }, { recipe: 'publish-a-dataset' }), /^No column is read as the place's name yet/);
+  assert.match(columnsProblem({}, map), /^No column is read as the place's name yet/);
+  // A name and no id, where every place is looked up: refused, with the two ways on.
+  assert.equal(columnsProblem({ name: 'name', county: { field: 'within', level: 1 } }, map),
+    'This workflow looks each place up, and a place needs an id for that: no column is read as the place\'s id. Press "Number the rows", or read a column as the Place id.');
+  // The controls: an id column; a web address (plain, or made through a pattern); the rows numbered; a workflow that looks nothing up.
+  assert.equal(columnsProblem({ id: 'id', name: 'name' }, map), null);
+  assert.equal(columnsProblem({ uri: 'address' }, map), null);
+  assert.equal(columnsProblem({ name: 'name', q: { field: 'address', pattern: 'https://www.wikidata.org/entity/{}' } }, map), null);
+  assert.equal(columnsProblem({ name: 'name' }, { ...map, numbered: true }), null);
+  assert.equal(columnsProblem({ name: 'name' }, { recipe: 'publish-a-dataset' }), null);
+  assert.equal(columnsProblem({ name: 'name' }), null);
+});

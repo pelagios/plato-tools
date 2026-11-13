@@ -139,7 +139,7 @@ test('Map your data with regions, end to end in Node: the regions level by level
   // Checked, converted under the base address, then at the region review, which waits for the reviewer.
   assert.equal(a.state.status, 'waiting');
   assert.equal(a.state.current, 'regions');
-  assert.match(a.state.steps.find((x) => x.id === 'regions').why, /level by level, the widest first/);
+  assert.match(a.state.steps.find((x) => x.id === 'regions').why, /the regions to be found in the gazetteer, the widest first: press "Review the regions level by level" below/);
   const converted = JSON.parse(await host.store.get(a.state.steps.find((x) => x.id === 'dataset').outputs.dataset[0].name).text());
   assert.equal(ends(converted).contained, 10, 'Hermes wrote each of the ten places ContainedIn its parish');
   assert.equal(ends(converted).regions, 6);
