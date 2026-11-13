@@ -5740,6 +5740,33 @@ def myd_tracker_checks(pw, url, tmp):
         finally: ctx.close()
     attempt('Map your data (tracker): a one-column table, which could not be looked up, is refused at its columns with "Number the rows" named, the step still current; a table with ids is accepted, and told "Press Check below."', refused_at_the_columns)
 
+    # ---- The remedy the refusal names works: the rows numbered, the step is accepted and the lookup takes every place
+    #      (the batches landed together, 13 November 2026: the refusal is the tracker's, the button the Columns panel's)
+    def numbered_goes_on():
+        ctx, page = fresh()
+        try:
+            begin(page, MYD_ONE_COLUMN)
+            page.click('#methodos-done')
+            until(page, "() => /Number the rows/.test(document.getElementById('methodos-message').textContent)", 15)
+            refused = track(page)['steps']
+            page.click('#columns-number')
+            wait_state(page, lambda x: ((x.get('columns') or {}).get('mapping') or {}).get('(row number)') == 'id', T(10), 'numbered')
+            page.click('#methodos-done'); step_is(page, 'columns', 'done', 15)
+            t = track(page)
+            run(page, '#check'); step_is(page, 'check', 'done')
+            page.select_option('#target', 'plato-json')
+            run(page, '#convert'); step_is(page, 'dataset', 'done')
+            use(page, '14-one-column.json')
+            if not page.evaluate("() => document.getElementById('lookup').open"): page.click('#lookup > summary')
+            until(page, "() => /Would look up \\d+ places|can be looked up yet|No places to look up/.test(document.getElementById('lookup-preview').textContent)", 60)
+            preview = re.sub(r'\s+', ' ', page.inner_text('#lookup-preview'))[:200]
+            ok = (refused.get('columns') == 'current' and refused.get('check') == 'todo'
+                  and t['steps'].get('columns') == 'done' and t['steps'].get('check') == 'current' and 'Number the rows' not in t['message']
+                  and 'Would look up 5 places' in preview and 'can be looked up yet' not in preview)
+            return ok, {'refused': refused, 'numbered': t['steps'], 'said': t['message'], 'lookup': preview}
+        finally: ctx.close()
+    attempt('Map your data (tracker): the one-column table refused at its columns is accepted once "Number the rows" is pressed, and at the lookup all 5 of its places would be looked up', numbered_goes_on)
+
     # ---- At the regions step the dataset made is offered, and nothing points at "step 5" (simple S4, rich R12)
     def regions_step():
         ctx, page = fresh()

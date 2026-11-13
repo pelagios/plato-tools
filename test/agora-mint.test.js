@@ -454,6 +454,33 @@ test('the guard: mint, report and site each refuse a dataset under the stand-in 
   assert.equal(w3id.refused?.severity, 'error'); assert.deepEqual(w3id.outputs, []);
 });
 
+// The candidate set written beside the dataset at the relate step (<stem>.candidates.json) is not rewritten by
+// minting, so it still holds temporary addresses. No part of publishing takes it: handed to one as the dataset,
+// it is refused whole and nothing is written, so it cannot reach a deposit or the site through the tools. The
+// refusal is of a candidate set as such (the control under a real base is refused too); the presence that
+// shows these parts can write at all is the dataset under the real base.
+test('the candidate set left beside the dataset, still under the stand-in, is taken by no part of publishing: mint, report and site each refuse it and write nothing', async () => {
+  const SET = readFileSync(`${PLATO_REPO}/schemas/examples/candidate-set-regions.json`, 'utf8');
+  const under = (base) => SET.replaceAll('https://whgazetteer.org/example/', base);
+  assert.ok(holdsStandIn(under(STAND_IN_BASE)), 'the set holds temporary addresses');
+  assert.ok(JSON.parse(under(STAND_IN_BASE)).candidates.length > 0, 'and has candidates');
+  for (const name of ['mint', 'report', 'site']) {
+    for (const [why, text, options] of [['no base', under(STAND_IN_BASE), {}], ['a real base given', under(STAND_IN_BASE), { base: REAL }], ['made under a real base', under(REAL), { base: REAL }]]) {
+      const e = env();
+      const input = await detect([textFile(text, 'rich2.candidates.json')]);
+      assert.equal(input.profile, 'candidate-set', 'read as a candidate set');
+      const r = await publish({ part: name, input, options: { name: 'rich2.candidates.json', ...options } }, e);
+      assert.ok(r.report.errors > 0, `${name}, ${why}: refused`);
+      assert.deepEqual(r.outputs, [], `${name}, ${why}: no outputs`);
+      assert.deepEqual(Object.keys(e.outs), [], `${name}, ${why}: nothing is written`);
+    }
+    // The presence: the same part writes the dataset under the real base, with no temporary address in it.
+    const ok = await part(name, rich2(REAL), { base: REAL });
+    assert.ok(ok.outputs.length > 0, `${name}: the dataset is written`);
+    assert.ok(Object.values(ok.e.outs).every((parts) => !parts.some((p) => typeof p === 'string' && holdsStandIn(p))), `${name}: nothing temporary in what is written`);
+  }
+});
+
 test('the rewrite: minted with the real base, every address under the stand-in is moved to it, none is left anywhere in the copy, and nothing is lost on the way', async () => {
   const before = tally(JSON.stringify(rich2(STAND_IN_BASE)));
   assert.deepEqual([before.places, before.regions, before.subjects, before.promotedFrom, before.relatesTo], [10, 5, 9, 9, 9], 'the fixture, counted');
