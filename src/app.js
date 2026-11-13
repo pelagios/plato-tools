@@ -1385,8 +1385,8 @@ methodos = mountMethodos({
       if (!$('result').hidden && !lingering) { lingering = { step: was.id, words: $('summary').textContent.trim(), label: resultLabel(was.title) }; resultOf(lingering.label); }
       showNext(!$('action').hidden ? $('action-h') : $('workflow-title'), { from: stepHead() });
     }
-    // Gone on from a step whose result is the review as it stands (its decisions said done, or written by Finish): the
-    // workflow holds them now, so leaving the page loses none of them (leaveGuard, below).
+    // Gone on from a step whose result is the review as it stands (the lookup's answers, the decisions said done, or
+    // what Finish wrote): the workflow holds them now, so leaving the page loses none of them (the guard on leaving, below).
     if (wentOn(was, step) && REVIEW_HELD.has(was?.op)) handedOver = unsaved;
     // At the review step (the lookup has ended, or the step is come back to): the review is the one thing to do, so the
     // lookup's panel is closed, "Match with another dataset" and "Resume a review" are put away (src/styles.css,
@@ -1560,7 +1560,7 @@ let saves = 0;     // how many times it has been saved (Krisis × Methodos: with
 // How many of `unsaved` a workflow already holds: the count as it stood when the workflow last went on from a step whose
 // result is the review (onStep, above). Decisions made since are in this page alone.
 let handedOver = 0;
-const REVIEW_HELD = new Set(['review', 'lookup.levels', 'wikidata.items', 'apply', 'relate.containment']);
+const REVIEW_HELD = new Set(['lookup', 'lookup.levels', 'review', 'wikidata.items', 'apply', 'relate.containment']);
 const REVIEWER_KEY = 'plato-tools.reviewer';
 /**
  * The reviewer remembered, checked again on load by the engine's own rule (checkReviewer), as before a
