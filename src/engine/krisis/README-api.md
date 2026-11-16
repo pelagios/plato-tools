@@ -211,12 +211,15 @@ words them all.
   `diceForm(s)`, `isLatin(s)`, `bestDice(forms, cand)`, `withheldOf(cand, forms)`, `tieOf(answer)`.
   `guardOf(workCandidate)` — the same verdict from what mergeAnswers stored (`not-recorded` for a local
   candidate or an older file). `passing(work, iri)`, `guardsFirst(work, order)`.
-  `planGuarded(work) -> { accept, leftOut: { far, ccodes, kind, total, examples }, several, tied: [{ id, place,
-  count, region }] }` (changes nothing; `tied`: places left out because `count` candidates of the passing
+  `planGuarded(work) -> { accept, leftOut: { far, ccodes, kind, total, km, examples: [{ id, why, name, km? }] },
+  several, tied: [{ id, place, count, region }] }` (changes nothing; each example a candidate not taken, `name`
+  the reviewer's own label of its place and, for a far one, `km` the greatest distance it was judged by;
+  `leftOut.km` that distance when all the far ones share it, else null; `guardWords.leftOut` says them; `tied`: places left out because `count` candidates of the passing
   one's title were found under the same constraint, not in another country and, unless confined to a
   region, not far; `region` the label of the region it was confined to, else null; #31),
   `acceptGuarded(work, { reviewer, identityType = 'closeMatch', at, threshold }) -> { batch, accepted,
-  leftOut, several, ties, tied }` (`ties` the number of such places, `tied` each one's count; page only:
+  leftOut, several, ties, tied }` (`leftOut` as planGuarded's; the batch in the work file keeps the counts
+  alone; `ties` the number of such places, `tied` each one's count; page only:
   the CLI prints planGuarded's counts, `guarded.ties` among them, with `lookup --dry-run --review`),
   `undoBatch(work, 'bN') -> cleared` (only decisions still carrying the batch).
 - `names.js`: `queryVariants(name) -> [{ text, how }]`, how `given | brackets | alternative | inverted |

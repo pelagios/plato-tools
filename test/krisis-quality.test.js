@@ -229,11 +229,11 @@ test('the bulk accept never takes a candidate of a conflicting kind: the place i
   const town = await run(TOWN);
   const plan = planGuarded(town);
   assert.deepEqual(plan.accept.map((c) => c.gazetteer.id), ['place:gn:2'], 'Kendal, a town for a town');
-  assert.deepEqual(plan.leftOut, { far: 0, ccodes: 0, kind: 1, total: 1, examples: [{ id: town.candidates.find((c) => c.gazetteer.id === 'place:gn:1').id, why: 'kind' }] });
+  assert.deepEqual(plan.leftOut, { far: 0, ccodes: 0, kind: 1, total: 1, km: null, examples: [{ id: town.candidates.find((c) => c.gazetteer.id === 'place:gn:1').id, why: 'kind', name: 'Windermere' }] });
   const r = acceptGuarded(town, { at: NOW });
   assert.equal(r.accepted, 1);
   assert.equal(town.candidates.find((c) => c.gazetteer.id === 'place:gn:1').decision, null, 'the lake is left for the reviewer');
-  assert.equal(guardWords.leftOut(r.leftOut), "1 left out: 1 of another kind of place than the place's own (a lake for a town, say). Decide on them yourself.");
+  assert.equal(guardWords.leftOut(r.leftOut), "1 not accepted: the gazetteer's place is another kind of place than yours, a lake for a town, say (Windermere). Choose 'places still to decide' above to settle it yourself.");
   // The control: Windermere with no kind of its own: the lake passes the guard and is taken.
   const plain = await run(null);
   assert.equal(acceptGuarded(plain, { at: NOW }).accepted, 2);

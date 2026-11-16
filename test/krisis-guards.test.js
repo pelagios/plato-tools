@@ -23,7 +23,7 @@ import { runLookup, selectPlaces, planQueries, WHG_SERVICE } from '../src/engine
 import { queryVariants, MAX_VARIANTS } from '../src/engine/krisis/names.js';
 import { guard, guardOf, dice, bestDice, tieOf, withheldOf, acceptGuarded, undoBatch, planGuarded, guardsFirst, GUARD_RULE, SAME_PLACE_KM } from '../src/engine/krisis/guards.js';
 import { distanceKm } from '../src/engine/krisis/match.js';
-import { guardWords } from '../src/engine/words.js';
+import { guardWords, GUARD_SHOW } from '../src/engine/words.js';
 
 const X = 'https://example.org/';
 const W3ID = 'https://w3id.org/whg/id/';
@@ -180,7 +180,12 @@ test('acceptGuarded: one passing candidate each, as closeMatch by default, with 
   assert.equal(before.accept.length, 2, 'planGuarded changes nothing and says how many');
   assert.ok(work.candidates.every((c) => c.decision === null || c.gazetteer.id === 'place:gn:7'), 'planning decided nothing');
   const r = acceptGuarded(work, { reviewer: REVIEWER, at: NOW });
-  assert.deepEqual(r, { batch: 'b1', accepted: 2, leftOut: { far: 1, ccodes: 1, kind: 0, total: 2 }, several: 0, ties: 0, tied: [], flagged: 0 });
+  const left = { far: 1, ccodes: 1, kind: 0, total: 2, km: 50, examples: [{ id: candOf(work, 3).id, why: 'far', name: 'Barton', km: 50 }, { id: candOf(work, 4).id, why: 'ccodes', name: 'Cotton' }] };
+  assert.deepEqual(before.leftOut, left, 'the plan names the distance and the places left');
+  assert.deepEqual(r, { batch: 'b1', accepted: 2, leftOut: left, several: 0, ties: 0, tied: [], flagged: 0 });
+  assert.deepEqual(work.batches[0].leftOut, { far: 1, ccodes: 1, kind: 0, total: 2 }, 'the work file keeps the counts alone');
+  assert.equal(guardWords.leftOut(r.leftOut, r.several, r.tied, r.flagged),
+    "2 not accepted: for 1, the gazetteer's place is more than 50 km from where your table puts yours (Barton); for 1, the gazetteer's place is in another country than yours (Cotton). Choose 'places still to decide' above to settle them yourself.");
   const alton = candOf(work, 1), felton = candOf(work, 8);
   for (const c of [alton, felton]) {
     assert.equal(c.decision.kind, 'match');
@@ -240,7 +245,7 @@ test('"WHG\'s guards first" orders the places with a passing candidate first; a 
   const two = await looked([place('gorton', 'Gorton', -2.2, 53.47, { attestations: [named('Gorton', 'Gortun'), at(-2.2, 53.47)] })],
     { Gorton: [cand(9, 'Gorton', { repr_point: [-2.2, 53.47] })], Gortun: [cand(10, 'Gortun', { repr_point: [-2.21, 53.47] })] }, { allNames: true });
   assert.equal(two.work.candidates.filter((c) => guardOf(c).pass).length, 2, 'control: both pass');
-  assert.deepEqual(acceptGuarded(two.work, { at: NOW }), { batch: null, accepted: 0, leftOut: { far: 0, ccodes: 0, kind: 0, total: 0 }, several: 1, ties: 0, tied: [], flagged: 0 });
+  assert.deepEqual(acceptGuarded(two.work, { at: NOW }), { batch: null, accepted: 0, leftOut: { far: 0, ccodes: 0, kind: 0, total: 0, km: null, examples: [] }, several: 1, ties: 0, tied: [], flagged: 0 });
 });
 
 // #31 (Stephen, 10 Oct 2026, "skip ties"): two places of one name where a place was looked for are never
@@ -315,6 +320,41 @@ test('a namesake from another lookup counts when that lookup was sent under the 
   assert.equal(planGuarded(again(await fresh(), { ...IN_BUCKLOW, from: 'k:other', params: { contained_in: ['gn:2'] } })).tied.length, 0, 'another constraint: not one');
   const unknown = await fresh(); candOf(unknown, 22).lookup = 'nowhere';
   assert.equal(planGuarded(unknown).tied.length, 0, 'a lookup not in the file: not one');
+});
+
+test('what the page says of those the bulk accept did not take: the distance set, some of the places by name, and the list to choose', async () => {
+  const ex = (why, ...names) => names.map((name, i) => ({ id: `${why}${i}`, why, name, ...(why === 'far' ? { km: 50 } : {}) }));
+  const far = (n, names, km = 50) => ({ far: n, ccodes: 0, kind: 0, total: n, km, examples: ex('far', ...names) });
+  assert.equal(guardWords.leftOut(far(2, ['Lancaster', 'Malpas'])),
+    "2 not accepted: the gazetteer's place is more than 50 km from where your table puts yours (Lancaster, Malpas). Choose 'places still to decide' above to settle them yourself.");
+  assert.equal(guardWords.leftOut(far(1, ['Lancaster'], 12.5)),
+    "1 not accepted: the gazetteer's place is more than 12.5 km from where your table puts yours (Lancaster). Choose 'places still to decide' above to settle it yourself.");
+  assert.equal(guardWords.leftOut(far(7, ['Lancaster', 'Malpas', 'Chester', 'Frodsham', 'Tarvin', 'Hale', 'Lymm'], 1500)),
+    "7 not accepted: the gazetteer's place is more than 1,500 km from where your table puts yours (Lancaster, Malpas, Chester and 4 more). Choose 'places still to decide' above to settle them yourself.");
+  // Lookups run with different distances: no one figure is true of them all, so none is given.
+  assert.equal(guardWords.leftOut(far(2, ['Lancaster', 'Malpas'], null)),
+    "2 not accepted: the gazetteer's place is more than the greatest distance you set from where your table puts yours (Lancaster, Malpas). Choose 'places still to decide' above to settle them yourself.");
+  // A result with the counts alone (as a batch in the work file holds them) still reads.
+  assert.equal(guardWords.leftOut({ far: 0, ccodes: 2, kind: 0, total: 2 }),
+    "2 not accepted: the gazetteer's place is in another country than yours. Choose 'places still to decide' above to settle them yourself.");
+  assert.equal(guardWords.leftOut({ far: 1, ccodes: 0, kind: 2, total: 3, km: 50, examples: [...ex('far', 'Lancaster'), ...ex('kind', 'Windermere', 'Windermere', 'Bala')] }, 1),
+    "3 not accepted: for 1, the gazetteer's place is more than 50 km from where your table puts yours (Lancaster); for 2, the gazetteer's place is another kind of place than yours, a lake for a town, say (Windermere, Bala). Choose 'places still to decide' above to settle them yourself. 1 place has more than one passing, and is left to you.");
+  assert.equal(guardWords.leftOut({ far: 0, ccodes: 0, kind: 0, total: 0, km: null, examples: [] }), '', 'control: nothing left, nothing said');
+  // The list the words name is the page's own, by its own words: the first choice under "Show".
+  const html = readFileSync(fileURLToPath(new URL('../index.html', import.meta.url)), 'utf8');
+  const show = html.match(/<label for="review-filter">Show<\/label>\s*<select id="review-filter">\s*<option value="undecided">([^<]+)<\/option>/);
+  assert.ok(show, 'control: the page has the list, its first choice the places undecided');
+  assert.equal(show[1], GUARD_SHOW);
+  assert.ok(html.indexOf('id="review-filter"') < html.indexOf('id="review-bulk"'), 'and it is above the bulk accept, as the words say');
+  // The distance is the lookup's own: Barton's candidate, 750 km off, judged by a lookup of 700 km, is named with 700.
+  const { work } = await looked(PLACES(), TABLE);
+  assert.equal(planGuarded(work).leftOut.km, 50, 'control: the default distance, named');
+  const other = structuredClone(work.lookups[0]); other.id = 'L-other'; other.parameters = { ...other.parameters, maxDistanceKm: 700 };
+  work.lookups.push(other); candOf(work, 3).lookup = 'L-other';
+  const own = planGuarded(work).leftOut;
+  assert.deepEqual([own.far, own.km, own.examples.filter((x) => x.why === 'far').map((x) => [x.name, x.km])], [1, 700, [['Barton', 700]]], JSON.stringify(own));
+  other.parameters.maxDistanceKm = 800;
+  assert.equal(planGuarded(work).leftOut.far, 0, 'and within 800 km it is not far at all');
 });
 
 test('what the page and the command line say of places left out for namesakes', () => {
@@ -548,7 +588,7 @@ test('old work files still read; a candidate looked up before the guard was stor
   const back = readWork(JSON.stringify(old));
   assert.equal(guardOf(candOf(back, 1)).reason, 'not-recorded');
   assert.equal(guardOf(candOf(work, 1)).pass, true, 'control: with the figures, it passes');
-  assert.deepEqual(acceptGuarded(back, { at: NOW }), { batch: null, accepted: 0, leftOut: { far: 0, ccodes: 0, kind: 0, total: 0 }, several: 0, ties: 0, tied: [], flagged: 0 });
+  assert.deepEqual(acceptGuarded(back, { at: NOW }), { batch: null, accepted: 0, leftOut: { far: 0, ccodes: 0, kind: 0, total: 0, km: null, examples: [] }, several: 0, ties: 0, tied: [], flagged: 0 });
   const refused = (f, re) => { const w = JSON.parse(serialiseWork(work)); f(w); assert.throws(() => readWork(JSON.stringify(w)), (e) => e.name === 'DataError' && re.test(e.message), re); };
   refused((w) => { w.places[A('alton')].rowState = 'drop'; }, /row state/);
   refused((w) => { w.candidates[0].flagged = 'yes'; }, /flag/);

@@ -1270,6 +1270,8 @@ const GUARD_FAILS = {
   'not-top': 'not the top of its answer', 'head-word': 'found only by its head word', weak: 'neither an exact title nor a score of 90 or more',
   withheld: 'withheld: the name is too unlike', tie: 'tied with another candidate', 'not-recorded': 'looked up before the guard was recorded; look it up again to judge it',
 };
+/** The first choice of the review's "Show" list (index.html, #review-filter), as the bulk accept's words name it; test/krisis-guards.test.js holds the two together. */
+export const GUARD_SHOW = 'places still to decide';
 export const guardWords = {
   /** The basis each decision of the bulk accept carries, naming the guard (recorded with the attestation). */
   basis: (g) => `Accepted in bulk by the reviewer as passing WHG's guard (${guardFigures(g)}).`,
@@ -1289,10 +1291,28 @@ export const guardWords = {
   undone: (n) => `${n.toLocaleString('en-GB')} taken back; any you changed since are kept.`,
   /** A place left out of the bulk accept for having namesakes where it was looked for (#31), on its own screen. */
   namesakes: (n, region) => `${n.toLocaleString('en-GB')} places of this name ${region ? `in ${region}` : 'where it was looked for'}: left for you, not accepted in bulk.`,
-  /** Those left out of the bulk accept, and why. */
+  /**
+   * Those the bulk accept did not take, and why, in the reviewer's terms: the distance set (l.km, when all
+   * the far ones were judged by one), up to three of the reviewer's own names for each reason (l.examples:
+   * [{ why, name }]), and where to find them: the review's "Show" list, GUARD_SHOW its first choice.
+   */
   leftOut: (l, several = 0, tied = [], flagged = 0) => [
-    l.total ? `${l.total.toLocaleString('en-GB')} left out: ${[l.far ? `${l.far.toLocaleString('en-GB')} further from the place than the greatest distance` : '', l.ccodes ? `${l.ccodes.toLocaleString('en-GB')} in another country than the place's own` : '',
-      l.kind ? `${l.kind.toLocaleString('en-GB')} of another kind of place than the place's own (a lake for a town, say)` : ''].filter(Boolean).join(', ')}. Decide on them yourself.` : '',
+    l.total ? (() => {
+      const n = (k) => k.toLocaleString('en-GB');
+      const named = (why) => {
+        const names = [...new Set((l.examples || []).filter((x) => x.why === why && x.name).map((x) => x.name))];
+        if (!names.length) return '';
+        const more = l[why] - Math.min(names.length, 3);
+        return ` (${names.slice(0, 3).join(', ')}${more > 0 ? ` and ${n(more)} more` : ''})`;
+      };
+      const reasons = [
+        ['far', `the gazetteer's place is more than ${typeof l.km === 'number' ? `${n(l.km)} km` : 'the greatest distance you set'} from where your table puts yours`],
+        ['ccodes', "the gazetteer's place is in another country than yours"],
+        ['kind', "the gazetteer's place is another kind of place than yours, a lake for a town, say"],
+      ].filter(([why]) => l[why]);
+      const said = reasons.map(([why, text]) => `${reasons.length > 1 ? `for ${n(l[why])}, ` : ''}${text}${named(why)}`).join('; ');
+      return `${n(l.total)} not accepted: ${said}. Choose '${GUARD_SHOW}' above to settle ${l.total === 1 ? 'it' : 'them'} yourself.`;
+    })() : '',
     several ? `${several.toLocaleString('en-GB')} ${several === 1 ? 'place has' : 'places have'} more than one passing, and ${several === 1 ? 'is' : 'are'} left to you.` : '',
     guardWords.ties(tied),
     flagged ? `${flagged.toLocaleString('en-GB')} ${flagged === 1 ? 'place has its own gazetteer link' : 'places have their own gazetteer link'} far from WHG's best candidate, and ${flagged === 1 ? 'is' : 'are'} left to you.` : ''].filter(Boolean).join(' '),

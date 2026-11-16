@@ -217,7 +217,10 @@ function lookedWithin(work, iri, c, lookups) {
 }
 /**
  * What acceptGuarded() would do, changing nothing: { accept: [candidate], leftOut: { far, ccodes, kind,
- * total, examples: [{ id, why }] }, several, tied: [{ id, place, count, region }] }. A place is
+ * total, km, examples: [{ id, why, name, km? }] }, several, tied: [{ id, place, count, region }] }. Each
+ * example is one candidate left out: `name` the reviewer's own label of its place, and for a far one `km`,
+ * the greatest distance it was judged by; `leftOut.km` is that distance when every far one shares it, else
+ * null (lookups run with different distances, or none far), so that the page can name it. A place is
  * considered when it has no decision yet and is to be reconciled (no row state). Exactly one of its
  * candidates must pass the guard; that one is left out (and counted) when it is further from the
  * place's point than the review's greatest distance, its countries disagree with the place's own, or
@@ -229,7 +232,7 @@ function lookedWithin(work, iri, c, lookups) {
  * refCheck: `ref.state` 'disagrees') is listed in `flagged`, and nothing is accepted for it.
  */
 export function planGuarded(work, { threshold = GUARD_DEFAULTS.threshold } = {}) {
-  const accept = [], leftOut = { far: 0, ccodes: 0, kind: 0, total: 0, examples: [] };
+  const accept = [], leftOut = { far: 0, ccodes: 0, kind: 0, total: 0, km: null, examples: [] };
   const tied = [], flagged = [];
   let several = 0;
   const by = bySource(work), lookups = new Map();
@@ -250,13 +253,16 @@ export function planGuarded(work, { threshold = GUARD_DEFAULTS.threshold } = {})
     if (far || ccodes || kind) {
       const why = far ? 'far' : ccodes ? 'ccodes' : 'kind';
       leftOut[why]++;
-      leftOut.total++; leftOut.examples.push({ id: c.id, why });
+      leftOut.total++;
+      leftOut.examples.push({ id: c.id, why, name: work.places[iri]?.label ?? '', ...(far ? { km: maxKmOf(work, c, lookups) } : {}) });
       continue;
     }
     const namesakes = namesakesOf(work, iri, c, mine, lookups);
     if (namesakes.length) { tied.push({ id: c.id, place: iri, count: namesakes.length + 1, region: lookedWithin(work, iri, c, lookups) }); continue; }
     accept.push(c);
   }
+  const kms = new Set(leftOut.examples.filter((x) => x.why === 'far').map((x) => x.km));
+  leftOut.km = kms.size === 1 ? [...kms][0] : null;
   return { accept, leftOut, several, tied, flagged };
 }
 /** Whether a candidate's kind of place conflicts with its place's own (kinds.js kindFit), both being known. */
@@ -280,8 +286,9 @@ function nextBatch(work) {
  * (planGuarded). Called only on the reviewer's word (the page's button): nothing calls it by itself,
  * and the command line never does. Each decision is 'match' of `identityType` (closeMatch by default,
  * the reviewer's choice), with a basis naming the guard, `guard` (the figures it passed on) and
- * `batch`. The batch is recorded in work.batches. Returns { batch, accepted, leftOut, several, ties, tied }:
- * `batch` null when nothing passed; `ties` the places left to the reviewer as having namesakes (#31),
+ * `batch`. The batch is recorded in work.batches (its `leftOut` the counts alone). Returns { batch, accepted,
+ * leftOut, several, ties, tied }: `batch` null when nothing passed; `leftOut` as planGuarded's (the counts, `km`
+ * and `examples`, for the page to name the distance and some of the places); `ties` the places left to the reviewer as having namesakes (#31),
  * `tied` how many places of its name each has.
  */
 export function acceptGuarded(work, { reviewer, identityType = 'closeMatch', at = new Date().toISOString(), threshold = GUARD_DEFAULTS.threshold } = {}) {
@@ -290,7 +297,8 @@ export function acceptGuarded(work, { reviewer, identityType = 'closeMatch', at 
   const plan = planGuarded(work, { threshold });
   const counts = { far: plan.leftOut.far, ccodes: plan.leftOut.ccodes, kind: plan.leftOut.kind, total: plan.leftOut.total };
   const ties = plan.tied.length, tied = plan.tied.map((t) => t.count), flagged = plan.flagged.length;
-  if (!plan.accept.length) return { batch: null, accepted: 0, leftOut: counts, several: plan.several, ties, tied, flagged };
+  const left = { ...counts, km: plan.leftOut.km, examples: plan.leftOut.examples };
+  if (!plan.accept.length) return { batch: null, accepted: 0, leftOut: left, several: plan.several, ties, tied, flagged };
   const batch = nextBatch(work);
   for (const c of plan.accept) {
     const v = guardOf(c, { threshold });
@@ -299,7 +307,7 @@ export function acceptGuarded(work, { reviewer, identityType = 'closeMatch', at 
     Object.assign(c.decision, { guard: g, batch });
   }
   (work.batches ||= []).push({ id: batch, at, identityType, threshold, accepted: plan.accept.length, leftOut: counts });
-  return { batch, accepted: plan.accept.length, leftOut: counts, several: plan.several, ties, tied, flagged };
+  return { batch, accepted: plan.accept.length, leftOut: left, several: plan.several, ties, tied, flagged };
 }
 /**
  * Take back a batch: clear the decisions that still carry it (a decision changed since, or taken back
