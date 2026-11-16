@@ -14,7 +14,7 @@ import { workbench, envelope, unwrap, WORKBENCH, WorkbenchError } from '../src/e
 
 const TOKEN = process.env.WHG_TOKEN;
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
-const USER_AGENT = `plato-tools/${VERSION} (+https://pelagios.org/plato-tools/)`;
+const USER_AGENT = `plato-tools/${VERSION} (+https://plato.pelagios.org/tools/)`;
 
 test('WHG\'s Workbench keeps, refuses when stale, shares and deletes a PLATO tools project as the tools expect, and no body carries the token', { skip: !TOKEN && 'WHG_TOKEN is not set, so the live test against WHG\'s Workbench is not run' }, async () => {
   const bodies = [];

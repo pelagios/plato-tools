@@ -47,7 +47,7 @@ const listOf = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(',
 
 export const PANEL = {
   title: 'Permissions',
-  shared: 'These tools are on pelagios.org, which other Pelagios sites share. So what this browser keeps for them (your permissions, your choices, keys such as a pasted basemap’s or the World Historical Gazetteer token if you remember it, and your working data) can be read, on this computer only, by any Pelagios site.',
+  shared: 'These tools are on plato.pelagios.org, which they share with PLATO’s own pages (its guide and its specification). So what this browser keeps for them (your permissions, your choices, keys such as a pasted basemap’s or the World Historical Gazetteer token if you remember it, and your working data) can be read, on this computer only, by any page of plato.pelagios.org.',
   sitesHeading: 'Sites these tools may ask',
   sitesIntro: 'Each is asked only once you allow it. “Not decided” means a tool will ask you first; “Never” means the tool does without it, and does not ask again.',
   links: 'A link in your data (to a source, say, or to an ORCID) is followed only when you click it: that is a visit you make yourself, outside these permissions, and the site visited is told nothing of this page.',
@@ -80,7 +80,7 @@ export const PANEL = {
   tokenRevoke: 'Forgetting it here does not revoke it: only regenerating it in the World Historical Gazetteer does, and then every copy of the old one stops working.',
   tokenNone: 'No token is held.',
   tokenRemember: 'Remember my token in this browser',
-  tokenRememberNote: 'Remembered, it stays after the tab is closed, and any Pelagios site open on this computer could read it. Not remembered, it is forgotten when the tab is closed.',
+  tokenRememberNote: 'Remembered, it stays after the tab is closed, and any page of plato.pelagios.org open on this computer could read it. Not remembered, it is forgotten when the tab is closed.',
   tokenForget: 'Forget the token',
   llmKeysHeading: 'Language-model keys',
   llmKeysNone: 'No key is held.',

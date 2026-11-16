@@ -1253,7 +1253,7 @@ async function sharedProjectInfo(link, o, { readProject, describe, blobSource })
   if (!token) return fail(1, 'That is not a WHG share link: it ends #whg-shared= and a token of 36 characters.');
   const base = process.env.PLATO_TOOLS_WORKBENCH || WORKBENCH;
   if (!isOrigin(originOf(base) || '') || !/\/$/.test(base)) return usage('PLATO_TOOLS_WORKBENCH is not an https address ending in /.');
-  const wb = workbench({ base, fetch: (url, init) => fetch(url, init), userAgent: `plato-tools/${PKG.version} (+https://pelagios.org/plato-tools/)` });
+  const wb = workbench({ base, fetch: (url, init) => fetch(url, init), userAgent: `plato-tools/${PKG.version} (+https://plato.pelagios.org/tools/)` });
   let got, bytes;
   try { got = await wb.shared(token); bytes = unwrap(got.snapshot); } catch (e) {
     const unreachable = e instanceof WorkbenchError && ['network', 'server', 'bad-answer'].includes(e.kind);

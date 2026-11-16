@@ -1,9 +1,31 @@
-# Test, build and publish the tools to GitHub Pages (https://pelagios.org/plato-tools/).
+# Test, build and publish https://plato.pelagios.org/ on GitHub Pages: PLATO's own published site at the root,
+# every path as it is on the gh-pages branch of pelagios/place-attestation-ontology (the guide, the
+# specification, the ontology's files, the schemas, the releases), and these tools under tools/
+# (scripts/assemble-site.mjs, which also says what the root page and the 404 page do for the tools' former
+# addresses).
+#
+# When it runs, and what it then does:
+# - a push to main: the tests, the build, the site, the deploy;
+# - every day, and when started by hand: so that what PLATO has published since is on the site within a day.
+#   PLATO's repository cannot start this workflow without a personal access token, and none is used: this one
+#   looks instead. It reads tools/deployed.json from the site, which the deploy before wrote: the commit of the
+#   tools deployed, and the commit of PLATO's gh-pages branch deployed with it.
+#     - Both as they are now (a daily run): nothing is built or deployed.
+#     - The tools' commit as it is now, PLATO's site changed (or a run started by hand): the site is built and
+#       deployed again WITHOUT the tests. That is safe because tools/deployed.json is written only here, after
+#       the tests of that commit passed in the run that first deployed it, and nothing the tests read has
+#       changed since: the tools' code and the pinned PLATO commit they are checked against are both that
+#       commit's (package.json), the dependencies its package-lock.json's. PLATO's published site is no input to
+#       any test; it is copied as it is. The build itself is made afresh, with its own checks (the vendored
+#       files are the pinned commit's, the relief's sha256).
+#     - Any other commit of the tools (a push whose run failed or was cancelled, say): the tests run, as on a push.
 name: Test and publish
 
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: '43 4 * * *'   # daily
   workflow_dispatch:
 
 permissions:
@@ -16,11 +38,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # What this run has to do (above): `deploy`, whether anything is built and deployed; `tested`, whether the
+  # tools' commit is the one already deployed, its tests passed then; `site`, the commit of PLATO's gh-pages.
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      deploy: ${{ steps.plan.outputs.deploy }}
+      tested: ${{ steps.plan.outputs.tested }}
+      site: ${{ steps.plan.outputs.site }}
+    steps:
+      - id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          site=$(git ls-remote https://github.com/pelagios/place-attestation-ontology refs/heads/gh-pages | cut -f1)
+          [[ "$site" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::The commit of PLATO's gh-pages branch could not be read."; exit 1; }
+          # No answer, or one that is not the JSON expected: nothing is taken as deployed, and the run does everything.
+          live=$(curl -fsSL --retry 2 --max-time 30 https://plato.pelagios.org/tools/deployed.json || true)
+          live_tools=$(jq -r '.tools // empty' <<<"$live" 2>/dev/null || true)
+          live_site=$(jq -r '.platoSite // empty' <<<"$live" 2>/dev/null || true)
+          tested=false; deploy=true
+          if [ "${{ github.event_name }}" != push ] && [ "$live_tools" = "$GITHUB_SHA" ]; then tested=true; fi
+          if [ "${{ github.event_name }}" = schedule ] && [ "$tested" = true ] && [ "$live_site" = "$site" ]; then deploy=false; fi
+          { echo "site=$site"; echo "tested=$tested"; echo "deploy=$deploy"; } >> "$GITHUB_OUTPUT"
+          echo "Tools $GITHUB_SHA (deployed: ${live_tools:-none read}); PLATO's site $site (deployed: ${live_site:-none read}). Tests: $([ $tested = true ] && echo 'passed when this commit was first deployed, not run again' || echo 'run'). Deploy: $deploy." | tee -a "$GITHUB_STEP_SUMMARY"
+
   build:
+    needs: plan
+    if: needs.plan.outputs.deploy == 'true'
     # Pinned: ubuntu-latest is now Ubuntu 26.04, which Playwright 1.59 refuses; upgrading to Playwright 1.62 or later lifts the pin.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      # PLATO's published site, at the commit the plan read: what the root of the site is.
+      - uses: actions/checkout@v4
+        with:
+          repository: pelagios/place-attestation-ontology
+          ref: ${{ needs.plan.outputs.site }}
+          path: plato-site
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -38,8 +94,10 @@ jobs:
       # librsvg's rsvg-convert and the fonts Wikimedia Commons draws a map's labels in (DejaVu Sans, Noto Sans), for
       # the test that renders a map made in Chora as Commons would (test/chora-export-rsvg.test.js): absent, it fails.
       - name: rsvg-convert and the fonts Commons has
+        if: needs.plan.outputs.tested != 'true'
         run: sudo apt-get update -q && sudo apt-get install -y --no-install-recommends librsvg2-bin fontconfig fonts-dejavu-core fonts-noto-core
       - name: Unit and conversion tests
+        if: needs.plan.outputs.tested != 'true'
         run: npm test
         env:
           PLATO_REPO: plato-repo
@@ -47,6 +105,7 @@ jobs:
       # scripts run), then run: a postinstall needing a development dependency once made
       # `npx github:pelagios/plato-tools` exit 127 with nothing installed, and every test passed.
       - name: Install as npx does, and run the command
+        if: needs.plan.outputs.tested != 'true'
         run: node scripts/install-test.mjs
       - name: Build (vendors PLATO's files at the pinned commit)
         run: npm run build
@@ -79,11 +138,23 @@ jobs:
         run: |
           node -e "const v=require('./dist/plato/VERSION.json'), p=require('./package.json'); if (v.commit !== p.plato.commit) { console.error('vendored', v.commit, 'pinned', p.plato.commit); process.exit(1) }"
           cmp dist/plato/ontology.ttl plato-repo/ontology.ttl
+      # PLATO's site at the root, the tools under tools/, the root page and the 404 page; and what was deployed,
+      # for the next run's plan (above): written only here, after everything above passed.
+      - name: The site (PLATO's at the root, the tools under tools/)
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/assemble-site.mjs plato-site dist site
+          printf '{"tools":"%s","platoSite":"%s","run":"%s"}\n' "$GITHUB_SHA" "${{ needs.plan.outputs.site }}" "$GITHUB_RUN_ID" > site/tools/deployed.json
+          cat site/tools/deployed.json
+          for f in index.html 404.html guide/index.html index-en.html ontology.ttl tools/index.html tools/spike/index.html tools/plato/VERSION.json; do test -s "site/$f" || { echo "::error::The site has no $f."; exit 1; }; done
+          rm -rf dist
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: site
   deploy:
-    needs: build
+    needs: [plan, build]
+    if: needs.plan.outputs.deploy == 'true'
     # Pinned: ubuntu-latest is now Ubuntu 26.04, which Playwright 1.59 refuses; upgrading to Playwright 1.62 or later lifts the pin.
     runs-on: ubuntu-24.04
     environment:

@@ -1,8 +1,8 @@
 # Files to try the PLATO tools with
 
-Drop these into the tools at <https://pelagios.org/plato-tools/> (Check, Convert, Compare,
+Drop these into the tools at <https://plato.pelagios.org/tools/> (Check, Convert, Compare,
 Publish, Match; Chora, the map, is "Show on the map" on the same page, at
-<https://pelagios.org/plato-tools/#chora>). Each result below was
+<https://plato.pelagios.org/tools/#chora>). Each result below was
 checked with the command-line version of the same tools (`plato-tools`) on 13 November 2026
 (the problems in `2-problems`, again after the streaming spreadsheet reader landed).
 
@@ -99,7 +99,7 @@ of Wight), or the three added places.
 
 ## 7-chora
 
-Open <https://pelagios.org/plato-tools/#chora> and drop one of `judgements.json` (6 places),
+Open <https://plato.pelagios.org/tools/#chora> and drop one of `judgements.json` (6 places),
 `king-john.json` (19 places) or `routes-tables.zip` (spreadsheet tables with routes: 8 places,
 18 attestations). All pass Check with no problems.
 

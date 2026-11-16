@@ -119,6 +119,13 @@ the commit of PLATO the tools are checked against is pinned in `package.json`.
 
 ### Changed
 
+- **The tools have moved to https://plato.pelagios.org/tools/**, beside PLATO's own guide and specification,
+  which are now at the root of the same site. Links to the former address still arrive: with `#chora`,
+  `#tool=…`, `#methodos` or a WHG share link they are sent on to the tools. What a browser kept for the tools
+  at the former address (permissions, a remembered token, working data, saved datasets) stays there and is
+  not carried over. Every address the tools write (a map's credit, the command line's `User-Agent`, the
+  citation file) is the new one.
+
 - The example files' README points at Chora on the main page (`#chora`, not the removed
   `chora.html`) and says Chora opens IIIF maps; the zip is built reproducibly from
   `examples/try-files/` by `scripts/build-try-zip.py`. The status line reads "Experimental, under

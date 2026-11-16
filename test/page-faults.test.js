@@ -25,8 +25,8 @@ test('the engine\'s files not arriving is recognised from SQLite\'s abort and ea
   for (const m of [
     "Aborted(NetworkError: Failed to execute 'send' on 'XMLHttpRequest': Failed to load 'http://localhost:4174/assets/sqlite3-Con_VOcu.wasm'.). Build with -sASSERTIONS for more info.",
     'Aborted(both async and sync fetching of the wasm failed). Build with -sASSERTIONS for more info.',
-    'Failed to fetch dynamically imported module: https://pelagios.org/plato-tools/assets/xlsx-CuSbHU4R.js',   // Chromium
-    'error loading dynamically imported module: https://pelagios.org/plato-tools/assets/xlsx-CuSbHU4R.js',     // Firefox
+    'Failed to fetch dynamically imported module: https://plato.pelagios.org/tools/assets/xlsx-CuSbHU4R.js',   // Chromium
+    'error loading dynamically imported module: https://plato.pelagios.org/tools/assets/xlsx-CuSbHU4R.js',     // Firefox
     'Importing a module script failed.',                                                                       // Safari
     'Failed to fetch', 'TypeError: Failed to fetch', 'NetworkError when attempting to fetch resource.', 'Load failed',
   ]) assert.equal(downloadFailed(m), true, m);

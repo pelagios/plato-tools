@@ -170,7 +170,7 @@ envelope (`src/engine/workbench.js`, `envelope()` and `unwrap()`):
 
 ```bash
 plato-tools project info [--json] FILE.platoproj
-plato-tools project info [--json] 'https://pelagios.org/plato-tools/#whg-shared=<token>'
+plato-tools project info [--json] 'https://plato.pelagios.org/tools/#whg-shared=<token>'
 ```
 
 lists the manifest and checks every part's size and SHA-256, reading by the central directory as the

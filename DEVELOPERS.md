@@ -2366,7 +2366,7 @@ below), and its engine `src/engine/chora/` (`store.js`, `view.js`, `draw.js`, `s
   failing among others loaded is not. A map error goes to the console with only the
   site of its addresses, since a key may be in the query or the path. A drawing's note names the
   basemap it was drawn on if it is a built-in one, and a pasted one only as such. CARTO's key is given at build time as `VITE_CARTO_API_KEY`, and without it CARTO
-  is shown disabled. It is scoped by referrer to `https://pelagios.org`, so it never works on
+  is shown disabled. It is to be scoped by referrer to the site's address (`https://plato.pelagios.org` since the tools moved there in November 2026: a key scoped to `https://pelagios.org` alone, as it was before, does not work there), so it never works on
   localhost and no test may need it. Vite writes it into the built page, where anyone can read it:
   the scope is its protection. Never commit it (`.gitignore` does not cover `.env` files). It is to
   reach the build from a GitHub Actions variable, which `pages.yml` does not yet pass.
@@ -2955,7 +2955,7 @@ environment, never in a file; `build.sh` runs each heavy step through `heavy.sh`
 source file with its sha256), 322 MB, grey WebP tiles of 256 pixels: zooms 0 to 10 over 15° W to 60° E and
 15° N to 62° N, zoom 11 over 10° W to 45° E and 28° N to 47° N, flat land and sea at grey 181.
 
-- **Hosting**: same-site, on pelagios.org. The file is not committed (over 100 MB; `.gitignore` names it). The
+- **Hosting**: same-site, on plato.pelagios.org (under `tools/`). The file is not committed (over 100 MB; `.gitignore` names it). The
   Pages workflow (`.github/workflows/pages.yml`, "Shaded relief, from the release asset") downloads the asset
   `relief.pmtiles` of the release `relief-v1` of this repository after the build, checks it against the
   committed `public/basemap/relief.pmtiles.sha256` (a file that differs fails the build), and puts it at
@@ -3161,7 +3161,7 @@ the places within it; the places themselves never send it.
   still ignore) and is in no `<form>`, so that nothing is submitted for a password manager to offer to
   save, and only what is typed or pasted into it is taken (`noteInput`, on each input event: an
   `inputType` of `insertText`, `insertFromPaste` and the like marks it typed; anything else, such as an
-  autofill's input event, empties it), so that a password a browser saved for another pelagios.org site
+  autofill's input event, empties it), so that a password a browser saved for another page of plato.pelagios.org
   and filled in is never sent to WHG. The field is emptied once the token is
   given (Enter or leaving the field gives it for the tab, "Remember my token" for this browser), and
   then shows a masked placeholder (`TOKEN_FIELD.mask`), "Token kept for this tab only" or "Token
@@ -4103,7 +4103,7 @@ the user's WHG token; nothing is sent until the user asks, and only under the `c
   again shows WHG's newest save, read-only, never a second copy. The share tokens seen in the tab are among
   the secrets a project file refuses (`projectSecrets()`).
 - **The command line** (D5): `plato-tools project info [--json] <share link>` reads the shared project with
-  no token and `User-Agent: plato-tools/<version> (+https://pelagios.org/plato-tools/)`, unwraps and checks
+  no token and `User-Agent: plato-tools/<version> (+https://plato.pelagios.org/tools/)`, unwraps and checks
   it as a file, and says once that the link is now in the shell's history; it is the only command that asks
   WHG for anything. `PLATO_TOOLS_WORKBENCH` points it at another Workbench (https, or http on this computer),
   for the tests.
@@ -4259,11 +4259,12 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   once per load (`announceCanary`), that this was its test and was blocked as it should be, or warns
   that the page is not protected, with the panel's reason. Playwright evaluates a bare expression with
   `eval()`, which the policy forbids: the browser checks give it functions.
-- **The shared origin, plainly.** The tools are served on `pelagios.org`, which other Pelagios sites
-  share. Everything the tools keep in this browser, permissions, choices, a pasted basemap's address
+- **The shared origin, plainly.** The tools are served on `plato.pelagios.org` (under `tools/`, since November 2026; on `pelagios.org`, shared
+  with every other Pelagios site, before), which they share with PLATO's own published pages: its guide, its
+  specification, WebVOWL. Everything the tools keep in this browser, permissions, choices, a pasted basemap's address
   and key, the WHG token if remembered, a reviewer's name, the working data (Chora's drafts, its
   last output, the historical maps it keeps in `chora-overlays/` and their notes in sessionStorage),
-  can be read and changed by any page of `pelagios.org`, on that computer only. A
+  can be read and changed by any page of `plato.pelagios.org`, on that computer only. A
   page there could forge a grant; the panel lists whatever is kept, so a forged grant is seen and can
   be withdrawn, and the policy admits only plain sites. The panel says this in words. Moving the
   tools to an origin of their own was considered and not done (2026-10-01); the audit of that day
@@ -4278,7 +4279,7 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
   is admitted afresh, permissions and all, on every load; what Chora keeps across a reload for a
   permission is usable for two minutes, and taken once. That exposure, plainly: the kept file (above,
   "Chora, the map"), the user's latest choice in step 1, stays in this origin's OPFS, where any
-  page of `pelagios.org` open on that computer could read it, for as long as it is kept, with no time
+  page of `plato.pelagios.org` open on that computer could read it, for as long as it is kept, with no time
   limit: until the user forgets it, clears it, chooses another, or turns working data off; with working
   data off it is not kept at all. A workflow's own files (its user's file included) stay in OPFS,
   readable the same way, for the workflow's lifetime. The panel says both. Files are chosen from
@@ -4289,7 +4290,7 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
 - **The frame and the referrer.** The head script also guards against framing: framed by another
   origin (the top window's address cannot be read), the page hides everything it has behind one line,
   "PLATO tools cannot be used inside another site's page", and publishes `__platoCsp.framed`. Framed
-  by this site's own origin, any page of `pelagios.org`, it cannot tell, and does not try: script
+  by this site's own origin, any page of `plato.pelagios.org`, it cannot tell, and does not try: script
   cannot stop same-origin framing, and only a `frame-ancestors` header or an origin of the tools' own
   could. Each page's `<meta name="referrer">` is `strict-origin-when-cross-origin`: another site, on a
   link followed or a tile asked, is sent this site's origin at most, never the page's address. Not
@@ -4462,7 +4463,7 @@ another site, and `src/lib/permissions-panel.js` the panel; its words are in
 ```bash
 npm test                                  # the engine and the command line, in Node
 python3 e2e/app_test.py                   # the page itself, in Playwright's bundled Chromium
-python3 e2e/app_test.py --url=https://pelagios.org/plato-tools/   # the deployed page
+python3 e2e/app_test.py --url=https://plato.pelagios.org/tools/   # the deployed page
 python3 e2e/app_test.py --prove-it-fails  # every check pointed at a page with no tools: all must fail
 python3 e2e/ink_budget.py                 # the budget of tracing with assistance, timed in the page
 node e2e/ink_memory.mjs                   # the tracing worker's memory, for its budget
@@ -4598,7 +4599,32 @@ npx vite build   # the same, with the PLATO files already in public/plato/
 ```
 
 A push to `main` runs the tests, builds the site and publishes it to GitHub Pages
-(`.github/workflows/pages.yml`).
+(`.github/workflows/pages.yml`), at https://plato.pelagios.org/.
+
+- **The site** (since November 2026) is PLATO's own published site at the root, copied as it is from the
+  `gh-pages` branch of `pelagios/place-attestation-ontology` with every path kept (the guide, the specification,
+  the ontology's files, the schemas, the releases), and these tools under `tools/`
+  (`scripts/assemble-site.mjs`, `test/assemble-site.test.js`). The tools are built with a relative base
+  (`vite.config.js`), so nothing in them names where they are. The workflow also runs every day, and by hand,
+  to bring in what PLATO has published since: it reads `tools/deployed.json` from the site (the commits
+  deployed, written by the deploy before), does nothing when neither has changed, and does not run the tests
+  again for a commit of the tools already deployed (the workflow's first comment says why that is safe). No
+  token is used.
+- **The tools' former address** was `pelagios.org/plato-tools/`, which GitHub now answers with a 301 to the new
+  host, the path kept. It is published nowhere any more. Links made before the move arrive at the root or at a
+  path that is not there, and two small pages send them on: the root page (PLATO's own, with one script put
+  first in it; or written here while PLATO's is still a plain refresh to `index-en.html`) sends an address with
+  a query, or with a fragment that is the tools' (`#chora`, `#tool=…`, `#methodos`, `#whg-shared=…`), to
+  `tools/` with the same query and fragment, and leaves a term's anchor to reach the specification; `404.html`
+  sends a path that exists under `tools/` (`spike/`, `basemap/relief.pmtiles`) there. A new fragment of the
+  tools' has to be added to `TOOLS_FRAGMENT` in the script only if links with it were published before the
+  move, which none can be now. The browser checks open both pages (`site_layout_checks` in `e2e/app_test.py`),
+  locally against the build put together with a stand-in for PLATO's site, and against the deployed site with
+  `--url=https://plato.pelagios.org/tools/`.
+- **What the move left behind.** A browser keeps storage by origin: what a user's browser kept for the tools at
+  `pelagios.org` (permissions, a remembered WHG token, working data, datasets saved in Mneme) is not at
+  `plato.pelagios.org`, and cannot be fetched from there. Sites that allow the tools by their origin or
+  referrer (WHG's Workbench allow-list, CARTO's key) have to name the new one.
 
 - **A release.** The version is in `package.json` (and `package-lock.json`), `CITATION.cff` and
   `.zenodo.json`, which must agree, and the git tag (`v0.9.0-alpha.1` style). The `alpha.N` in a

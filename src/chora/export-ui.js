@@ -309,7 +309,7 @@ export function createExport(root, preview, ctx) {
         places: items, marks: !!s.furniture.key, keyRows: keyRows(),
         furniture: { north: s.furniture.north, inset: s.furniture.inset ? await landFeatures() : null, title: s.furniture.title ? s.title : '', attribution: attributionLines(s, licence, hist, author) },
         lang: s.lang || null, title: s.title, desc: s.description, settings: meta,
-        dc: { title: s.title, creator: author, rights: licence.ok ? licence.licence.iri : null, date: meta.made, source: 'PLATO tools, https://pelagios.org/plato-tools/' }, measure,
+        dc: { title: s.title, creator: author, rights: licence.ok ? licence.licence.iri : null, date: meta.made, source: 'PLATO tools, https://plato.pelagios.org/tools/' }, measure,
       };
       const out = composeMap(common);
       if (mine !== seq) return;
@@ -341,7 +341,7 @@ export function createExport(root, preview, ctx) {
     const ticked = places.filter((p) => s.places[p.id]?.off !== true);
     const records = [...new Set(ticked.flatMap((p) => p.records))];
     const b = bm();
-    const sources = ['Made with PLATO tools, https://pelagios.org/plato-tools/', `Places from the dataset ${s.dataset}`];
+    const sources = ['Made with PLATO tools, https://plato.pelagios.org/tools/', `Places from the dataset ${s.dataset}`];
     if (!(hist && s.historical.over === 'alone')) sources.push(`Background: ${b.name}${b.export?.licence?.credit ? ` (${b.export.licence.credit})` : ''}`);
     if (s.relief && b.local) sources.push(RELIEF.licence.credit);
     if (e) sources.push(`Historical map: “${e.title}”, ${e.manifestUrl || e.g.manifestId || e.g.imageServiceId}${e.rights?.map?.credit ? ` (${e.rights.map.credit})` : ''}`);
@@ -508,7 +508,7 @@ export function createExport(root, preview, ctx) {
       const p = page('png');
       blob = new Blob([withMeta(png, { dpi: s.dpi, text: {
         Title: s.title, Author: composed.contributor?.name || '', Description: s.description, Copyright: composed.licence.ok ? `${composed.licence.licence.label} (${composed.licence.licence.iri})` : `Not under an open licence: ${composed.licence.refused.map((r) => `${r.name}: ${r.why}`).join('; ')}`,
-        Source: p.sources.join('; '), Software: 'PLATO tools, https://pelagios.org/plato-tools/', 'Creation Time': new Date().toISOString(),
+        Source: p.sources.join('; '), Software: 'PLATO tools, https://plato.pelagios.org/tools/', 'Creation Time': new Date().toISOString(),
         'plato-tools:map': JSON.stringify(composed.common.settings),
       } })], { type: 'image/png' });
     }

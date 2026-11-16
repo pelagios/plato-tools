@@ -20,7 +20,7 @@ identifiers:
     value: 10.5281/zenodo.23133141
     description: "Concept DOI — always resolves to the latest version."
 repository-code: "https://github.com/pelagios/plato-tools"
-url: "https://pelagios.org/plato-tools/"
+url: "https://plato.pelagios.org/tools/"
 references:
   - type: software
     title: "PLATO — Place Attestation Ontology"

@@ -3,7 +3,7 @@
 // (permissions-core.js: CATEGORIES, REGISTRY, parse, originsFor, check, …) is re-exported here, and is
 // what the command line uses; nothing below touches a page or storage until it is called.
 //
-// Kept in this browser (localStorage, which every page of pelagios.org can read: the panel says so):
+// Kept in this browser (localStorage, which every page of plato.pelagios.org can read: the panel says so):
 // - 'plato-tools.permissions': {version: 1, grants: {'cat:subj': {state, at, added?}}}, every
 //   permission decided, remembered until forgotten; a site typed by the user is marked `added`;
 // - 'plato-tools.permissions.tab' (sessionStorage): the keys allowed for this tab only;
@@ -442,7 +442,7 @@ export function forgetRemembered(key) { if (Object.hasOwn(REMEMBERED, key)) { dr
 // ---- The World Historical Gazetteer token --------------------------------------------------------
 // One keeper for the tools that look places up in WHG. Kept for this tab (sessionStorage, memory where
 // storage is refused) unless the user chose "Remember my token in this browser", when it is kept in
-// localStorage too, where any Pelagios site on this computer could read it (the panel says so). Never
+// localStorage too, where any page of plato.pelagios.org on this computer could read it (the panel says so). Never
 // logged, put in an address, in list(), in window.__plato or in an error; onChange says whether there
 // is one, not what it is. Forgetting it here does not revoke it: only regenerating it in WHG does.
 let memory = null;

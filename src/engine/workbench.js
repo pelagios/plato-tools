@@ -161,7 +161,7 @@ export const WORDS = {
   token: 'Your WHG token is needed first: give it in the token field, which is opened for you. Nothing was sent.',
   unauthenticated: 'WHG did not accept your token (it may have been regenerated): give it again in the token field, which is opened for you.',
   beta: 'Keeping projects in WHG is part of its Workbench, which is in beta, and your WHG account is not enrolled in it. It cannot be joined from here: ask WHG to enrol you, through “Get in touch” on its development page.',
-  origin: 'WHG does not accept projects from this copy of PLATO tools: only from the tools at pelagios.org.',
+  origin: 'WHG does not accept projects from this copy of PLATO tools: only from the tools at plato.pelagios.org.',
   forbidden: {
     save: 'Your role in this WHG project lets you read it, not save to it: save it as a new WHG project of your own instead.',
     restore: 'Your role in this WHG project lets you read it, not save to it, so you cannot restore a version of it either.',

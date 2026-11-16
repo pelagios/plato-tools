@@ -13,7 +13,7 @@
 
 Tools for data about places in the formats of PLATO, the Place Attestation Ontology: check it,
 convert it, compare two versions of it, publish it. They run in your browser at
-**https://pelagios.org/plato-tools/**, and [from the command line](#from-the-command-line) for many
+**https://plato.pelagios.org/tools/**, and [from the command line](#from-the-command-line) for many
 files at a time.
 
 Your files stay on your computer, and nothing is sent to any other site unless you allow it, in the
@@ -30,7 +30,7 @@ is in the guide.
 when converting, and what the version check reports. The rest of the [guide](https://pelagios.org/place-attestation-ontology/guide/) explains PLATO
 itself. How the tools work, and how they are tested, is in [DEVELOPERS.md](DEVELOPERS.md).
 
-No data to hand? [Download example files](https://pelagios.org/plato-tools/try/plato-tools-try-files.zip)
+No data to hand? [Download example files](https://plato.pelagios.org/tools/try/plato-tools-try-files.zip)
 (zip, 337 KB) to try each tool with, and a README in it saying what each should show. The zip is
 also in this repository, in [`public/try/`](public/try/).
 

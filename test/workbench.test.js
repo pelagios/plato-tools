@@ -212,7 +212,7 @@ test('every refusal in words, each with its control: 401, 403 beta (with the enr
   assert.equal(beta.link, ENROL); assert.match(beta.message, /not enrolled/); assert.match(beta.message, /Get in touch/);
   // 403 origin_not_allowed: an Origin outside the allow-list (control: pelagios.org's, and none, as Node's).
   const from = (origin) => client(fake, TOKEN, (f) => (url, init) => f(url, { ...init, headers: { ...init.headers, Origin: origin } }));
-  await rejects(from('https://evil.example.org').list(), 'origin', /only from the tools at pelagios\.org/);
+  await rejects(from('https://evil.example.org').list(), 'origin', /only from the tools at plato\.pelagios\.org/);
   assert.equal((await from('https://pelagios.org').list()).length, 1);
   // 403 without a code: a viewer cannot save, or delete; an editor can save, not delete.
   const viewer = fake.addUser({ token: 'viewer-token-1234567' }), editor = fake.addUser({ token: 'editor-token-1234567' });
@@ -353,9 +353,9 @@ test('sharing: a token for a read-only link, read with no Authorization at all; 
 
 test('the share link: the page\'s own address and #whg-shared=<token>, read back from an address or a fragment', () => {
   const t = '0f1e2d3c-4b5a-4987-8a6b-5c4d3e2f1a0b';
-  assert.equal(shareLink('https://pelagios.org/plato-tools/#tool=check', t), `https://pelagios.org/plato-tools/#whg-shared=${t}`);
+  assert.equal(shareLink('https://plato.pelagios.org/tools/#tool=check', t), `https://plato.pelagios.org/tools/#whg-shared=${t}`);
   assert.equal(shareLink('http://localhost:4174/?x=1', t), `http://localhost:4174/?x=1#whg-shared=${t}`);
-  assert.equal(sharedToken(`https://pelagios.org/plato-tools/#whg-shared=${t}`), t);
+  assert.equal(sharedToken(`https://plato.pelagios.org/tools/#whg-shared=${t}`), t);
   assert.equal(sharedToken(`#whg-shared=${t}`), t);
   assert.equal(sharedToken(`#tool=match&whg-shared=${t}`), t);
   for (const bad of ['#whg-shared=', `#whg-shared=${t.toUpperCase()}`, `#whg-shared=${t}x`, `https://pelagios.org/?whg-shared=${t}`, '#tool=check', null]) assert.equal(sharedToken(bad), null, String(bad));

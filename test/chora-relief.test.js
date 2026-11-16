@@ -47,7 +47,7 @@ test('the browser checks\' stand-in for the relief file is a PMTiles file pmtile
 });
 
 test('MapLibre\'s guard lets the relief\'s own protocol through, a tile address of it only; the control: another site is refused', () => {
-  globalThis.location ??= { href: 'https://pelagios.org/plato-tools/', origin: 'https://pelagios.org' };
+  globalThis.location ??= { href: 'https://plato.pelagios.org/tools/', origin: 'https://plato.pelagios.org' };
   const blocked = [];
   const tr = permissions.transformRequest(() => [], { onBlocked: (o) => blocked.push(o) });
   assert.deepEqual(tr('plato-relief://7/72/49'), { url: 'plato-relief://7/72/49' });
@@ -56,7 +56,7 @@ test('MapLibre\'s guard lets the relief\'s own protocol through, a tile address 
 });
 
 test('the relief\'s first check reads only the file\'s first bytes: a host that ignores the range (200, the whole file) is not read through', async () => {
-  globalThis.document ??= { baseURI: 'https://pelagios.org/plato-tools/' };
+  globalThis.document ??= { baseURI: 'https://plato.pelagios.org/tools/' };
   const realFetch = globalThis.fetch;
   let pulled = 0, cancelled = false, asked = 0;
   // A long body (200 pieces of 64 KB, standing for 322 MB), made only as it is read; it starts with the PMTiles magic.

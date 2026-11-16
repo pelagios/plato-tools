@@ -7,7 +7,7 @@
 // field says it, and that forgetting does not revoke a token is the field's static help.
 //
 // A password field invites the browser's password manager, which `autocomplete="new-password"` (and no
-// <form> to submit) discourages but cannot forbid: a password the browser saved for any pelagios.org site
+// <form> to submit) discourages but cannot forbid: a password the browser saved for any page of plato.pelagios.org
 // could be filled into it. So only what was typed or pasted into the field is taken (noteInput, called
 // on every input event of the field): a value that arrives any other way (an autofill's input event has
 // no inputType, or insertReplacementText) marks the field untyped, and is emptied, never sent.

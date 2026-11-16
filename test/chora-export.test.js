@@ -326,7 +326,7 @@ test('licence: the places\' sources that ask for credit are credited by their ow
 const PAGE_MAP = {
   title: 'Attica in antiquity', description: 'Places of ancient Attica.', lang: 'en', legend: 'Red dots: places; dotted circles: how far each may be from its point.',
   author: { name: 'Ada Lovelace', orcid: '0000-0002-1825-0097' }, date: '2026-10-15', projection: 'mercator', bounds: [22.9, 37.5, 24.4, 38.7],
-  scaleWords: 'scale bar, true at latitude 38° N', sources: ['Made with PLATO tools, https://pelagios.org/plato-tools/', 'Places: Pleiades, https://pleiades.stoa.org/places/579885'],
+  scaleWords: 'scale bar, true at latitude 38° N', sources: ['Made with PLATO tools, https://plato.pelagios.org/tools/', 'Places: Pleiades, https://pleiades.stoa.org/places/579885'],
   residuals: [], warp: null, licence: composeLicence({ parts: [NE, RELIEF] }), format: 'svg', rasterInSvg: false, otherVersions: ['Attica in antiquity.png'],
 };
 test('the Commons page: the {{Map}} template filled, the author by name and ORCID iD, never an email address; held to its words', () => {
@@ -342,7 +342,7 @@ test('the Commons page: the {{Map}} template filled, the author by name and ORCI
  |scale = scale bar, true at latitude 38° N
  |latitude = 38.1000
  |longitude = 23.6500
- |source = Made with PLATO tools, https://pelagios.org/plato-tools/; Places: Pleiades, https://pleiades.stoa.org/places/579885
+ |source = Made with PLATO tools, https://plato.pelagios.org/tools/; Places: Pleiades, https://pleiades.stoa.org/places/579885
  |warp status =
  |warp url =
  |permission = The map can be shared under CC BY 4.0.

@@ -214,7 +214,7 @@ test('forget and forget all: the permission is undecided again; keep working dat
 });
 
 test('MapLibre\'s transformRequest: this site goes, an allowed provider goes, and once withdrawn it is refused at once and counted', async () => {
-  globalThis.location = { origin: 'https://pelagios.org', href: 'https://pelagios.org/plato-tools/#chora' };
+  globalThis.location = { origin: 'https://plato.pelagios.org', href: 'https://plato.pelagios.org/tools/#chora' };
   try {
     inPolicy(OSM); permissions.set('basemap', 'osm', 'allowed');
     await permissions.enforced();

@@ -41,7 +41,7 @@ document.head.prepend(meta);
 // The frame guard. A page of another site that frames this one could lay its own content over it and
 // have the user click here unknowingly (clickjacking): framed by another origin (the top window's
 // address cannot be read), the page hides everything it has and shows one line instead. Framing by
-// this site's own origin (any page of pelagios.org) can read the top window, and cannot be told from
+// this site's own origin (any page of plato.pelagios.org) can read the top window, and cannot be told from
 // the page being on its own: script cannot stop it, and this does not try (DEVELOPERS.md).
 var framed = false;
 try {

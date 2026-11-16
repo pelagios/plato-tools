@@ -1,7 +1,7 @@
 """Browser tests of the page itself, in Playwright's bundled Chromium with an on-disk profile.
 
     python3 e2e/app_test.py                 run every check against the built site
-    python3 e2e/app_test.py --url=https://pelagios.org/plato-tools/   the deployed site
+    python3 e2e/app_test.py --url=https://plato.pelagios.org/tools/   the deployed site
     python3 e2e/app_test.py --prove-it-fails run every check against a page with no tools on it;
                                             every check must fail, or the harness cannot fail
     --no-gl-flags   start Chora's browser without the software-GL switches, to measure whether the map
@@ -1383,7 +1383,7 @@ def krisis_lookup_case(page, tmp, url):
     pt = na.get('permissions panel', '')
     check("lookup: the token's scope is stated in the Permissions panel (kept for the tab unless remembered, what remembering means), not in the lookup panel",
           'World Historical Gazetteer token' in pt and 'A token is held' in pt and 'Remember my token in this browser' in pt
-          and 'forgotten when the tab is closed' in pt and 'any Pelagios site' in pt and 'forgotten when' not in na.get('panel text', 'forgotten when'), pt[:600])
+          and 'forgotten when the tab is closed' in pt and 'any page of plato.pelagios.org' in pt and 'forgotten when' not in na.get('panel text', 'forgotten when'), pt[:600])
 
     # Allowed in the panel: a permission allowed since the page loaded is used from the next load, so the
     # panel offers the reload (asking first, as the files chosen would be lost); the token is kept for the tab.
@@ -3310,6 +3310,7 @@ def main():
             open_map_export_checks(pw, url, tmp)
             open_map_historical_checks(pw, url, tmp)
             open_map_workflow_checks(pw, url, tmp)
+            site_layout_checks(pw, url, tmp)
     finally:
         stop(srv)
         stop_fixtures()
@@ -6883,12 +6884,12 @@ def whg_checks(pw, url, tmp):
         out_['404'] = view(a)['said']; out_['link after 404'] = a.evaluate(WHG_LINKS_JS).get(r['wid'])
         # An origin WHG does not allow: refused by WHG itself (403 origin_not_allowed, its second line of defence after the
         # browser's CORS check, which Playwright's routing does not apply to a fulfilled answer: see whg_cors below).
-        # Allowed: only an origin no page under test can have (the live check runs AT pelagios.org, so allowing that
+        # Allowed: only an origin no page under test can have (the live check runs AT plato.pelagios.org, so allowing that
         # one alone tested nothing there).
         fake('config', {'origins': ['https://not-this-page.example']})
         try:
             a.click('#whg-save')
-            said(a, "() => /only from the tools at pelagios\\.org/.test(document.getElementById('whg-said').textContent)", 20)
+            said(a, "() => /only from the tools at plato\\.pelagios\\.org/.test(document.getElementById('whg-said').textContent)", 20)
             out_['origin'] = view(a)['said']
         finally: fake('config', {'origins': [origin]})
         ok = ('not enrolled' in out_['beta'][0] and (out_['beta'][1] or '').startswith('https://whgazetteer.org/development')
@@ -7856,7 +7857,7 @@ def main_permissions(ctx, page, url, requests):
         promise = 'Your files stay on your computer, and nothing is sent to any other site unless you allow it.'
         top = page.inner_text('header.top')
         return (opened['open'] and opened['focus'] == 'permissions-h' and not closed['open'] and closed['focus'] == 'permissions-button'
-                and promise in text and 'any Pelagios site' in text and top.count(promise) == 1
+                and promise in text and 'any page of plato.pelagios.org' in text and top.count(promise) == 1
                 and 'sends nothing anywhere' not in page.inner_text('#action')), {'opened': opened, 'closed': closed, 'header': top[:300]}
     attempt('main page: the Permissions panel opens from the header with the focus on its heading, Esc closes it and the focus returns; the promise is said once at the top', panel)
     def no_policy():
@@ -9898,7 +9899,7 @@ def chora_checks(pw, url, tmp):
                 and 'back on Natural Earth' in err and err in text), {'asked': hits['cawm'] - h0, 'back': back, 'error': err, 'said': text[:300]}
     attempt('Chora: Ancient World (CAWM) allowed, but its site unreachable (no tile loads), gives way to Natural Earth, and the page says it could not be loaded from cawm.lib.uiowa.edu', cawm_unreachable)
     # ---- The shared origin, the frame and the referrer: the security audit of 1 October 2026.
-    # Every page of pelagios.org can write this browser's storage for the tools. What one could write:
+    # Every page of plato.pelagios.org can write this browser's storage for the tools. What one could write:
     # a grant for a site, marked as if the user had added it, a pasted basemap on that site and the
     # choice of it. None of it may put the basemap on the map at load: the map stays on Natural Earth,
     # the site is asked nothing, the page names the remembered choice, and a click uses it (the control).
@@ -12796,7 +12797,7 @@ def ink_checks(page, base, tmp, h):
 
 # ---- Make an open map (#37): the backgrounds a map may be made on -------------------------------------
 # The shaded relief over Natural Earth (src/chora/relief.js), and the Digital Atlas of the Roman Empire's tiles.
-# The relief file is never the real one (322 MB, on pelagios.org from the asset of the release relief-v1): this
+# The relief file is never the real one (322 MB, on plato.pelagios.org from the asset of the release relief-v1): this
 # site's own address for it is answered by a route with test/fixtures/chora/relief/relief-fixture.pmtiles, honouring
 # the range each request asks (206, Content-Range), as the reader needs; where the route is not set, the build
 # has no relief file, as a build that found no release asset (404) has none. DARE's tiles are answered by a route.
@@ -13640,5 +13641,97 @@ def open_map_workflow_checks(pw, url, tmp):
     attempt('Make an open map (workflow): the map made in Chora of the three places located, labelled, CC BY 4.0, the places identified with Pleiades and credited to it (through WHG) in the file and the Commons page, downloaded as an SVG, which does the last step, and the PNG after it, kept with the same step: every step done; nothing asked of any site but this one and the stand-in WHG', made_the_map)
     attempt('Make an open map (workflow): no page error along the way, and the stand-in WHG was asked', lambda: (bool(posts) and not errors, {'posts': len(posts), 'errors': errors[:5]}))
     ctx.close(); browser.close()
+
+# ---- The site at plato.pelagios.org: PLATO at the root, the tools under tools/ (scripts/assemble-site.mjs) ----
+# Until November 2026 the tools were at the root of another address, which GitHub now sends to the root of
+# this host with the path kept. The root page and the 404 page send what was the tools' on to tools/; a term's
+# anchor still reaches the specification. Locally: the build put together with a stand-in for PLATO's
+# published site (twice: its root page as it was, a refresh to index-en.html, which the site's own page takes
+# the place of; and a root page of PLATO's own, which is kept, with the forwarding put first in it), and
+# served as GitHub Pages serves it (404.html, with a 404, for a path that is not there). Against the deployed
+# site (--url=https://plato.pelagios.org/tools/): the site itself. Scripts and styles under tools/ are not
+# fetched: where the browser ends is what is asked, and the tools' own page would rewrite the fragment.
+SITE_PLATO_ROOTS = {
+    "PLATO's root page still a refresh to index-en.html": '<!DOCTYPE html>\n<html><head>\n<meta http-equiv="refresh" content="0; url=index-en.html">\n</head><body>\n<p>Redirecting to <a href="index-en.html">documentation</a>...</p>\n</body></html>',
+    "PLATO's own root page kept": '<!DOCTYPE html>\n<html><head><meta charset="utf-8"><title>PLATO</title>\n<script>location.replace(location.hash ? "index-en.html" + location.hash : "guide/")</script>\n</head><body><a href="guide/">guide</a></body></html>',
+}
+def serve_site(directory):
+    """`directory` served as GitHub Pages serves a site: its 404.html, with status 404, for a path that is not there."""
+    import functools, http.server, threading
+    class Pages(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *a): pass
+        def send_error(self, code, message=None, explain=None):
+            page = pathlib.Path(directory) / '404.html'
+            if code != 404 or not page.exists(): return super().send_error(code, message, explain)
+            body = page.read_bytes()
+            self.send_response(404); self.send_header('Content-Type', 'text/html; charset=utf-8'); self.send_header('Content-Length', str(len(body))); self.end_headers()
+            if self.command != 'HEAD': self.wfile.write(body)
+    srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(Pages, directory=str(directory)))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+def site_layout_checks(pw, url, tmp):
+    sites, servers = [], []
+    if REMOTE:
+        if not url.rstrip('/').endswith('/tools'):
+            print(f'  (the site\'s layout is not checked: {url} is not a site with the tools under tools/)', flush=True); return
+        sites.append(('the deployed site', url.rstrip('/')[:-len('tools')]))
+    else:
+        for n, (name, index) in enumerate(SITE_PLATO_ROOTS.items()):
+            plato = tmp / f'site-plato-{n}'; (plato / 'guide').mkdir(parents=True)
+            (plato / 'index.html').write_text(index)
+            (plato / 'guide/index.html').write_text('<!DOCTYPE html><title>PLATO guide (stand-in)</title><h1>The guide</h1>')
+            (plato / 'index-en.html').write_text('<!DOCTYPE html><title>PLATO specification (stand-in)</title><h1 id="Attestation">Attestation</h1>')
+            (plato / 'ontology.ttl').write_text('# a stand-in\n')
+            made = subprocess.run(['node', str(ROOT / 'scripts/assemble-site.mjs'), str(plato), str(ROOT / 'dist'), str(tmp / f'site-{n}')], capture_output=True, text=True)
+            if made.returncode: print('  (the site could not be put together: ' + made.stderr.strip()[:300] + ')', flush=True)
+            (tmp / f'site-{n}').mkdir(exist_ok=True)
+            srv = serve_site(tmp / f'site-{n}'); servers.append(srv)
+            sites.append((name, f'http://127.0.0.1:{srv.server_address[1]}/'))
+    browser = pw.chromium.launch(headless=True)
+    try:
+        for name, root in sites:
+            ctx = browser.new_context()
+            host = urlparse(root).netloc
+            def only_the_site(route):
+                r = route.request; u = urlparse(r.url)
+                if u.netloc != host and u.scheme in ('http', 'https'): return route.abort()
+                if u.path.startswith('/tools/') and r.resource_type not in ('document', 'fetch', 'xhr'): return route.abort()
+                route.continue_()
+            ctx.route('**/*', only_the_site)
+            page = ctx.new_page()
+            def ends(path, want, also):
+                """Where the browser is, a moment after `path` is opened: `want` (under the root), and `also` true of the page there."""
+                want = root + want; resp = None
+                # A page that sends the browser on at once interrupts the navigation to it: where it ends is what is asked.
+                try: page.goto('about:blank'); resp = page.goto(NOTOOLS if PROVE else root + path, wait_until='commit')
+                except Exception: pass
+                t0 = time.time(); ok = False
+                while time.time() - t0 < (FAST if PROVE else T(15)):   # the page with no tools goes nowhere: no longer than FAST
+                    try: ok = page.url == want and page.evaluate('() => document.readyState') == 'complete' and bool(page.evaluate(also))
+                    except Exception: ok = False     # between two documents
+                    if ok: break
+                    page.wait_for_timeout(200)       # not time.sleep: the page's address is only brought up to date while Playwright is asked something
+                return ok, {'opened': path, 'ended at': page.url, 'wanted': want, 'status': resp.status if resp else None}
+            def all_of(*cases):
+                got = [ends(*c) for c in cases]
+                return all(ok for ok, _ in got), [d for ok, d in got if not ok]
+            where = f'The site ({name})'
+            tools_page = "() => !!document.getElementById('toolbox') && !!document.getElementById('picker')"
+            attempt(f'{where}: the root goes to the guide, and with a term\'s anchor to the specification at that anchor', lambda: all_of(
+                ('', 'guide/', "() => /guide/i.test(document.title + ' ' + (document.querySelector('h1')?.textContent || ''))"),
+                ('#Attestation', 'index-en.html#Attestation', "() => !!document.getElementById('Attestation')")))
+            attempt(f'{where}: the root with a fragment of the tools\' (#chora, #tool=check, #methodos, a share link), or with a query, goes to tools/ with the same query and fragment, and the tools\' page is there',
+                    lambda: all_of(*[(q, 'tools/' + q, tools_page) for q in ('#chora', '#tool=check', '#methodos', '#whg-shared=0123456789abcdef', '?from=old#tool=convert', '?from=old')]))
+            attempt(f'{where}: a path that is not there but is under tools/ goes there, with its query and fragment (spike/, the vendored PLATO version)', lambda: all_of(
+                ('spike/?probe=1#x', 'tools/spike/?probe=1#x', "() => document.title.length > 0 && document.querySelector('h1')?.textContent !== 'Not found'"),
+                ('plato/VERSION.json', 'tools/plato/VERSION.json', "() => /\"commit\"/.test(document.body.textContent)")))
+            attempt(f'{where}: a path that is nowhere stays where it is and says so, at the root and under tools/', lambda: all_of(
+                ('no-such-page-here', 'no-such-page-here', "() => document.querySelector('h1')?.textContent === 'Not found' && !!document.querySelector('a[href=\"/tools/\"]')"),
+                ('tools/no-such-page-here', 'tools/no-such-page-here', "() => document.querySelector('h1')?.textContent === 'Not found'")))
+            ctx.close()
+    finally:
+        browser.close()
+        for s in servers: s.shutdown()
 
 if __name__ == '__main__': main()

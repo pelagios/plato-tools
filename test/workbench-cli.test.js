@@ -39,7 +39,7 @@ test('project info <share link>: the shared project read from WHG with no token 
     const { record, bytes } = await project();
     const made = await wb.create({ snapshot: envelope(bytes, record), title: 'Parishes' });
     const { token } = await wb.share(made.id);
-    const link = `https://pelagios.org/plato-tools/#whg-shared=${token}`;
+    const link = `https://plato.pelagios.org/tools/#whg-shared=${token}`;
     const n = fake.log.length;
     const ok = await cli(['project', 'info', link], { PLATO_TOOLS_WORKBENCH: base, WHG_TOKEN: TOKEN });
     assert.equal(ok.code, 0, ok.err + ok.out);
@@ -50,7 +50,7 @@ test('project info <share link>: the shared project read from WHG with no token 
     const asked = fake.log.slice(n);
     assert.equal(asked.length, 1);
     assert.equal(asked[0].path, `/reconciliation/shared/${token}/`);
-    assert.equal(asked[0].headers['user-agent'], `plato-tools/${VERSION} (+https://pelagios.org/plato-tools/)`);
+    assert.equal(asked[0].headers['user-agent'], `plato-tools/${VERSION} (+https://plato.pelagios.org/tools/)`);
     assert.equal(asked[0].headers.authorization, undefined, 'no token of the user\'s, though WHG_TOKEN is set');
     const json = JSON.parse((await cli(['project', 'info', '--json', link], { PLATO_TOOLS_WORKBENCH: base })).out);
     assert.equal(json.ok, true); assert.equal(json.manifest.workflow.id, 'map-your-data-cli1'); assert.ok(!JSON.stringify(json).includes(token));
@@ -59,7 +59,7 @@ test('project info <share link>: the shared project read from WHG with no token 
     const gone = await cli(['project', 'info', link], { PLATO_TOOLS_WORKBENCH: base });
     assert.equal(gone.code, 1); assert.match(gone.out, /no longer opens anything/);
     const before = fake.log.length;
-    const bad = await cli(['project', 'info', 'https://pelagios.org/plato-tools/#whg-shared=not-a-token'], { PLATO_TOOLS_WORKBENCH: base });
+    const bad = await cli(['project', 'info', 'https://plato.pelagios.org/tools/#whg-shared=not-a-token'], { PLATO_TOOLS_WORKBENCH: base });
     assert.equal(bad.code, 1); assert.match(bad.out, /not a WHG share link/);
     assert.equal(fake.log.length, before);
     const down = await cli(['project', 'info', link], { PLATO_TOOLS_WORKBENCH: 'http://127.0.0.1:9/reconciliation/' });

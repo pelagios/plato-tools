@@ -15,7 +15,7 @@ const NE = { name: 'Natural Earth', role: 'background', licence: { iri: 'https:/
 const page = filePage({
   title: 'Attica (test of the PLATO tools map)', description: 'A test file: places of ancient Attica with Greek labels, made with the PLATO tools. Please delete after checking.', lang: 'en',
   legend: 'Red dots: places; dotted circles: how far each may be from its point.', author: { name: 'Ada Lovelace' }, date: '2026-10-31', projection: 'mercator',
-  bounds: [22.9, 37.5, 24.4, 38.7], scaleWords: 'scale bar, true at latitude 38° N', sources: ['Made with PLATO tools, https://pelagios.org/plato-tools/'],
+  bounds: [22.9, 37.5, 24.4, 38.7], scaleWords: 'scale bar, true at latitude 38° N', sources: ['Made with PLATO tools, https://plato.pelagios.org/tools/'],
   residuals: [], warp: null, licence: composeLicence({ parts: [NE] }), format: 'svg', rasterInSvg: false, otherVersions: [],
 });
 writeFileSync(`${out}/Attica-test-map.description.txt`, page);
