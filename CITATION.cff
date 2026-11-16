@@ -13,7 +13,7 @@ authors:
     orcid: "https://orcid.org/0000-0003-3060-0181"
     email: stephen.gadd@pitt.edu
     affiliation: "Institute for Spatial History Innovation (ISHI), University of Pittsburgh"
-version: 0.9.0-alpha.2
+version: 0.9.0-alpha.3
 license: BSD-3-Clause
 identifiers:
   - type: doi
@@ -29,7 +29,7 @@ references:
         given-names: Stephen
       - name: "Pelagios Network Place Working Group"
     doi: 10.5281/zenodo.21688313
-    url: "https://pelagios.org/place-attestation-ontology/"
+    url: "https://plato.pelagios.org/"
 keywords:
   - PLATO
   - historical gazetteer

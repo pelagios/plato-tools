@@ -16,6 +16,11 @@ the commit of PLATO the tools are checked against is pinned in `package.json`.
 
 ## [Unreleased]
 
+## [0.9.0-alpha.3] - 2026-11-16
+
+Checked against PLATO 0.9.0-alpha.3 (commit 4b1dffd, DOI 10.5281/zenodo.24272786), and served at
+https://plato.pelagios.org/tools/.
+
 ### Added
 
 - **Several values for one attribute of a figure.** The figures reader has a new column role, `attribute`, for
@@ -131,11 +136,18 @@ the commit of PLATO the tools are checked against is pinned in `package.json`.
   `examples/try-files/` by `scripts/build-try-zip.py`. The status line reads "Experimental, under
   development; one workflow, Map your data, is in beta testing", and the README names the browsers
   tested.
-- The vendored PLATO is 0.9.0-alpha.2 (commit e10406d): five succession
+- The vendored PLATO is 0.9.0-alpha.3 as tagged (commit 4b1dffd): a figure's
+  `attributes` may take a list of values, and PLATO's own site is
+  https://plato.pelagios.org/. Before that, 0.9.0-alpha.2 (e10406d): five succession
   relation types (`SucceededBy`, `MergedInto`, `AbsorbedBy`, `SplitInto`,
   `TransferredTo`) accepted by the table definitions, relation types and
-  certainty levels also SKOS concepts, free-text ranges `rdfs:Literal`. Before
-  that, 0.9.0-alpha.1 as tagged (0b23ada).
+  certainty levels also SKOS concepts, free-text ranges `rdfs:Literal`; and
+  0.9.0-alpha.1 as tagged (0b23ada).
+- **The bulk accept says what it did not take in plain words**: the distance set, some of the
+  places by name, and where to find them, as "2 not accepted: the gazetteer's place is more than
+  50 km from where your table puts yours (Lancaster, Malpas). Choose 'places still to decide' above
+  to settle them yourself." It used to say "2 left out: 2 further from the place than the greatest
+  distance." Another country and another kind of place are said the same way.
 - The README, DEVELOPERS.md and the smaller docs brought into step with the
   code: the command table lists all fourteen commands, and statements
   overtaken by later branches are corrected.
@@ -332,6 +344,7 @@ and 0.7.1 as each was released.
 - **Testing**: the browser checks in headless Playwright, with a proof that
   they can fail; the full gates run on GitHub for every branch pushed.
 
-[Unreleased]: https://github.com/pelagios/plato-tools/compare/v0.9.0-alpha.2...HEAD
+[Unreleased]: https://github.com/pelagios/plato-tools/compare/v0.9.0-alpha.3...HEAD
+[0.9.0-alpha.3]: https://github.com/pelagios/plato-tools/compare/v0.9.0-alpha.2...v0.9.0-alpha.3
 [0.9.0-alpha.2]: https://github.com/pelagios/plato-tools/compare/v0.9.0-alpha.1...v0.9.0-alpha.2
 [0.9.0-alpha.1]: https://github.com/pelagios/plato-tools/releases/tag/v0.9.0-alpha.1

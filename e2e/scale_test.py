@@ -38,9 +38,9 @@ try:
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         page.add_init_script('window.__plato_forceDownload = true;')
         page.goto(url)
-        page.wait_for_function("window.__plato && window.__plato.phase === 'ready'", timeout=60_000)
+        page.wait_for_function("() => window.__plato && window.__plato.phase === 'ready'", timeout=60_000)
         page.set_input_files('#picker', a.input)
-        page.wait_for_function("['detected','unrecognised'].includes(window.__plato.phase)", timeout=120_000)
+        page.wait_for_function("() => ['detected','unrecognised'].includes(window.__plato.phase)", timeout=120_000)
         page.select_option('#target', a.target)
         if a.no_typing: page.uncheck('#typing')
         page.click('#convert')
@@ -63,7 +63,7 @@ try:
                        'items': [(i['severity'], i['kind'], i['count'], i['message'][:120]) for i in (st.get('report') or {}).get('items', [])][:25], 'error': st.get('error')})
         if st.get('phase') == 'done' and st.get('outputs'):
             with page.expect_download(timeout=1_800_000) as d:
-                page.evaluate(f"window.__plato_save({json.dumps(st['outputs'][0]['name'])})")
+                page.evaluate('(name) => window.__plato_save(name)', st['outputs'][0]['name'])
             d.value.save_as(a.out); result['outputBytes'] = pathlib.Path(a.out).stat().st_size
         ctx.close()
 finally:

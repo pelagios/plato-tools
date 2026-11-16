@@ -7138,7 +7138,7 @@ def quality_checks(pw, url, tmp):
         cands = W().get('candidates', [])
         dec = {c['gazetteer']['id']: (c.get('decision') or {}).get('kind') for c in cands}
         return (dec.get('place:gn:2634000') is None and dec.get('place:osm:r1') is None and dec.get('place:tgn:7011000') == 'match' and dec.get('place:gn:2657000') == 'match'
-                and "1 of another kind of place than the place's own" in said and '2 accepted as yours.' in said), {'said': said[:300], 'decisions': dec}
+                and "1 not accepted: the gazetteer's place is another kind of place than yours, a lake for a town, say (" in said and "Choose 'places still to decide' above to settle it yourself." in said and '2 accepted as yours.' in said), {'said': said[:300], 'decisions': dec}
     attempt("lookup quality: the bulk accept leaves Windermere (its passing candidate a lake, the place a town) for the reviewer and says so, and accepts Kendal and Ashby", bulk)
 
     def daily():

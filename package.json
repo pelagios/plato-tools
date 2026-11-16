@@ -1,7 +1,7 @@
 {
   "name": "plato-tools",
   "private": true,
-  "version": "0.9.0-alpha.2",
+  "version": "0.9.0-alpha.3",
   "type": "module",
   "description": "Tools that check and convert PLATO data on your own computer, in the browser or on the command line.",
   "bin": {
@@ -50,6 +50,6 @@
   },
   "plato": {
     "repository": "https://github.com/pelagios/place-attestation-ontology",
-    "commit": "e10406d5f5536d66831d91c17ae01c1c06bc5f40"
+    "commit": "4b1dffdff9948a4d747690590df9ae2183939cbd"
   }
 }
