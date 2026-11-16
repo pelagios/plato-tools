@@ -1,6 +1,6 @@
 // What https://plato.pelagios.org/ serves, put together (.github/workflows/pages.yml):
 //
-//   /          the published PLATO site, as it is on the gh-pages branch of pelagios/place-attestation-ontology,
+//   /          the published PLATO site, as it is on the `site` branch of pelagios/place-attestation-ontology,
 //              every path as it is there (guide/, index-en.html, ontology.ttl, schemas/, releases/ and the rest),
 //              so that PLATO's w3id addresses need only another host;
 //   /tools/    this repository's built tools (dist), with spike/ and basemap/.
@@ -17,6 +17,12 @@
 //                 (or there is none), the page is written here instead: no fragment, to guide/; a fragment
 //                 (a term's anchor), to index-en.html with it.
 //   /404.html     a path that is not there but is under /tools/ (spike/, basemap/relief.pmtiles) goes there.
+//
+// PLATO's site was first at https://pelagios.org/place-attestation-ontology/, published from that repository's
+// gh-pages branch. That address now forwards here: gh-pages holds, for every page, a small page that sends the
+// reader to the same path on this host (PLATO's .github/workflows/widoco.yml, which publishes the site itself
+// to `site`). Copied here, those pages would each forward to themselves, for ever. So a tree whose pages
+// forward to this host is refused (forwardsHere, below), whichever branch it came from.
 //
 //   node scripts/assemble-site.mjs <PLATO's published site> <dist> <out>
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -62,9 +68,32 @@ export function rootPage(platoIndex) {
   return doctype + FORWARD_SCRIPT + platoIndex.slice(doctype.length);
 }
 
+/** The host this site is served at, which PLATO's forwarding pages for its former address send the reader to. */
+export const HOST = 'plato.pelagios.org';
+
+/**
+ * Whether a page is one that forwards to this site: it carries the mark PLATO's workflow puts in each such page
+ * (<meta name="plato-forward" …>), or it sends the reader to this host by a refresh or by script. A link to this
+ * host is not forwarding: PLATO's guide and specification name their own address.
+ */
+export function forwardsHere(html) {
+  const host = HOST.replace(/\./g, '\\.');
+  return /<meta\s[^>]*name=["']?plato-forward\b/i.test(html)
+    || new RegExp(`http-equiv=["']?refresh["']?[^>]*url=\\s*["']?(https?:)?//${host}`, 'i').test(html)
+    || new RegExp(`location\\s*(\\.href\\s*=|\\.(replace|assign)\\s*\\()[^;<]*//${host}`, 'i').test(html);
+}
+
+/** PLATO's pages that must be the pages themselves, each as its path in the tree. */
+export const MUST_NOT_FORWARD = ['index-en.html', 'guide/index.html', 'index.html'];
+
 export function assemble(plato, dist, out) {
   for (const [dir, file] of [[plato, 'index-en.html'], [plato, 'guide/index.html'], [plato, 'ontology.ttl'], [dist, 'index.html']]) {
     if (!existsSync(join(dir, file))) throw new Error(`${dir} has no ${file}: not the site expected`);
+  }
+  // The pages that forward PLATO's former address here, in place of the site: stop, rather than publish a site
+  // that forwards to itself.
+  for (const file of MUST_NOT_FORWARD) {
+    if (existsSync(join(plato, file)) && forwardsHere(readFileSync(join(plato, file), 'utf8'))) throw new Error(`${plato}/${file} forwards to ${HOST}: these are the pages kept at PLATO's former address (its gh-pages branch), not PLATO's site (its site branch), and published here they would forward to themselves`);
   }
   // A path of PLATO's that the site's own would take the place of: stop, rather than serve one for the other.
   for (const mine of ['tools', '404.html']) if (existsSync(join(plato, mine))) throw new Error(`PLATO's published site has a ${mine} of its own, which this site's would replace`);

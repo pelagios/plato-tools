@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { assemble, rootPage, goesToTheSpecification, ROOT_PAGE, FORWARD_SCRIPT, NOT_FOUND_PAGE } from '../scripts/assemble-site.mjs';
+import { assemble, rootPage, goesToTheSpecification, forwardsHere, MUST_NOT_FORWARD, ROOT_PAGE, FORWARD_SCRIPT, NOT_FOUND_PAGE } from '../scripts/assemble-site.mjs';
 
 const OLD = '<!DOCTYPE html>\n<html><head>\n<meta http-equiv="refresh" content="0; url=index-en.html">\n</head><body>\n<p>Redirecting to <a href="index-en.html">documentation</a>...</p>\n</body></html>';
 const NEW = '<!DOCTYPE html>\n<html><head><script>location.replace(location.hash ? "index-en.html" + location.hash : "guide/")</script></head><body><a href="guide/">guide</a></body></html>';
@@ -53,4 +53,39 @@ test('the site is refused when PLATO\'s has a path this site\'s own would replac
     rmSync(join(f.plato, 'tools'), { recursive: true }); rmSync(join(f.plato, 'ontology.ttl'));
     assert.throws(() => assemble(f.plato, f.dist, f.out), /has no ontology\.ttl/);
   } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+// PLATO's former address forwards to this site, page by page, from its gh-pages branch. Those pages, copied
+// here in place of PLATO's site (its site branch), would forward to themselves.
+const STUB = '<!DOCTYPE html>\n<html lang="en"><head><meta charset="utf-8">\n<meta name="plato-forward" content="https://plato.pelagios.org/">\n<meta name="robots" content="noindex">\n<link rel="canonical" href="https://plato.pelagios.org/guide/">\n<script>location.replace("https://plato.pelagios.org/guide/" + location.search + location.hash)</script>\n<meta http-equiv="refresh" content="0; url=https://plato.pelagios.org/guide/">\n</head><body><a href="https://plato.pelagios.org/guide/">moved</a></body></html>';
+
+test('a page that forwards to this site is told from one that only names it', () => {
+  assert.equal(forwardsHere(STUB), true);
+  // Each of the three signs alone is enough: the mark, the refresh, the script.
+  assert.equal(forwardsHere('<meta name="plato-forward" content="x">'), true);
+  assert.equal(forwardsHere('<meta http-equiv="refresh" content="0; url=https://plato.pelagios.org/index-en.html">'), true);
+  assert.equal(forwardsHere("<meta http-equiv=refresh content='0;url=//plato.pelagios.org/'>"), true);
+  assert.equal(forwardsHere('<script>window.location.replace("https://plato.pelagios.org/guide/" + location.hash)</script>'), true);
+  assert.equal(forwardsHere('<script>location.href = "https://plato.pelagios.org/"</script>'), true);
+  // PLATO's own pages: links to this host, a canonical address on it, a refresh or a script to a path beside the page.
+  assert.equal(forwardsHere('<link rel="canonical" href="https://plato.pelagios.org/guide/"><a href="https://plato.pelagios.org/index-en.html">the specification</a>'), false);
+  assert.equal(forwardsHere(OLD), false);
+  assert.equal(forwardsHere(NEW), false);
+  assert.equal(forwardsHere('<meta http-equiv="refresh" content="0; url=https://example.org/">'), false);
+  assert.equal(forwardsHere(ROOT_PAGE), false);
+  assert.equal(forwardsHere(NOT_FOUND_PAGE), false);
+});
+
+test('the site is refused when PLATO\'s pages are the ones that forward to this site: it would forward to itself', () => {
+  assert.deepEqual(MUST_NOT_FORWARD, ['index-en.html', 'guide/index.html', 'index.html']);
+  for (const file of MUST_NOT_FORWARD) {
+    const f = fixture(NEW);
+    try {
+      // The same tree is taken first, so that the refusal below is the forwarding page's doing and nothing else's.
+      assemble(f.plato, f.dist, f.out);
+      assert.equal(existsSync(join(f.out, 'tools', 'index.html')), true);
+      writeFileSync(join(f.plato, file), STUB);
+      assert.throws(() => assemble(f.plato, f.dist, f.out), new RegExp(`${file.replace(/[.]/g, '\\.')} forwards to plato\\.pelagios\\.org`), file);
+    } finally { rmSync(f.dir, { recursive: true, force: true }); }
+  }
 });

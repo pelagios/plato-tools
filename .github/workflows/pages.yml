@@ -1,15 +1,20 @@
 # Test, build and publish https://plato.pelagios.org/ on GitHub Pages: PLATO's own published site at the root,
-# every path as it is on the gh-pages branch of pelagios/place-attestation-ontology (the guide, the
+# every path as it is on the `site` branch of pelagios/place-attestation-ontology (the guide, the
 # specification, the ontology's files, the schemas, the releases), and these tools under tools/
 # (scripts/assemble-site.mjs, which also says what the root page and the 404 page do for the tools' former
 # addresses).
+#
+# NOT that repository's gh-pages branch, which is what its former address, pelagios.org/place-attestation-ontology/,
+# is published from: its pages are small ones that forward to this site, and copied here they would forward to
+# themselves. PLATO's workflow writes both branches at each deploy. Should the pages that forward ever arrive
+# here all the same, the site is refused (scripts/assemble-site.mjs, forwardsHere) and the build fails.
 #
 # When it runs, and what it then does:
 # - a push to main: the tests, the build, the site, the deploy;
 # - every day, and when started by hand: so that what PLATO has published since is on the site within a day.
 #   PLATO's repository cannot start this workflow without a personal access token, and none is used: this one
 #   looks instead. It reads tools/deployed.json from the site, which the deploy before wrote: the commit of the
-#   tools deployed, and the commit of PLATO's gh-pages branch deployed with it.
+#   tools deployed, and the commit of PLATO's `site` branch deployed with it.
 #     - Both as they are now (a daily run): nothing is built or deployed.
 #     - The tools' commit as it is now, PLATO's site changed (or a run started by hand): the site is built and
 #       deployed again WITHOUT the tests. That is safe because tools/deployed.json is written only here, after
@@ -39,7 +44,7 @@ concurrency:
 
 jobs:
   # What this run has to do (above): `deploy`, whether anything is built and deployed; `tested`, whether the
-  # tools' commit is the one already deployed, its tests passed then; `site`, the commit of PLATO's gh-pages.
+  # tools' commit is the one already deployed, its tests passed then; `site`, the commit of PLATO's `site` branch.
   plan:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -52,8 +57,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          site=$(git ls-remote https://github.com/pelagios/place-attestation-ontology refs/heads/gh-pages | cut -f1)
-          [[ "$site" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::The commit of PLATO's gh-pages branch could not be read."; exit 1; }
+          site=$(git ls-remote https://github.com/pelagios/place-attestation-ontology refs/heads/site | cut -f1)
+          [[ "$site" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::The commit of PLATO's site branch could not be read."; exit 1; }
           # No answer, or one that is not the JSON expected: nothing is taken as deployed, and the run does everything.
           live=$(curl -fsSL --retry 2 --max-time 30 https://plato.pelagios.org/tools/deployed.json || true)
           live_tools=$(jq -r '.tools // empty' <<<"$live" 2>/dev/null || true)

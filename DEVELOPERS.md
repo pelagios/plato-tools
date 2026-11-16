@@ -4602,9 +4602,12 @@ A push to `main` runs the tests, builds the site and publishes it to GitHub Page
 (`.github/workflows/pages.yml`), at https://plato.pelagios.org/.
 
 - **The site** (since November 2026) is PLATO's own published site at the root, copied as it is from the
-  `gh-pages` branch of `pelagios/place-attestation-ontology` with every path kept (the guide, the specification,
+  `site` branch of `pelagios/place-attestation-ontology` with every path kept (the guide, the specification,
   the ontology's files, the schemas, the releases), and these tools under `tools/`
-  (`scripts/assemble-site.mjs`, `test/assemble-site.test.js`). The tools are built with a relative base
+  (`scripts/assemble-site.mjs`, `test/assemble-site.test.js`). Not from that repository's `gh-pages` branch:
+  PLATO's former address, `pelagios.org/place-attestation-ontology/`, is published from it, and its pages are
+  small ones that forward to this site. Copied here they would forward to themselves, so a tree whose
+  `index-en.html`, `guide/index.html` or `index.html` forwards to this host is refused and the build fails. The tools are built with a relative base
   (`vite.config.js`), so nothing in them names where they are. The workflow also runs every day, and by hand,
   to bring in what PLATO has published since: it reads `tools/deployed.json` from the site (the commits
   deployed, written by the deploy before), does nothing when neither has changed, and does not run the tests
