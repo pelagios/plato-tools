@@ -1033,7 +1033,7 @@ $('target').onchange = () => { document.querySelector('[data-for="ntriples-outpu
 // a link keeps it. The keys are not the ids of step 2's buttons (#check would scroll to the button,
 // not choose the tool). Hermes, the readers, narrows nothing: its card goes to the drop zone. Chora's
 // card is a link to #chora, which opens it here, with the files chosen (openChora, below).
-const GUIDE = 'https://pelagios.org/place-attestation-ontology/guide/tools.html';
+const GUIDE = 'https://plato.pelagios.org/guide/tools.html';
 const TOOLS = {
   check: { name: 'Elenchos', what: 'the check', heading: 'Check it', guide: ['checking', 'What it checks'] },
   convert: { name: 'Metaphrasis', what: 'conversion', heading: 'Convert it', guide: ['converting', 'What each format keeps'] },

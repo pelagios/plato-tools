@@ -16,6 +16,11 @@ the commit of PLATO the tools are checked against is pinned in `package.json`.
 
 ## [Unreleased]
 
+### Changed
+
+- **Links to PLATO's guide and specification name https://plato.pelagios.org/**, in the page, the README and
+  the developers' notes. Their former address, under pelagios.org, now forwards there page by page.
+
 ## [0.9.0-alpha.3] - 2026-11-16
 
 Checked against PLATO 0.9.0-alpha.3 (commit 4b1dffd, DOI 10.5281/zenodo.24272786), and served at

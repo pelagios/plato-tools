@@ -8465,7 +8465,7 @@ def front_page_checks(browser, url):
             got = page.evaluate("""() => Object.fromEntries([['guide', '.masthead-side a#guide-link'], ['templato', '#drop a#get-templato']].map(([k, q]) => {
               const a = document.querySelector(q); return [k, a && { href: a.getAttribute('href'), text: a.textContent.trim(), visible: !!a.offsetWidth }]; }))""")
         finally: ctx.close()
-        g = 'https://pelagios.org/place-attestation-ontology/guide/'
+        g = 'https://plato.pelagios.org/guide/'
         docs = {'tools.md': (PLATO / 'docs/tools.md').is_file(),
                 'Get temPlato': any(l.strip() == '## Get temPlato' for l in (PLATO / 'docs/spreadsheets/index.md').read_text().splitlines()) if (PLATO / 'docs/spreadsheets/index.md').is_file() else False}
         return (got.get('guide') == {'href': g + 'tools.html', 'text': 'Guide', 'visible': True}
@@ -8516,7 +8516,7 @@ def front_page_checks(browser, url):
             # By keyboard: Enter on a focused summary closes it again, and it reads "More".
             page.locator('#toolbox .tools > li').nth(0).locator(':scope > details.more > summary').focus(); page.keyboard.press('Enter'); page.wait_for_timeout(100)
             again = page.evaluate(STATE)[0]
-            guide = 'https://pelagios.org/place-attestation-ontology/guide/'
+            guide = 'https://plato.pelagios.org/guide/'
             by = {c['name']: c for c in opened}
             chora, krisis, peripleo, methodos = by.get('Chora', {}), by.get('Krisis', {}), by.get('Peripleo', {}), by.get('Methodos', {})
             ok = (len(closed) == 10 and all(c['has'] and not c['open'] and c['said'] == 'More' and c['body'] == 0 and c['named'] and not c['insideLink'] for c in closed)

@@ -1,7 +1,7 @@
 # PLATO tools, for developers
 
 How the tools are built, what they do beyond what the
-[PLATO guide](https://pelagios.org/place-attestation-ontology/guide/tools.html) says of them, how
+[PLATO guide](https://plato.pelagios.org/guide/tools.html) says of them, how
 they are tested, and the conventions to keep. For what the tools are and how to run them, see the
 [README](README.md); for what each release changed, [CHANGELOG.md](CHANGELOG.md).
 
@@ -282,7 +282,7 @@ are held to.
 
 ### Statistical figures
 
-The guide's [Statistical tables](https://pelagios.org/place-attestation-ontology/guide/statistics.html)
+The guide's [Statistical tables](https://plato.pelagios.org/guide/statistics.html)
 gives the design and the two commands.
 
 - **PLATO JSON to RDF.** Under `dimensions` and `attributes`, a key that is an IRI becomes a
@@ -1119,7 +1119,7 @@ the page uses them yet (no page, no CLI, `text.find` and `text.review` still dec
 ## The version check
 
 What it reports, and why, is in the guide:
-[Comparing two versions](https://pelagios.org/place-attestation-ontology/guide/tools.html#comparing-two-versions).
+[Comparing two versions](https://plato.pelagios.org/guide/tools.html#comparing-two-versions).
 `src/engine/compare.js` holds it.
 
 - **Each version is read by `run()`** with `options.sink`, so every input reaches the check as
@@ -1377,7 +1377,7 @@ a new version" (below).
 ## Publishing (Agora)
 
 What each part reports, and the order to take them in, is in the guide:
-[Publishing your dataset](https://pelagios.org/place-attestation-ontology/guide/tools.html#publishing-your-dataset).
+[Publishing your dataset](https://plato.pelagios.org/guide/tools.html#publishing-your-dataset).
 `src/engine/agora/` holds it: `index.js` runs one part, reading the dataset through `run()` as the
 version check does, and each part is a module of its own, with its wording in its own `TEXT`.
 
@@ -1927,7 +1927,7 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
 ## Chora, the map
 
 What it does is in the guide:
-[Placing on the map](https://pelagios.org/place-attestation-ontology/guide/tools.html#chora).
+[Placing on the map](https://plato.pelagios.org/guide/tools.html#chora).
 It is a module mounted in the main page's centre column (Stephen, 13 October 2026; it was a page of its
 own, `chora.html`, until then, "the odd one out and unintegrated"): `mountChora(root, host)` in
 `src/chora/app.js`, into `#chora-root` in `section#chora`, at the address `#chora`. Its card (a link to

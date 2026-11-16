@@ -130,7 +130,7 @@ illustrative, and the identifiers are made up.
 
 How `src/formats/annotations.js` reads an annotation, key by key. The PLATO guide explains the same
 for the people who made the annotations:
-[Annotations from Recogito](https://pelagios.org/place-attestation-ontology/guide/annotations.html).
+[Annotations from Recogito](https://plato.pelagios.org/guide/annotations.html).
 Each link from a passage to a place becomes one attestation-centric attestation about that place.
 
 | In the annotation | In PLATO | Notes |

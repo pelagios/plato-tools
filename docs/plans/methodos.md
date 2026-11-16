@@ -868,7 +868,7 @@ to the tools page in its first line and `index.md` twice, so each knows the othe
 is a link where a reader *looks* for one.
 
 - **Tools to Guide:** a "Guide" button in the masthead side, beside Permissions (`.masthead-side`), to
-  `https://pelagios.org/place-attestation-ontology/guide/tools.html`, and, in each card's
+  `https://plato.pelagios.org/guide/tools.html`, and, in each card's
   `details.more`, the existing `p.in-guide` line (already there). The lede's link stays.
 - **Guide to Tools:** a "PLATO tools" entry in the guide's header navigation (the Sphinx theme's
   external links in `docs/conf.py`, so it is on every page), and a "Try it" box at the top of
@@ -882,7 +882,7 @@ coordinator.
 Step 1's `small` text under the drop zone already offers example files. For arrivals who have no
 PLATO data and do not know PLATO, one more sentence, after "Download example files":
 
-> New to PLATO? Start from <a href="https://pelagios.org/place-attestation-ontology/guide/spreadsheets/#get-templato">temPlato</a>, the spreadsheet template: fill its sheets, and drop the workbook here.
+> New to PLATO? Start from <a href="https://plato.pelagios.org/guide/spreadsheets/#get-templato">temPlato</a>, the spreadsheet template: fill its sheets, and drop the workbook here.
 
 The link goes to the guide's "Get temPlato" section rather than to the download itself, since the
 workbook's download address under `_downloads/` is Sphinx's and may change.
