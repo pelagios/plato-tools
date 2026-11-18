@@ -5,13 +5,12 @@ Historical Gazetteer validates an uploaded Linked Places Format v2 file against,
 
   repository   whg3, the World Historical Gazetteer's (read from a checkout at ~/Documents/GitHub/whg3)
   file         validation/static/lpf_v2.0.jsonld   (served as https://whgazetteer.org/schema/lpf_v2.0.jsonld, its $id)
-  commit       af99c81fc, on whg3's branch staging (not yet deployed on 2026-11-18: the file at that address
-               still has the older patterns until it is)
+  commit       06c9a17e2, on whg3's main (deployed: https://whgazetteer.org/static/lpf_v2.0.jsonld serves it)
   copied       2026-11-18
-  sha256       5f59883ddd491d14c32ca7c40ec816013c37448e02cf27210ee9ad0a380d1176
+  sha256       30e27f0d8d55304042fbd51fed5481daa50718df048864f79a98aa73ce5b7f5a
 
   This copy differs from the one first taken (commit c238ab7e9, sha256 c8cd2c4c...) in two patterns, the
-  `lang` definition's and the toponym's, which now admit a trailing private-use tail such as -x-ijmes (the
+  `lang` definition's and the toponym's, which now admit a private-use tail such as -x-ijmes, and a bare private-use tag (x-ijmes) (the
   schema listed ar-Latn-x-ijmes among its own examples and refused it: WorldHistoricalGazetteer/place#351).
 
 It is named .json here, not .jsonld, only so that it can be imported as JSON; nothing in it is changed
