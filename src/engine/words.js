@@ -161,6 +161,7 @@ export const COLUMN_CHOICES = {
   wkt: 'Point or shape, as WKT text', geometry: 'Point or shape, as GeoJSON', gridref: 'Grid reference (Ordnance Survey, Irish Grid)', id: 'Place id', address: "Place's web address",
   type: 'Kind of place', language: 'Language of the name', source: 'Source', date: 'Date, as the source writes it',
   start: 'Earliest date', end: 'Latest date', within: 'Region it lies in', split: 'Regions, to split into levels',
+  featureClass: 'Feature class (A, H, L, P, R, S, T)', aatType: 'Kind of place, as a Getty AAT identifier', matches: 'Same place elsewhere (web addresses, or wd: gn: ids)', countryCodes: 'Country codes (two letters)',
   note: 'Keep as a note', skip: "Don't carry over",
 };
 export const COLUMN_WORDS = {

@@ -27,7 +27,7 @@ import { LOSS_TEXT } from '../report.js';
 import { tableIds } from '../../formats/tables.js';
 // The tables reader's own forms for a workbook's numbers and dates, so that a sheet reads alike either way.
 import { numberText, dateText } from '../pipeline.js';
-import { resolveColumns, applyColumns, expandSplits, splitRow, GENERIC_KINDS, FEATURE_ID, FIELDS, OTHER, FIGURE_FIELDS } from './columns.js';
+import { resolveColumns, applyColumns, expandSplits, splitRow, matchBasis, GENERIC_KINDS, FEATURE_ID, FIELDS, OTHER, FIGURE_FIELDS } from './columns.js';
 import { containerKey, CONTAINED_IN } from './within.js';
 import { sha256 } from '../../lib/sha256.js';
 /** The id a region is minted with, under the base address: "region-" and 16 hex digits of the SHA-256 of its containerKey. */
@@ -492,6 +492,18 @@ export async function* genericSource(given, rep, options = {}, defaultBase = 'ht
     contained.push(containedIn(iri, a.attestation));
     return { events, contained };
   };
+  // The matches a row's "matches" column gives its place (columns.js, matchAddress), as one attestation
+  // of identities about that place, each a closeMatch: the table says the two are the same without
+  // saying how strictly, as an LPF link from such a column is. Its source is the file and its locator
+  // the row, whatever source the row names for its name; it has no contributor and no date, and each
+  // relation's basis says the table gave it, so that it is never taken for a reviewer's decision
+  // (Krisis's answers have a contributor: krisis/identity.js, withdraw.js).
+  const matchesOf = (a, subject, where) => {
+    const given = (a.matches || []).filter((m) => m.iri !== subject);
+    if (!given.length) return [];
+    const source = { title: file.name, authorityType: 'source' };
+    return [{ identities: given.map((m) => ({ subject, object: m.iri, identityType: 'closeMatch', basis: matchBasis(file.name, m.column) })), sources: [source], citations: [{ source, locator: where }] }];
+  };
   let standIn = false;
   const idAt = new Map();   // an address -> the id and row that first gave it, to say when ids are merged
   const mint = (id) => { if (!options.base && !standIn) { standIn = true; report('generic-stand-in-base', base); } return minted.place(id); };
@@ -529,6 +541,7 @@ export async function* genericSource(given, rep, options = {}, defaultBase = 'ht
       const { events, contained } = regionsOf(a);
       yield* events;
       yield { type: 'attestation', value: { about: a.address, ...a.attestation }, n, ...w, ...looked };
+      for (const m of matchesOf(a, a.address, r.where)) yield { type: 'attestation', value: { about: a.address, ...m }, n, ...w };
       for (const c of contained) yield { type: 'attestation', value: { about: a.address, ...c }, n, ...w };
       continue;
     }
@@ -545,12 +558,14 @@ export async function* genericSource(given, rep, options = {}, defaultBase = 'ht
       // Evidence about the place its id names: an attestation needs that address, so a row with no id is lost.
       if (a.id === undefined) { report('generic-same-id-empty', r.where); continue; }
       let p = places.get(a.id);
-      if (!p) places.set(a.id, (p = { names: new Set() }));
+      if (!p) places.set(a.id, (p = { names: new Set(), ccodes: new Set() }));
       p.names.add(a.label);
+      for (const c of a.ccodes || []) p.ccodes.add(c);
       out++;
       const { events, contained } = regionsOf(a);
       yield* events;
       yield { type: 'attestation', value: { about: mint(a.id), ...a.attestation }, n, ...w, ...looked };
+      for (const m of matchesOf(a, mint(a.id), r.where)) yield { type: 'attestation', value: { about: mint(a.id), ...m }, n, ...w };
       for (const c of contained) yield { type: 'attestation', value: { about: mint(a.id), ...c }, n, ...w };
       continue;
     }
@@ -561,9 +576,11 @@ export async function* genericSource(given, rep, options = {}, defaultBase = 'ht
       rec['@id'] = mint(a.id);
     } else if (hasId) report('generic-id-empty', r.where);
     rec.label = a.label;
+    if (a.ccodes) rec.ccodes = a.ccodes;
     if (a.id !== undefined) rec.entityIdentifier = a.id;
     const { events, contained } = regionsOf(a);
-    rec.attestations = [a.attestation, ...contained];
+    // The matches the table gives are about the place's address, which its id made (a row without one keeps them in its notes: columns.js).
+    rec.attestations = [a.attestation, ...(rec['@id'] ? matchesOf(a, rec['@id'], r.where) : []), ...contained];
     yield* events;
     out++;
     yield byAddress ? { type: 'record', value: rec, n, newEntity: true, ...w, ...looked } : { type: 'record', value: rec, n, ...w, ...looked };
@@ -575,7 +592,7 @@ export async function* genericSource(given, rep, options = {}, defaultBase = 'ht
     for (const [id, p] of places) {
       const names = [...p.names];
       if (names.length > 1) report('generic-same-id-label', `"${id}": ${names.slice(0, 5).join(' / ')}${names.length > 5 ? ` and ${names.length - 5} more` : ''}`);
-      yield { type: 'record', newEntity: true, value: { '@id': mint(id), label: names.length > 1 ? id : names[0], entityIdentifier: id, attestations: [] } };
+      yield { type: 'record', newEntity: true, value: { '@id': mint(id), label: names.length > 1 ? id : names[0], ...(p.ccodes.size ? { ccodes: [...p.ccodes] } : {}), entityIdentifier: id, attestations: [] } };
     }
   }
   // A skipped column is reported once, by name, if it had a value to lose.

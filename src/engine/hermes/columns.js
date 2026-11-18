@@ -19,6 +19,7 @@
 // do, a date column is the date as the source writes it, a start and end the earliest start and
 // latest end, a type column a type's label (and its identifier, when it is a web address).
 import { isAbsoluteIri } from '../../lib/context.js';
+import { expandLpf, LPF_PREFIXES, FCLASS, GN_CLASS } from '../../formats/lpf.js';
 import { placeAddress, addressNote, addressFromPattern, patternProblem, patternId, GAZETTEER_PATTERNS } from './addresses.js';
 import { withinNote } from './within.js';
 import { parseGridRef, gridRefToWgs84, looksLikeGridRef, isMissingMarker } from './gridref.js';
@@ -42,6 +43,11 @@ export const FIELDS = {
   end: { single: true, words: 'the latest date: a year (such as -0500 or 1066) or an ISO date' },
   within: { single: false, words: 'a region the place lies in (a parish, a county, a country…), with its level: 1 for the widest, then 2, 3…; given as {"field": "within", "level": 2}' },
   split: { single: false, words: 'several regions in one cell, narrowest first, such as "Rotherhithe, Surrey, England": split on a separator into levels, given as {"field": "split", "separator": ", ", "levels": [3, 2, 1], "firstIsName": true}' },
+  // The columns of the World Historical Gazetteer's LP-TSV template that are none of the above (#42).
+  featureClass: { single: false, words: 'the class of feature, as GeoNames and Linked Places Format code it: one of A, H, L, P, R, S, T; several in one cell are separated by ; or |' },
+  aatType: { single: false, words: 'what kind of place it is, as an identifier of the Getty Art & Architecture Thesaurus (300008347, or aat:300008347); several in one cell are separated by ; or |, and each goes with the type beside it when the row has as many of each' },
+  matches: { single: false, words: "the same place's web addresses in gazetteers, which the table itself gives (close matches): full addresses, or ids with a prefix of Linked Places Format (wd:Q90, gn:2988507, tgn:7008038); several in one cell are separated by ; or |" },
+  countryCodes: { single: false, words: 'the modern countries the place lies in, as ISO 3166-1 alpha-2 codes (GB, FR); several in one cell are separated by ; or |' },
   // A table of figures (a census, a return; figures.js): the roles that make a column a coordinate or a
   // figure. Their entries carry what they need, and the table's own description goes beside the columns.
   period: { single: true, words: 'the period the figures are for, as the table gives it: a year, an ISO date, or two years (1851-1861)' },
@@ -94,6 +100,12 @@ export const GENERIC_KINDS = {
   'generic-id-shape': 'loss',
   'generic-same-id-empty': 'loss',
   'generic-address-merges-ids': 'warning',
+  'generic-fclass-invalid': 'loss',
+  'generic-aat-invalid': 'loss',
+  'generic-match-not-address': 'loss',
+  'generic-match-no-place-address': 'loss',
+  'generic-ccode-invalid': 'loss',
+  'generic-ccodes-not-carried': 'loss',
   'generic-feature-key': 'loss',
   'generic-not-feature': 'loss',
   'generic-csv-extra-cells': 'loss',
@@ -157,7 +169,14 @@ const HEADINGS = {
   address: ['uri', 'url', 'iri', 'link', 'placeuri', 'placeurl', 'placeiri', 'wikidata', 'pleiades', 'geonames', 'whg', 'tgn', 'item'],
   type: ['type', 'types', 'featuretype', 'featuretypes', 'placetype', 'placetypes', 'category', 'categories', 'class', 'fclass', 'featureclass', 'featurecode', 'fcode', 'kind'],
   language: ['language', 'lang', 'languagecode', 'langcode', 'namelanguage', 'namelang'],
-  source: ['source', 'sources', 'citation', 'citations', 'reference', 'references', 'bibliography', 'ref', 'bibref'],
+  // title_source: the World Historical Gazetteer's LP-TSV heading for where the name (its "title") was found.
+  source: ['source', 'sources', 'citation', 'citations', 'reference', 'references', 'bibliography', 'ref', 'bibref', 'titlesource'],
+  // The rest of the LP-TSV template's own headings (fclasses, aat_types, matches, ccodes), each read as
+  // its field only while its sampled values have that field's form (guessColumns).
+  featureClass: ['fclasses'],
+  aatType: ['aattypes', 'aattype'],
+  matches: ['matches'],
+  countryCodes: ['ccodes', 'ccode', 'countrycode', 'countrycodes', 'iso2'],
   date: ['date', 'dates', 'period', 'when', 'datelabel', 'year'],
   start: ['start', 'from', 'startdate', 'begin', 'begindate', 'mindate', 'earliest', 'notbefore', 'datefrom', 'fromdate', 'yearfrom', 'fromyear', 'startyear'],
   end: ['end', 'to', 'enddate', 'maxdate', 'latest', 'notafter', 'dateto', 'todate', 'yearto', 'toyear', 'endyear', 'until'],
@@ -199,6 +218,7 @@ const FIELD_WORDS = {
   gridref: 'a grid reference',
   id: 'an identifier', address: "the place's web address", type: 'a type', language: 'a language', source: 'a source', date: 'a date', start: 'a start date', end: 'an end date',
   within: 'a region the place lies in', split: 'several regions in one cell',
+  featureClass: 'a class of feature', aatType: 'a type, as an identifier of the Getty Art & Architecture Thesaurus', matches: "the same place's web addresses in gazetteers", countryCodes: 'country codes',
   period: 'the period of the figures', dimension: 'a coordinate of the figures', value: 'a figure', figure: 'a figure',
 };
 
@@ -251,6 +271,50 @@ function cellList(v) {
   if (Array.isArray(v)) return v.map(cellText).filter(Boolean);
   return cellText(v).split(/[;|]/).map((s) => s.trim()).filter(Boolean);
 }
+
+// ---- the World Historical Gazetteer's LP-TSV columns (#42) -------------------------------------------
+// fclasses: Linked Places Format's seven classes, written as the LPF reader writes them (a type whose
+// identifier is the GeoNames ontology's, lpf.js), so that the LPF writer puts them back in fclasses.
+/** A cell's value as one of LPF's feature classes (A, H, L, P, R, S, T; in either case), or undefined: no class is made up. */
+export const featureClass = (v) => { const c = cellText(v).toUpperCase(); return Object.hasOwn(FCLASS, c) ? c : undefined; };
+/** The PLATO type a feature class is, as the LPF reader makes it. */
+const classType = (c) => ({ identifier: GN_CLASS + c, label: FCLASS[c] });
+// aat_types: an AAT identifier as the template gives it (300008347), with Linked Places Format's
+// prefix (aat:300008347), or as the Getty's own address.
+const AAT = /^(?:aat:\s*|https?:\/\/vocab\.getty\.edu\/(?:page\/)?aat\/)?(\d+)$/i;
+/** The digits of an AAT identifier in a cell's value, or undefined. */
+export const aatId = (v) => AAT.exec(cellText(v))?.[1];
+/** The address of an AAT concept, as the LPF reader expands aat:<n>. */
+const aatAddress = (n) => expandLpf(`aat:${n}`);
+// matches: the prefixes of Linked Places Format's alias table for links (the README's; lpf.js holds
+// them beside the vocabulary prefixes, which name no place and are not expanded here).
+const LINK_PREFIXES = new Set(['bnf', 'cerl', 'dbp', 'gn', 'gnd', 'gov', 'loc', 'pl', 'tgn', 'viaf', 'wd', 'wp']);
+/**
+ * The web address a value of a "matches" column names, or undefined when none can be made of it: a
+ * full address, an id with a prefix of LPF's alias table (wd:Q90, gn:2988507, tgn:7008038; the prefix
+ * in either case), or a World Historical Gazetteer record id (place:gn:2988507), each then put into
+ * the form `about` carries (addresses.js, placeAddress: GeoNames and Wikidata each have one form).
+ * A bare number, an unknown prefix, an address that is not a place's, and a web page that is not a
+ * gazetteer's record (Wikipedia, as for a TEI place's addresses) make none.
+ */
+export function matchAddress(v) {
+  const t = cellText(v);
+  const m = /^([A-Za-z]+):(?!\/\/)(\S+)$/.exec(t);
+  const full = m && LINK_PREFIXES.has(m[1].toLowerCase()) ? LPF_PREFIXES[m[1].toLowerCase()] + m[2] : t;
+  const p = placeAddress(full);
+  return p.lost || p.page || !isWebAddress(p.iri) ? undefined : p.iri.trim();
+}
+/** The basis written on each match a table gives: the table's own statement, not a reviewer's decision. */
+export const matchBasis = (fileName, column) => `Given by the table ${fileName} in its column "${column}": the table's own statement, not a reviewer's decision`;
+const CCODE = /^[A-Za-z]{2}$/;
+// What the values of each LP-TSV field must be for a heading to be read as it, and the words for one that is not.
+const LPTSV_FORM = {
+  featureClass: { fits: (x) => featureClass(x) !== undefined, words: 'feature classes (A, H, L, P, R, S or T)' },
+  aatType: { fits: (x) => aatId(x) !== undefined, words: 'identifiers of the Art & Architecture Thesaurus (such as 300008347)' },
+  matches: { fits: (x) => matchAddress(x) !== undefined, words: 'web addresses, or ids with a prefix such as wd: or gn:' },
+  countryCodes: { fits: (x) => CCODE.test(x), words: 'two-letter country codes (such as GB)' },
+};
+
 function geometryLike(s) {
   try { const g = JSON.parse(s); return !!g && typeof g === 'object' && typeof g.type === 'string'; } catch { return false; }
 }
@@ -333,6 +397,13 @@ export function guessColumns(headers, sampleRows = [], headerText = {}, { ownGeo
       // (/places/579885): at least half of the sampled values must be one for the pattern to be suggested.
       const fit = vs.filter((v) => /^\/places\/\d+$/.test(v)).length;
       if (fit && 2 * fit >= vs.length) { field = 'note'; reason = `the heading "${h}" is Pleiades' for the place a row is about`; suggested[h] = { field: 'address', pattern: GAZETTEER_PATTERNS.pleiades.pattern, gazetteer: 'pleiades', fit, sampled: vs.length }; }
+    } else if (field && Object.hasOwn(LPTSV_FORM, field)) {
+      // An LP-TSV heading (fclasses, aat_types, matches, ccodes) is read as its field while at least
+      // half of the sampled values have its form (a column empty in the sample is read by its heading):
+      // a stray value is then reported with its own row, and "matches: yes" or a country's name under
+      // "country_code" stays a note.
+      const parts = vs.flatMap(cellList), k = parts.filter(LPTSV_FORM[field].fits).length;
+      if (parts.length && 2 * k < parts.length) { reason = `the heading "${h}" reads as ${FIELD_WORDS[field]}, but ${k ? `only ${k}` : 'none'} of its ${parts.length} sampled values ${k === 1 ? 'is' : 'are'} ${LPTSV_FORM[field].words}, so it is kept in the notes`; field = 'note'; }
     } else if ((field === 'latitude' || field === 'longitude') && ownGeometry) {
       // GeoJSON features with a geometry of their own: that is the place's location, and a latitude
       // and longitude beside it would give each place a second one.
@@ -748,7 +819,11 @@ export function geometryToPlato(g, report = () => {}, where = '') {
  * label (the name, else the first other name), `address` the place's web address when the address
  * column holds one (`addressText` what it holds, if it is not; `addressLost` when it held one that must
  * not be carried, which is reported here), and `skipped` the skipped columns
- * that had a value. `where` says which row, for the report; `fileName` is the file, cited as the
+ * that had a value; `matches` ([{ iri, column }]) the web addresses a "matches" column gives for the
+ * same place, for the caller to write as identities of the place once it has its address (a row with
+ * neither an address nor an id keeps them in its notes, and that is reported), and
+ * `ccodes` its country codes, for the place's record (kept in the notes instead, and reported, for
+ * a row about an address: `idAsNote`). `where` says which row, for the report; `fileName` is the file, cited as the
  * source when no source column gives one; `geometry` is a GeoJSON feature's own geometry.
  * `idAsNote` keeps the id in the notes, for rows that are attestations about an address.
  * `patterns` (resolveColumns) gives the pattern an address column's ids are made into addresses by;
@@ -757,6 +832,7 @@ export function geometryToPlato(g, report = () => {}, where = '') {
 export function applyColumns(row, mapping, { where = '', report = () => {}, fileName = 'the file', geometry, idAsNote = false, patterns = {}, levels = {}, from = {}, withinNote: noteWithin = true } = {}) {
   let name, id, idCol, address, addressFrom, addressText, addressLost = false, language, languageCol, date, start, end, wkt, lat = '', lon = '', geomCell;
   const alternatives = [], types = [], sources = [], notes = [], skipped = [], within = [];
+  const classes = [], aats = [], matches = [], ccodes = [], ccodeCells = [];
   let gridCell;
   const note = (col, v) => notes.push(`${col}: ${v}`);
   for (const [col, field] of Object.entries(mapping)) {
@@ -805,6 +881,29 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
       }
       case 'type': for (const x of cellList(raw)) types.push(isWebAddress(x) ? { identifier: x, label: x } : { label: x }); break;
       case 'language': language = v; languageCol = col; break;
+      // A class of feature: one of LPF's seven; anything else is kept in the notes, and said.
+      case 'featureClass': for (const x of cellList(raw)) {
+        const c = featureClass(x);
+        if (c === undefined) { report('generic-fclass-invalid', `${where}, ${col}: ${x}`); note(col, x); } else if (!classes.includes(c)) classes.push(c);
+      } break;
+      case 'aatType': for (const x of cellList(raw)) {
+        const n = aatId(x);
+        if (n === undefined) { report('generic-aat-invalid', `${where}, ${col}: ${x}`); note(col, x); } else if (!aats.includes(n)) aats.push(n);
+      } break;
+      // The same place elsewhere, as the table gives it: a value no address can be made of is kept in the notes, and said.
+      case 'matches': for (const x of cellList(raw)) {
+        const iri = matchAddress(x);
+        if (iri === undefined) { report('generic-match-not-address', `${where}, ${col}: ${x}`); note(col, x); } else if (!matches.some((m) => m.iri === iri)) matches.push({ iri, column: col, given: x });
+      } break;
+      case 'countryCodes': {
+        const good = [];
+        for (const x of cellList(raw)) {
+          if (!CCODE.test(x)) { report('generic-ccode-invalid', `${where}, ${col}: ${x}`); note(col, x); } else if (!good.includes(x.toUpperCase())) good.push(x.toUpperCase());
+        }
+        for (const c of good) if (!ccodes.includes(c)) ccodes.push(c);
+        if (good.length) ccodeCells.push({ col, text: good.join(';') });
+        break;
+      }
       case 'source': sources.push(isWebAddress(v) ? { '@id': v, title: v, authorityType: 'source' } : { title: v, authorityType: 'source' }); break;
       case 'date': date = v; break;
       case 'start': if (ISO_OR_YEAR.test(pad(v))) start = pad(v); else report('generic-date-invalid', `${where}, ${col}: ${v}`); break;
@@ -827,6 +926,21 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
   for (const a of alternatives) if (a !== name) names.push({ toponym: a });
   // A row about an address keeps its id in the notes, since the place is not the file's to name.
   if (idAsNote && address && id !== undefined) note(idCol, id);
+  // Country codes are a finding aid of a place of the dataset's own (PLATO's ccodes, on the record): a
+  // row that is evidence about a place at an address elsewhere has no record to hold them, so they
+  // are kept in its notes, and that is said.
+  const carriesCcodes = !(idAsNote && address);
+  if (!carriesCcodes) for (const c of ccodeCells) { note(c.col, c.text); report('generic-ccodes-not-carried', `${where}, ${c.col}: ${c.text}`); }
+  // A match is about a place with an address: a row that is neither about one nor has an id to make
+  // one from has none, so its matches are kept in the notes, and that is said.
+  const linksMatches = !!address || id !== undefined;
+  if (!linksMatches) for (const m of matches) { note(m.column, m.given); report('generic-match-no-place-address', `${where}, ${m.column}: ${m.given}`); }
+  // An AAT identifier goes with the type beside it (settlement, 300008347) when the row has as many
+  // of each and no type has an identifier already, as the two columns of the LP-TSV template are
+  // filled; otherwise each is a type of its own, labelled with what the table wrote. Then the classes.
+  if (aats.length && aats.length === types.length && types.every((t) => !t.identifier)) types.forEach((t, i) => { types[i] = { identifier: aatAddress(aats[i]), label: t.label }; });
+  else for (const n of aats) types.push({ identifier: aatAddress(n), label: `aat:${n}` });
+  for (const c of classes) types.push(classType(c));
   // The regions it lies in, widest first, kept in the notes as the source gives them (PLATO has no
   // place for them yet; the reader's event carries them, within.js).
   // `withinNote` false: the reader writes them as ContainedIn attestations instead (generic.js).
@@ -885,7 +999,8 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
     citations: cited.map((c) => clean({ ...c })),
     notes: notes.join('\n') || undefined,
   });
-  return { label: name || alternatives[0], name, id, address, addressText, addressLost, attestation, skipped, ...(within.length ? { within } : {}) };
+  return { label: name || alternatives[0], name, id, address, addressText, addressLost, attestation, skipped, ...(within.length ? { within } : {}),
+    ...(linksMatches && matches.length ? { matches: matches.map(({ iri, column }) => ({ iri, column })) } : {}), ...(carriesCcodes && ccodes.length ? { ccodes } : {}) };
 }
 
 // ---- a grid reference beside a latitude and longitude -----------------------------------------------
