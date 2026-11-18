@@ -14,7 +14,7 @@ process.emitWarning = function (warning, ...rest) {
 
 const { parseArgs } = await import('node:util');
 const { readFileSync, statSync } = await import('node:fs');
-const { run, TARGETS, DEFAULT_TABLE_BASE } = await import('../src/engine/pipeline.js');
+const { run, TARGETS, DEFAULT_TABLE_BASE, isLpfTarget } = await import('../src/engine/pipeline.js');
 const { compare } = await import('../src/engine/compare.js');
 const { revise } = await import('../src/engine/revise.js');
 const { publish, PUBLISH_PARTS } = await import('../src/engine/agora/index.js');
@@ -243,9 +243,15 @@ does not apply to):
                     each figure from a statistical table: its qb:Observation type,
                     the measure as a direct statement, sdmx-dimension:refArea and refPeriod,
                     and the types of its table and structure. Without it, the plain PLATO graph.
+  --whg             check: say also what the World Historical Gazetteer (WHG) would accept: each
+                    place is made into the Linked Places Format v2 feature that convert --to lpf2
+                    would write, and held to WHG's own schema (a kind of place, a date, a name,
+                    and so on), with the places it would refuse and why. A Linked Places Format
+                    v2 file is held to that schema as it stands. Without --whg, check applies
+                    PLATO's rules only, which do not ask for what WHG asks.
   --gzip            convert: gzip the output as it is written, and add .gz to its name; the
                     same data gives the same bytes. Not --to tables, which is a zip already.
-  --candidates SET  check, convert --to lpf or lpf-seq, apply: a candidate set (PLATO JSON or
+  --candidates SET  check, convert --to lpf, lpf-seq, lpf2 or lpf2-seq, apply: a candidate set (PLATO JSON or
                     JSON Lines, profile candidate-set); give it once for each set.
                     check: check a dataset or candidate set together with these candidate
                     sets. The sets are taken in the order they were issued: a later set must
@@ -474,7 +480,7 @@ async function main(argv) {
       args: argv, allowPositionals: true, allowNegative: true, strict: true,
       options: {
         to: { type: 'string' }, out: { type: 'string', default: '.' }, overwrite: { type: 'boolean', default: false },
-        base: { type: 'string' }, typing: { type: 'boolean', default: true }, cube: { type: 'boolean', default: false }, gzip: { type: 'boolean', default: false },
+        base: { type: 'string' }, typing: { type: 'boolean', default: true }, cube: { type: 'boolean', default: false }, gzip: { type: 'boolean', default: false }, whg: { type: 'boolean', default: false },
         columns: { type: 'string' }, sheet: { type: 'string' }, limit: { type: 'string' }, split: { type: 'string', multiple: true, default: [] },
         clusters: { type: 'string' }, column: { type: 'string' }, method: { type: 'string' },
         'same-id': { type: 'boolean', default: false }, 'list-places': { type: 'boolean', default: false },
@@ -526,8 +532,9 @@ async function main(argv) {
     o.reading = reading;
   }
   // --candidates is check's (sets checked together), convert's (LPF's region matches) and apply's (what the answers point into).
-  if (o.candidates && action !== 'check' && action !== 'apply' && (action !== 'convert' || (o.to !== 'lpf' && o.to !== 'lpf-seq'))) return usage('--candidates is for check, convert --to lpf or lpf-seq, and apply.');
+  if (o.candidates && action !== 'check' && action !== 'apply' && (action !== 'convert' || !isLpfTarget(o.to))) return usage('--candidates is for check, convert --to lpf, lpf-seq, lpf2 or lpf2-seq, and apply.');
   if (o.gzip && action !== 'convert') return usage('--gzip is for convert.');
+  if (o.whg && action !== 'check') return usage('--whg is for check; convert --to lpf2 says the same of the file it writes.');
   if (action === 'cluster') return clusterCommand(args, o);
   if (o.column !== undefined || o.method !== undefined) return usage('--column and --method are for cluster.');
   if (o.clusters !== undefined && !reads) return usage('--clusters is for check, convert and preview.');
@@ -695,7 +702,7 @@ async function main(argv) {
     outputs: results.reduce((n, r) => n + r.outputs.length, 0), outputBytes: results.reduce((n, r) => n + r.outputs.reduce((m, x) => m + x.size, 0), 0),
   };
   total.exitCode = total.failed ? 2 : total.problems ? 1 : 0;
-  out(o.json ? JSON.stringify(total) + '\n' : describeTotal(total));
+  out(o.json ? JSON.stringify(total) + '\n' : describeTotal(total, o.whg));
   return total.exitCode;
 }
 
@@ -1037,7 +1044,7 @@ async function runOne(item, action, o, resources, host, live, seen) {
   const xlsx = input.container === 'workbook' ? await import('xlsx') : undefined;
   const { env, finish } = host.env(resources, { progress, xlsx });
   let result = null, failure = null;
-  try { result = await run({ input, action, target: r.target, options: { base: o.base, typing: o.typing, cube: o.cube, gzip: o.gzip, name: input.format === 'csv' ? undefined : item.name, columns: columnsFor(item, o), ...(table && o.savedClusters ? { clusters: o.savedClusters } : {}), candidates: o.candidateInputs, ...reading } }, env); }
+  try { result = await run({ input, action, target: r.target, options: { base: o.base, typing: o.typing, cube: o.cube, gzip: o.gzip, name: input.format === 'csv' ? undefined : item.name, columns: columnsFor(item, o), ...(table && o.savedClusters ? { clusters: o.savedClusters } : {}), candidates: o.candidateInputs, ...(action === 'check' && o.whg ? { whg: true } : {}), ...reading } }, env); }
   catch (e) { failure = e; }
   if (live) process.stderr.write('\r\x1b[K');
   // A file the engine could not read to the end comes back as a report marked incomplete; any
@@ -1070,6 +1077,8 @@ function describe(r, action, brief) {
   if (!brief && r.columns) lines.push(...columnLines(r));
   if (!brief && r.keyPatterns) lines.push('  Keys made into web addresses with the patterns given:', ...Object.entries(r.keyPatterns).map(([prefix, pattern]) => `    ${prefix ? `"${prefix}"` : '(no prefix)'}  ${pattern}`));
   if (!brief) lines.push(...itemLines(r.items, action));
+  // What WHG would accept (check --whg, convert --to lpf2) is said even in brief: it is what was asked.
+  else for (const i of r.items) if (i.kind === 'whg-verdict') lines.push(`  ${i.message}`);
   if (r.message) lines.push(`  ${r.message}`);
   for (const x of r.outputs) lines.push(`  Wrote ${x.path} (${fmtBytes(x.size)})`);
   return lines.join('\n') + (brief ? '\n' : '\n\n');
@@ -1086,12 +1095,16 @@ function columnLines(r) {
     ...(r.columnWarnings || []).map((w) => `  Note: ${w}`),
   ];
 }
-function describeTotal(t) {
+function describeTotal(t, whg = false) {
   const n = (k, one, many = one + 's') => `${k.toLocaleString('en-GB')} ${k === 1 ? one : many}`;
   const parts = [`${n(t.ok, 'without problems', 'without problems')}`, `${t.problems.toLocaleString('en-GB')} with problems${t.errors ? ` (${n(t.errors, 'problem')} in all)` : ''}`];
   if (t.failed) parts.push(`${t.failed.toLocaleString('en-GB')} could not be ${t.action === 'check' ? 'checked' : 'converted'}`);
   const wrote = t.action === 'convert' ? ` Wrote ${n(t.outputs, 'file')} (${fmtBytes(t.outputBytes)}).` : '';
-  return `${t.action === 'check' ? 'Checked' : 'Converted'} ${n(t.inputs, 'input')}: ${parts.join(', ')}.${wrote}\n`;
+  // A check is by PLATO's rules, which do not ask for what a gazetteer asks of an upload: said, so that
+  // "no problems" is not read as "WHG will take it". Before the total, which stays the last line.
+  const rules = t.action !== 'check' ? '' : whg ? "Checked by PLATO's rules, and against the World Historical Gazetteer's schema for Linked Places Format v2 (--whg).\n"
+    : "This checks PLATO's rules only. To see also what the World Historical Gazetteer would accept, add --whg.\n";
+  return `${rules}${t.action === 'check' ? 'Checked' : 'Converted'} ${n(t.inputs, 'input')}: ${parts.join(', ')}.${wrote}\n`;
 }
 
 process.exitCode = await main(process.argv.slice(2));

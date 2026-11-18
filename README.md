@@ -104,8 +104,8 @@ node bin/plato-tools.mjs preview --limit 5 my-places.csv                 # the f
 
 | Command | What it does |
 |---|---|
-| `check INPUT…` | Reports on each input in turn, then gives a total |
-| `convert --to TARGET INPUT…` | Also writes each input as `plato-jsonl`, `plato-json`, `ntriples`, `tables`, `lpf-seq` or `lpf`, into `--out` (by default the current directory), named after the input |
+| `check [--whg] INPUT…` | Reports on each input in turn, then gives a total. It applies PLATO's rules; with `--whg` it also says which places the World Historical Gazetteer would accept, and why it would refuse the others |
+| `convert --to TARGET INPUT…` | Also writes each input as `plato-jsonl`, `plato-json`, `ntriples`, `tables`, `lpf-seq`, `lpf`, `lpf2-seq` or `lpf2`, into `--out` (by default the current directory), named after the input |
 | `cluster --column NAME [--method M] INPUT` | Proposes groups of similar spellings in one column of a table of places, as JSON for review, and applies nothing ([below](#grouping-similar-spellings)) |
 | `preview [--limit N] [--split …] [--clusters FILE] INPUT` | Shows the first N records (10 unless `--limit` says otherwise) of a table of places, a TEI edition or W3C Web Annotations, as a run reads them, and writes nothing ([below](#previewing-the-first-records)) |
 | `compare EARLIER LATER` | Checks that a published dataset was only added to ([what it reports](https://plato.pelagios.org/guide/tools.html#comparing-two-versions)) |
@@ -164,7 +164,15 @@ node bin/plato-tools.mjs preview --limit 5 my-places.csv                 # the f
   manifest if you have it. Each region inside the map becomes a point, citing the map and the
   georeference ([the mapping](test/fixtures/annotations/README.md#the-mapping)). On the page, choose
   the files together. Nothing is fetched.
-- **`--candidates SET`** (repeatable), for `convert --to lpf` or `lpf-seq`: a candidate set (PLATO
+- **`--to lpf2`** (and `lpf2-seq`) writes Linked Places Format v2 as the World Historical Gazetteer
+  (WHG) reads it, and holds every place to WHG's own schema (copied to `src/vendor/whg-lpf_v2.0.json`)
+  before you upload anything. WHG needs a kind of place (a type or a feature class), a date and a name
+  for every place. A place without one is written as the data has it, with nothing made up, and the
+  report counts and names such places in plain words, then says how many WHG would accept (*11 of 12
+  places would be accepted by WHG*). Temporary web addresses are said too. **`check --whg`** gives the
+  same verdict without writing a file, and holds a Linked Places Format v2 file to the schema as it
+  stands; without `--whg`, `check` applies PLATO's rules only, which do not ask for what WHG asks.
+- **`--candidates SET`** (repeatable), for `convert --to lpf`, `lpf-seq`, `lpf2` or `lpf2-seq`: a candidate set (PLATO
   JSON or JSON Lines) whose suggestions the dataset's region matches answer. Each region a place is
   contained in is written as one `gvp:broaderPartitive`, pointing at the gazetteer's region, and with
   this the suggestion's score goes in its `whg_match_score`. Without it, no score is written, and

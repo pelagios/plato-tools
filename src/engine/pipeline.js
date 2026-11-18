@@ -12,7 +12,8 @@ import { Rdf2Json } from '../formats/rdf2json.js';
 import { tripleNT } from '../lib/ntriples.js';
 import { TripleStore, TableStore } from '../lib/store.js';
 import { PLATO, RDF } from '../lib/context.js';
-import { featureToRecord, recordToFeature, collectionHead, collectionToGazetteer, RegionIndex, regionLabel } from '../formats/lpf.js';
+import { featureToRecord, recordToFeature, collectionHead, collectionToGazetteer, RegionIndex, regionLabel, featureToV2, LPF2_CONTEXT } from '../formats/lpf.js';
+import { whgChecker, whgExample } from '../formats/whg-lpf-check.js';
 import { list, collectWithdrawn, resolveWithdrawn, addWithdrawal, versionLosses, tableLosses, relationTypeLosses, collectMembership, membershipCycles } from '../formats/shared.js';
 import { CubeExport, CUBE_TEXT } from '../formats/cube.js';
 import { validateTables, checkTableRules, checkAboutRules, aboutToGazetteer, gazetteerToAbout, rowToAttestation, tableIds, recordToRows, settleRelatedPlaces, identityRow, ATTESTATION_SHEETS, tableSchemas, cellChecker, sourceLosses } from '../formats/tables.js';
@@ -22,9 +23,9 @@ import { genericSource, genericProfile } from './hermes/generic.js';
 import { figuresSource, readsFigures, codesToNTriples } from './hermes/figures.js';
 import { lineChunks, lines, jsonDocument, annotationItems, TABLE_SHEETS, DataError, sheetOf, zipEntries, zipEntryText } from './input.js';
 import { csvRecords, textChunks, papaRecords, papaRow } from '../formats/csv.js';
-import { Report, LOSS_TEXT, droppedText, FORMAT_WORDS, WORKBOOK_TEXT, dateTimeWords, CANDIDATE_CHECK_TEXT, candidatesNotGivenText } from './report.js';
+import { Report, LOSS_TEXT, droppedText, FORMAT_WORDS, WORKBOOK_TEXT, dateTimeWords, CANDIDATE_CHECK_TEXT, candidatesNotGivenText, whgVerdictText } from './report.js';
 import { RUN_TEXT } from './words.js';
-import { standInIn } from './agora/address.js';
+import { standInIn, isStandIn } from './agora/address.js';
 import { FigureCheck } from './figurecheck.js';
 import { checkCube } from './cubecheck.js';
 import { gzipped } from '../lib/gzip.js';
@@ -37,7 +38,14 @@ export const TARGETS = {
   tables: { label: 'PLATO spreadsheet tables (.zip of ten CSV files)', ext: '.zip' },
   'lpf-seq': { label: 'Linked Places Format v1, GeoJSON sequence (.geojsonl): one feature per line', ext: '.geojsonl' },
   lpf: { label: 'Linked Places Format v1, FeatureCollection (.geojson)', ext: '.geojson' },
+  'lpf2-seq': { label: 'Linked Places Format v2, as the World Historical Gazetteer reads it, GeoJSON sequence (.geojsonl): one feature per line', ext: '.lpf2.geojsonl' },
+  lpf2: { label: 'Linked Places Format v2, as the World Historical Gazetteer reads it, FeatureCollection (.geojson)', ext: '.lpf2.geojson' },
 };
+// Linked Places Format, either version: v2 is v1 as these tools write it, with what the World Historical
+// Gazetteer's schema asks written its way (featureToV2), and that schema's verdict on every place in the report.
+const LPF_TARGETS = new Set(['lpf', 'lpf-seq', 'lpf2', 'lpf2-seq']);
+export const isLpfTarget = (target) => LPF_TARGETS.has(target);
+const isLpf2Target = (target) => target === 'lpf2' || target === 'lpf2-seq';
 const TYPE = RDF + 'type';
 // The base address for the places and sources of spreadsheet tables when neither the conversion
 // (--base, the page's field) nor the about sheet's base_uri gives one: a stand-in, temporary by its own words
@@ -149,15 +157,9 @@ async function* platoJson(file) {
 // The FeatureCollection's own members that PLATO's gazetteer header holds (collectionToGazetteer).
 const LPF_HEAD = ['@id', 'id', 'title', 'license', 'descriptions'];
 const notAListText = (key, shape) => `The document's ${key} is ${shape}, not a list, so it is not read as one.`;
-async function* lpfSource(file, seq, rep) {
-  let head = {};
-  if (seq) {
-    // A GeoJSON sequence may open with the collection's own line, as these tools write it.
-    for await (const { line } of lines(file)) { try { const v = JSON.parse(line); if (v && v.type === 'FeatureCollection') head = v; } catch { /* reported below */ } break; }
-  } else for await (const { path, value } of jsonDocument(file, { arrays: ['features'], keys: LPF_HEAD, onlyKeys: true })) head[path] = value;
-  const loss = (l) => rep.loss(l.kind, LOSS_TEXT[l.kind] || l.kind, l.value);
-  yield { type: 'header', value: { profile: 'place-centric', gazetteer: collectionToGazetteer(head, file.name, loss) } };
-  const each = seq ? (async function* () {
+/** The features of an LPF file as it holds them, each with its number: what is not a feature is reported, and not read. */
+function lpfFeatures(file, seq, rep) {
+  return seq ? (async function* () {
     let first = true;
     for await (const { line, n } of lines(file)) {
       let v;
@@ -175,7 +177,16 @@ async function* lpfSource(file, seq, rep) {
         yield { v: value, n: ++n };
       }
     })();
-  for await (const { v, n } of each) {
+}
+async function* lpfSource(file, seq, rep) {
+  let head = {};
+  if (seq) {
+    // A GeoJSON sequence may open with the collection's own line, as these tools write it.
+    for await (const { line } of lines(file)) { try { const v = JSON.parse(line); if (v && v.type === 'FeatureCollection') head = v; } catch { /* reported below */ } break; }
+  } else for await (const { path, value } of jsonDocument(file, { arrays: ['features'], keys: LPF_HEAD, onlyKeys: true })) head[path] = value;
+  const loss = (l) => rep.loss(l.kind, LOSS_TEXT[l.kind] || l.kind, l.value);
+  yield { type: 'header', value: { profile: 'place-centric', gazetteer: collectionToGazetteer(head, file.name, loss) } };
+  for await (const { v, n } of lpfFeatures(file, seq, rep)) {
     if (!v['@id']) rep.warning('lpf-no-id', 'An LPF feature has no @id', `feature ${n}`);
     if (!v.properties?.title) rep.warning('lpf-no-title', 'An LPF feature has no properties.title', v['@id'] || `feature ${n}`);
     if (!v.names?.length) rep.warning('lpf-no-names', 'An LPF feature has no names (LPF requires at least one)', v['@id'] || `feature ${n}`);
@@ -619,6 +630,53 @@ export function sourceFor(input, env, rep, options = {}, action = 'check', hooks
     : input.format === 'csv' || input.format === 'geojson' ? genericSource(input, rep, options, DEFAULT_TABLE_BASE)
     : ['ntriples', 'nquads', 'turtle'].includes(input.format) ? rdfSource(input.files[0], input.format, rep) : null;
 }
+/**
+ * What the World Historical Gazetteer's schema would say of each Linked Places Format v2 feature given
+ * (src/formats/whg-lpf-check.js), put in the report when the last has been given: a warning for each kind
+ * of thing WHG would refuse a place for, counting the places and naming the first few, then how many of the
+ * places it would accept. Nothing is refused here and nothing made up: the file is written as the data is.
+ * A place whose id is a temporary address (the stand-in base, agora/address.js) is said too: WHG's schema
+ * accepts it, and WHG would keep it.
+ */
+function whgWatch(rep) {
+  const checker = whgChecker({ examples: rep.examples });
+  const temporary = { n: 0, example: undefined };
+  return {
+    feature(f, n) {
+      checker.feature(f, n);
+      if (isStandIn(f?.['@id'])) { temporary.n++; temporary.example ??= f['@id']; }
+    },
+    finish() {
+      const r = checker.result();
+      for (const g of r.summary) g.examples.forEach((x, i) => rep.add('warning', `whg-${g.code}`, LOSS_TEXT[`whg-${g.code}`], whgExample(x), i === 0 ? g.count : 0));
+      // Counted by the places WHG would refuse, so that it stands with its reasons; a note when it would refuse none.
+      rep.add(r.refused || !r.total ? 'warning' : 'note', 'whg-verdict', whgVerdictText(r.valid, r.total), undefined, r.refused || 1);
+      if (temporary.n) rep.add('warning', 'whg-temporary-ids', LOSS_TEXT['whg-temporary-ids'], temporary.example, temporary.n);
+    },
+  };
+}
+/**
+ * check with options.whg: a sink that is given every place as a writer is, makes of each the feature
+ * convert --to lpf2 would write, and writes nothing. It sees a place's own attestations and the identity
+ * relations nested in it; one listed apart from its place (a link, in LPF) and what another part of the
+ * document withdraws are the conversion's to gather, so its report, of the file itself, is the fuller one.
+ */
+function whgSink(rep) {
+  const watch = whgWatch(rep);
+  let n = 0;
+  return {
+    header() {},
+    event(ev) {
+      if (ev.type !== 'record' || !ev.value) return;
+      n++;
+      let f;
+      try { f = featureToV2(recordToFeature(ev.value, [], () => {}, null, null)); }
+      catch (e) { rep.warning('whg-not-checked', LOSS_TEXT['whg-not-checked'], `${ev.value['@id'] || `item ${ev.n ?? n}`}: ${e && e.message || e}`); return; }
+      watch.feature(f, n);
+    },
+    async close() { watch.finish(); },
+  };
+}
 async function runChecked({ input, action, target, options = {} }, env, rep) {
   // options.augment(record) -> record: a caller's change to each place-centric record on its way to
   // the writer or sink (another tool appending its attestations to the places they are about), after
@@ -647,7 +705,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   let lastBeat = 0;
   const beat = (phase, extra = {}) => { const now = Date.now(); if (now - lastBeat > 250 || extra.force) { lastBeat = now; progress({ phase, ...rep.counts, elapsedMs: now - t0, ...extra }); } };
 
-  const lpfTarget = target === 'lpf' || target === 'lpf-seq';
+  const lpfTarget = isLpfTarget(target);
   // What the document says of the regions its places are ContainedIn, for LPF's gvp:broaderPartitive
   // (PLATO 1d2cf6e, #23): filled before any feature is written, below, by the tables' reader (from its
   // working database, before its first place), and by the store's reading. A region a table of places
@@ -658,7 +716,16 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   const source = sourceFor(input, env, rep, options, action, hooks);
   if (!source) throw new Error(`Unsupported input: ${input.format}`);
   if ((input.format === 'lpf' || input.format === 'lpf-seq') && input.lpfVersion === 2) {
-    rep.error('lpf-v2', 'Linked Places Format v2 is not yet specified, so it cannot be read. It will be supported once the specification is published.');
+    // Linked Places Format v2 is written (convert --to lpf2) and not yet read. What can be said of a v2 file is
+    // what the World Historical Gazetteer's schema says of it, feature by feature, when that is asked for.
+    if (action === 'check' && options.whg && !options.sink) {
+      const watch = whgWatch(rep);
+      for await (const { v, n } of lpfFeatures(input.files[0], input.format === 'lpf-seq', rep)) { stop(); rep.count('places'); watch.feature(v, n); }
+      watch.finish();
+      rep.note('lpf-v2-whg-only', LOSS_TEXT['lpf-v2-whg-only']);
+      return { report: rep.toJSON(), outputs: [] };
+    }
+    rep.error('lpf-v2', LOSS_TEXT['lpf-v2']);
     return { report: rep.toJSON(), outputs: [] };
   }
   const isRdf = ['ntriples', 'nquads', 'turtle'].includes(input.format);
@@ -710,6 +777,9 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   // The version check (src/engine/compare.js) reads the records itself, as a writer is given them:
   // every input then reaches it as place-centric records, whatever format it came in.
   else if (options.sink) writer = options.sink;
+  // check with options.whg: the places are also given to a sink that says what WHG would accept (whgSink).
+  else if (action === 'check' && options.whg && !candidateSet) writer = whgSink(rep);
+  if (action === 'check' && options.whg && !options.sink && candidateSet) rep.note('whg-not-places', LOSS_TEXT['whg-not-places']);
 
   // Checking (and writing) records as they stream past.
   // Memberships of routes, itineraries and networks, to find one that contains itself (PLATO 0.6.0).
@@ -925,7 +995,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       // attestation bundles (plato:attests_identity), which are read under their attestation.
       const idrIds = docId ? [...objectsOf(store, docId, PLATO + 'contains_identity_relation')]
         : [...store.subjects(TYPE, PLATO + 'IdentityRelation')].filter((i) => !store.in(PLATO + 'attests_identity', i).length);
-      if (target === 'lpf' || target === 'lpf-seq') for (const i of idrIds) { stop(); const v = r2j.identityRelation(i); (idrsBySubject.get(v.subject) || idrsBySubject.set(v.subject, []).get(v.subject)).push(v); }
+      if (lpfTarget) for (const i of idrIds) { stop(); const v = r2j.identityRelation(i); (idrsBySubject.get(v.subject) || idrsBySubject.set(v.subject, []).get(v.subject)).push(v); }
       // The places the document lists, then any other place its attestations are about: an
       // attestation-centric document's attestations are about existing places, which it need not list
       // (only its newSpatialEntities are), and they were once left out whenever it listed any.
@@ -1111,7 +1181,7 @@ export const CANDIDATE_SET_TEXT = {
  * candidates, as a writer is.
  */
 function refuseCandidateSet({ action, target, options }, rep) {
-  const kind = options.sink && !readsCandidates(options) ? 'candidate-set-not-a-dataset' : action === 'convert' && (target === 'tables' || target === 'lpf' || target === 'lpf-seq') ? 'candidate-set-target' : null;
+  const kind = options.sink && !readsCandidates(options) ? 'candidate-set-not-a-dataset' : action === 'convert' && (target === 'tables' || isLpfTarget(target)) ? 'candidate-set-target' : null;
   if (!kind) return null;
   rep.error(kind, CANDIDATE_SET_TEXT[kind]);
   return { report: rep.toJSON(), outputs: [], incomplete: true };
@@ -1274,7 +1344,10 @@ async function makeWriter(target, env, rep, options, typing, outputs, input) {
   const stem = (options.name || input.files[0].name).replace(/\.(gz)$/i, '').replace(/\.[^.]+$/, '');
   const open = (ext) => textOutput(env, stem + ext, options);
   // A key the target has no place for is reported by its own name, one line per key (report.js).
-  const loss = (l) => (l.kind === 'dropped' ? rep.loss(`dropped:${l.key}`, droppedText(l.key, FORMAT_WORDS[target]), l.value) : rep.loss(l.kind, LOSS_TEXT[l.kind] || l.kind, l.value));
+  // (A name written name@language is changed on its way to LPF, not left out: a warning, not a loss.)
+  const loss = (l) => (l.kind === 'dropped' ? rep.loss(`dropped:${l.key}`, droppedText(l.key, FORMAT_WORDS[target]), l.value)
+    : l.kind === 'lpf-name-at-no-language' || l.kind === 'lpf-name-at-language' ? rep.warning(l.kind, LOSS_TEXT[l.kind], l.value)
+    : rep.loss(l.kind, LOSS_TEXT[l.kind] || l.kind, l.value));
   if (target === 'plato-jsonl' || target === 'plato-json') {
     const sink = await open(TARGETS[target].ext);
     let started = false;
@@ -1369,28 +1442,36 @@ async function makeWriter(target, env, rep, options, typing, outputs, input) {
       async close() { if (cube) { cube.finish(); rep.count('observations', cube.observations); } rep.count('triples written', triples); outputs.push(await sink.close()); },
     };
   }
-  if (target === 'lpf' || target === 'lpf-seq') {
+  if (isLpfTarget(target)) {
     const sink = await open(TARGETS[target].ext);
-    let first = true;
+    const seq = target.endsWith('-seq');
+    // Linked Places Format v2: the same feature, written as WHG's schema asks, and that schema's verdict on it
+    // (whgWatch). v2 asks for a kind of place, a type or a feature class, where v1 asks for feature classes:
+    // the verdict says which places have neither, so v1's own remark on feature classes is not made.
+    const watch = isLpf2Target(target) ? whgWatch(rep) : null;
+    const featureLoss = watch ? (l) => { if (l.kind !== 'lpf-fclasses-missing') loss(l); } : loss;
+    let first = true, written = 0;
     const placed = new Set();   // the places written, so that an identity match with none is reported
     return {
       header(h) {
         versionLosses(h.gazetteer, loss); tableLosses(h, loss); relationTypeLosses(h, loss);
         const { '@id': id, ...own } = collectionHead(h.gazetteer, loss);
-        const head = { type: 'FeatureCollection', '@context': 'https://raw.githubusercontent.com/LinkedPasts/linked-places-format/main/linkedplaces-context-v1.1.jsonld', ...(id ? { '@id': id } : {}), ...own };
-        if (target === 'lpf-seq') sink.write(JSON.stringify(head) + '\n'); else { const s = JSON.stringify(head); sink.write(s.slice(0, -1) + ',"features":['); }
+        const head = { type: 'FeatureCollection', '@context': watch ? LPF2_CONTEXT : 'https://raw.githubusercontent.com/LinkedPasts/linked-places-format/main/linkedplaces-context-v1.1.jsonld', ...(id ? { '@id': id } : {}), ...own };
+        if (seq) sink.write(JSON.stringify(head) + '\n'); else { const s = JSON.stringify(head); sink.write(s.slice(0, -1) + ',"features":['); }
       },
       event(ev) {
         if (ev.type === 'attestation') loss({ kind: 'attestation-centric', value: ev.value?.['@id'] || `item ${ev.n}` });
         if (ev.type !== 'record') return;
         placed.add(ev.value['@id']);
-        const f = recordToFeature(ev.value, options.idrsBySubject.get(ev.value['@id']) || [], loss, options.withdrawn, options.regions);
-        sink.write(target === 'lpf-seq' ? JSON.stringify(f) + '\n' : (first ? '' : ',') + JSON.stringify(f)); first = false;
+        const f = recordToFeature(ev.value, options.idrsBySubject.get(ev.value['@id']) || [], featureLoss, options.withdrawn, options.regions);
+        if (watch) watch.feature(featureToV2(f), ++written);
+        sink.write(seq ? JSON.stringify(f) + '\n' : (first ? '' : ',') + JSON.stringify(f)); first = false;
       },
       async close() {
         // An identity match goes on its place's feature; one whose place is not in the file has none.
         for (const [subject, list] of options.idrsBySubject) if (!placed.has(subject)) for (const ir of list) loss({ kind: 'identity-without-place', value: `${subject} ${ir.object}` });
-        if (target === 'lpf') sink.write(']}'); outputs.push(await sink.close());
+        watch?.finish();
+        if (!seq) sink.write(']}'); outputs.push(await sink.close());
       },
     };
   }

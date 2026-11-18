@@ -412,6 +412,50 @@ function containment(r, a, when, cits, regions, withdrawn, loss) {
   return clean(rel);
 }
 
+// A language tag as LPF takes one (BCP 47, well formed: en, de-Arab-AR, ar-Latn-x-ijmes).
+const LANGUAGE_TAG = /^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$/;
+/**
+ * A PLATO name as LPF's toponym and lang. WHG's delimited format writes a name with its language as
+ * name@language (Livorno@it), and a name with none may be left with the "@" alone (Qanawat@): a
+ * table read without that convention carries both into the toponym. Written as they stand, the first
+ * is a name with no language, and the second a toponym WHG's schema refuses. So a toponym ending
+ * "@" is written without it, and one ending "@" and a well-formed language tag, where the name has
+ * no language of its own (or has that one), is written as the name and its language. Each is reported.
+ * An empty language is no language.
+ */
+export function nameAndLanguage(n, loss = () => {}) {
+  const language = typeof n.language === 'string' && n.language.trim() ? n.language : undefined;
+  const t = n.toponym;
+  if (typeof t !== 'string' || !t.includes('@')) return { toponym: t, lang: language };
+  const at = t.lastIndexOf('@'), name = t.slice(0, at).trim(), tag = t.slice(at + 1).trim();
+  if (!name) return { toponym: t, lang: language };
+  if (!tag) { loss({ kind: 'lpf-name-at-no-language', value: t }); return { toponym: name, lang: language }; }
+  if (LANGUAGE_TAG.test(tag) && (!language || language.toLowerCase() === tag.toLowerCase())) { loss({ kind: 'lpf-name-at-language', value: t }); return { toponym: name, lang: language || tag }; }
+  return { toponym: t, lang: language };
+}
+
+/**
+ * An LPF v1 feature, as these tools write one, as Linked Places Format v2 holds it (the World Historical
+ * Gazetteer's schema, src/vendor/whg-lpf_v2.0.json): the same members, with a citation's year a string
+ * where v1 has a number. Nothing is added: a place with no kind or no date is written without one, and
+ * src/formats/whg-lpf-check.js says that WHG would refuse it. The feature given is changed and returned.
+ */
+export function featureToV2(f) {
+  const walk = (x) => {
+    if (Array.isArray(x)) { for (const v of x) walk(v); return; }
+    if (!x || typeof x !== 'object') return;
+    for (const k of Object.keys(x)) {
+      if (k === 'coordinates') continue;
+      if (k === 'citations' && Array.isArray(x[k])) { for (const c of x[k]) if (c && typeof c.year === 'number') c.year = String(c.year); }
+      else walk(x[k]);
+    }
+  };
+  walk(f);
+  return f;
+}
+/** The context a Linked Places Format v2 collection names: the one WHG's schema gives as its own. */
+export const LPF2_CONTEXT = 'https://whgazetteer.org/schema/lpo_v2.0.jsonld';
+
 /**
  * PLATO place-centric record -> LPF Feature; `loss(l)` receives what LPF cannot hold. `withdrawn`
  * (attestation @id -> 'retracted' | 'superseded') is what the rest of the document withdraws or
@@ -473,7 +517,8 @@ export function recordToFeature(rec, idrs = [], loss = () => {}, withdrawn = nul
       qualificationLosses(n.qualification, [], loss);
       if (n.sourceLabel) loss({ kind: 'source-label' });
       dropKeys(n, 'name', KEEPS.name, loss);
-      f.names.push(clean({ toponym: n.toponym, lang: n.language, citations: cits.length ? cits : undefined, when }));
+      const { toponym, lang } = nameAndLanguage(n, loss);
+      f.names.push(clean({ toponym, lang, citations: cits.length ? cits : undefined, when }));
     }
     for (const t of list(a.types)) {
       qualificationLosses(t.qualification, [], loss);

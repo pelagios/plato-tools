@@ -1,4 +1,5 @@
 import { FIGURES_TEXT } from './hermes/figures-text.js';
+import { WHG_PROBLEMS } from '../formats/whg-lpf-check.js';
 // Collects problems and losses without letting them grow with the data: each kind keeps a count
 // and a handful of examples, however many times it occurs.
 export class Report {
@@ -373,6 +374,35 @@ const KEY_WORDS = {
   'identityRelation.promotedFrom': 'the candidate an identity match or a denial answers (promotedFrom)',
 };
 const OBJECT_WORDS = { gazetteer: 'the gazetteer', spatialEntity: 'a place', attestation: 'an attestation', name: 'a name', geometry: 'a location', timespan: 'a date', type: 'a type', propertyValue: 'a property value', source: 'a source', citation: 'a citation', identityRelation: 'an identity match', relation: 'a relation' };
+// Linked Places Format v2 for the World Historical Gazetteer (convert --to lpf2, check --whg): what WHG's
+// schema would refuse a place for (src/formats/whg-lpf-check.js, one kind for each of its problems), how
+// many places it would accept, and what is changed in a name on its way to LPF, either version.
+const WHG_ADVICE = {
+  'no-kind': ' Nothing is made up for them: to have them accepted, give each a kind of place (in a table, a column of types, in words or as Getty AAT identifiers, or of GeoNames feature classes), and convert again.',
+  'no-date': ' Nothing is made up for them: to have them accepted, give each a date (in a table, a column of start years, and of end years where there are any), and convert again.',
+  'when-no-years': " A period's name, or a date as the source wrote it, is kept, but WHG reads years: give the years it stands for.",
+  geometry: ' The location is kept as the data gives it; the examples say what WHG does not read in it.',
+};
+Object.assign(LOSS_TEXT, Object.fromEntries(Object.entries(WHG_PROBLEMS).map(([code, w]) => [`whg-${code}`,
+  `The World Historical Gazetteer (WHG) would not accept these places: each ${w.each}. Nothing in them is changed to make them pass; the examples name the first few, by title and id.${WHG_ADVICE[code] || ''}`])));
+Object.assign(LOSS_TEXT, {
+  'whg-temporary-ids': "The places' ids (@id) are temporary web addresses (the example gives the first; the count is of the places). WHG's schema accepts them as they are, and WHG keeps a place's @id as its id in your dataset there, beside the number WHG gives it: so a temporary address would stay with the place in WHG, and lead nowhere. Before sending the file to WHG, give the web address your places will live under (--base, or the field on the page) and convert again, or publish first and write this file from the published dataset.",
+  'whg-not-checked': 'A place could not be made into a Linked Places Format feature, so what WHG would say of it is not known; the example names it, and why.',
+  'whg-not-places': 'This is a candidate set, which holds no places, so there is nothing WHG would be sent: it is checked by PLATO\'s rules only.',
+  'lpf-v2': 'This is Linked Places Format v2, which these tools write (convert --to lpf2) and do not yet read: it is not checked by PLATO\'s rules, nor converted. What the World Historical Gazetteer would accept of it can be checked on the command line: check --whg.',
+  'lpf-v2-whg-only': "This is Linked Places Format v2, which these tools do not yet read as PLATO: it was checked against WHG's schema only, feature by feature, and not by PLATO's rules.",
+  'lpf-name-at-no-language': 'A name ending with "@" and no language (as WHG\'s delimited format writes a name whose language was left empty) is written without the "@", and with no language. The example gives the name as it was.',
+  'lpf-name-at-language': 'A name written as name@language (as WHG\'s delimited format writes it), with no language of its own in the data, is written as the name and its language: Livorno@it as Livorno, in Italian. The example gives the name as it was. If the "@" belongs to the name, give the name a language of its own.',
+});
+/** How many of the places WHG's schema would accept: the summary of the kinds above. */
+export function whgVerdictText(valid, total) {
+  const n = (k) => k.toLocaleString('en-GB');
+  const scope = "This is WHG's schema for Linked Places Format v2, as copied into these tools on 18 November 2026; WHG also tests the shape of each location, which is not done here.";
+  if (!total) return `There are no places, and WHG needs at least one. ${scope}`;
+  if (valid === total) return `${total === 1 ? 'The one place' : `All ${n(total)} places`} would be accepted by WHG. ${scope}`;
+  if (!valid) return `${total === 1 ? 'The one place would be refused by WHG' : `None of the ${n(total)} places would be accepted by WHG`}, for the reasons given here. ${scope}`;
+  return `${n(valid)} of ${n(total)} places would be accepted by WHG; ${n(total - valid)} would be refused, for the reasons given with them here. ${scope}`;
+}
 /** Words for a dropped key: "The notes on an attestation: Linked Places Format has no place for this, so it is left out." */
 export function droppedText(key, format) {
   const [where, ...rest] = key.split('.');
@@ -380,7 +410,7 @@ export function droppedText(key, format) {
   return `${words[0].toUpperCase()}${words.slice(1)}: ${format[0].toUpperCase()}${format.slice(1)} no place for this, so it is left out.`;
 }
 // Each format with its verb, so that "the spreadsheet tables have" agrees.
-export const FORMAT_WORDS = { lpf: 'Linked Places Format has', 'lpf-seq': 'Linked Places Format has', tables: 'the spreadsheet tables have', ntriples: 'RDF has', 'plato-json': 'PLATO JSON has', 'plato-jsonl': 'PLATO JSON has' };
+export const FORMAT_WORDS = { lpf: 'Linked Places Format has', 'lpf-seq': 'Linked Places Format has', lpf2: 'Linked Places Format has', 'lpf2-seq': 'Linked Places Format has', tables: 'the spreadsheet tables have', ntriples: 'RDF has', 'plato-json': 'PLATO JSON has', 'plato-jsonl': 'PLATO JSON has' };
 
 // What reading a workbook reports (pipeline.js, workbookSheetCsv).
 export const WORKBOOK_TEXT = {

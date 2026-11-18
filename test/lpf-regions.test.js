@@ -295,9 +295,9 @@ test('the command line: --candidates SET with convert --to lpf; refused for anot
     assert.equal(rel.whg_match_score, 93);
     // check takes candidate sets too (Elenchos: checked together); match does not.
     const match = cli('match', '--candidates', SET, DATASET);
-    assert.equal(match.status, 2); assert.match(match.stderr, /--candidates is for check, convert --to lpf or lpf-seq, and apply\./);
+    assert.equal(match.status, 2); assert.match(match.stderr, /--candidates is for check, convert --to lpf, lpf-seq, lpf2 or lpf2-seq, and apply\./);
     const tables = cli('convert', '--to', 'tables', '--out', dir, '--candidates', SET, DATASET);
-    assert.equal(tables.status, 2); assert.match(tables.stderr, /--candidates is for check, convert --to lpf or lpf-seq, and apply\./);
+    assert.equal(tables.status, 2); assert.match(tables.stderr, /--candidates is for check, convert --to lpf, lpf-seq, lpf2 or lpf2-seq, and apply\./);
     const notASet = cli('convert', '--to', 'lpf', '--out', dir, '--overwrite', '--candidates', DATASET, DATASET);
     assert.equal(notASet.status, 2); assert.match(notASet.stderr, /not a candidate set/);
     const missing = join(dir, 'nowhere.json');

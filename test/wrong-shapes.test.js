@@ -65,7 +65,7 @@ async function sweep(doc, name, arrays, fileName, reported) {
 // Presence control: the example as it is converts, with records, to every target, and (a PLATO
 // example) checks with no errors, so that an error after a change is the change's. A candidate set
 // (PLATO 53c5a40) has no place in the tables or Linked Places Format: those refuse it, in words.
-const REFUSE_CANDIDATES = new Set(['tables', 'lpf', 'lpf-seq']);
+const REFUSE_CANDIDATES = new Set(['tables', 'lpf', 'lpf-seq', 'lpf2', 'lpf2-seq']);
 async function control(text, fileName, clean) {
   if (clean) assert.equal((await go([textFile(text, fileName)], 'check', null)).report.errors, 0, `${fileName} has errors of its own`);
   const candidates = JSON.parse(text).profile === 'candidate-set';

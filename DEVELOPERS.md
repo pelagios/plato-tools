@@ -106,7 +106,7 @@ they are tested, and the conventions to keep. For what the tools are and how to 
   (prefixed or in full) becomes `plato:ContainedIn`, and a `whg_match_score` is reported as lost
   (`lpf-match-score`). The candidate sets come as
   `options.candidates` (inputs detected as a candidate set; `--candidates SET` on the command line,
-  repeatable, for `convert --to lpf` or `lpf-seq` only); a set is read for its scores alone, its own
+  repeatable, for `convert --to lpf`, `lpf-seq`, `lpf2` or `lpf2-seq` only); a set is read for its scores alone, its own
   faults left to checking it on its own. The page gives none yet, so its LPF has no scores, each
   reported. Names are kept only for the regions some place is `ContainedIn`, matched or not, so that the index
   stays small; a region whose record comes before every place in it is named on a second reading of the
