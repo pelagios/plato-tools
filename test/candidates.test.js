@@ -165,7 +165,7 @@ test("a dataset's candidateSets, written as spreadsheet tables or LPF, are left 
 });
 
 test('a candidate set written as spreadsheet tables or LPF is refused in plain words', async () => {
-  const words = 'A candidate set cannot be written as spreadsheet tables or Linked Places Format: neither has a place for suggestions made by software, which are claims by no one. Keep it as PLATO JSON or RDF.';
+  const words = 'A candidate set cannot be written as spreadsheet tables, a flat table or Linked Places Format: none has a place for suggestions made by software, which are claims by no one. Keep it as PLATO JSON or RDF.';
   for (const target of ['tables', 'lpf', 'lpf-seq']) {
     const r = await go([file(SET)], 'convert', target);
     const e = r.report.items.filter((i) => i.severity === 'error');

@@ -18,6 +18,7 @@ import { list, collectWithdrawn, resolveWithdrawn, addWithdrawal, versionLosses,
 import { CubeExport, CUBE_TEXT } from '../formats/cube.js';
 import { validateTables, checkTableRules, checkAboutRules, aboutToGazetteer, gazetteerToAbout, rowToAttestation, tableIds, recordToRows, settleRelatedPlaces, identityRow, ATTESTATION_SHEETS, tableSchemas, cellChecker, sourceLosses } from '../formats/tables.js';
 import { AnnotationReader, ANNOTATION_KINDS } from '../formats/annotations.js';
+import { FlatTable } from '../formats/flat.js';
 import { teiSource } from './hermes/tei.js';
 import { genericSource, genericProfile } from './hermes/generic.js';
 import { figuresSource, readsFigures, codesToNTriples } from './hermes/figures.js';
@@ -36,6 +37,7 @@ export const TARGETS = {
   'plato-json': { label: 'PLATO JSON document (.json), place-centric', ext: '.json' },
   ntriples: { label: 'RDF, N-Triples (.nt)', ext: '.nt' },
   tables: { label: 'PLATO spreadsheet tables (.zip of ten CSV files)', ext: '.zip' },
+  'table-flat': { label: 'One flat table (.flat.csv): one row per place, with its match and location, to open in a spreadsheet', ext: '.flat.csv' },
   'lpf-seq': { label: 'Linked Places Format v1, GeoJSON sequence (.geojsonl): one feature per line', ext: '.geojsonl' },
   lpf: { label: 'Linked Places Format v1, FeatureCollection (.geojson)', ext: '.geojson' },
   'lpf2-seq': { label: 'Linked Places Format v2, as the World Historical Gazetteer reads it, GeoJSON sequence (.geojsonl): one feature per line', ext: '.lpf2.geojsonl' },
@@ -747,7 +749,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
   const idrsBySubject = new Map();
   // LPF and the tables have no meta-attestations, so they show the current state (see
   // src/formats/shared.js): what the document retracts or supersedes is left out, and reported.
-  const currentOnly = action === 'convert' && (lpfTarget || target === 'tables');
+  const currentOnly = action === 'convert' && (lpfTarget || target === 'tables' || target === 'table-flat');
   let withdrawn = null;
   // A candidate set (PLATO 53c5a40) is read and written apart from a dataset (runCandidateSet, below).
   const candidateSet = input.profile === 'candidate-set';
@@ -1169,7 +1171,7 @@ function checkGraph(store, res, rep) {
 // as PLATO JSON, JSON Lines or N-Triples. The tables and Linked Places Format have no place for it.
 const CANDIDATE_SET_SCHEMA = 'https://w3id.org/plato/schemas/candidate-set.schema.json';
 export const CANDIDATE_SET_TEXT = {
-  'candidate-set-target': 'A candidate set cannot be written as spreadsheet tables or Linked Places Format: neither has a place for suggestions made by software, which are claims by no one. Keep it as PLATO JSON or RDF.',
+  'candidate-set-target': 'A candidate set cannot be written as spreadsheet tables, a flat table or Linked Places Format: none has a place for suggestions made by software, which are claims by no one. Keep it as PLATO JSON or RDF.',
   'candidates-other-dataset': "A candidate set given is for another dataset (its candidatesFor is not this dataset's address); a score is still taken from it only for a suggestion of the same two places as a match.",
   'candidates-not-a-set': 'A file given as a candidate set is not one (PLATO JSON or JSON Lines with the profile candidate-set), so no score is read from it.',
   'candidate-set-not-a-dataset': 'This is a candidate set, not a dataset: it holds matches suggested by software, and no places, attestations or identity relations, which are what this tool reads. A candidate set can be checked, and converted to PLATO JSON or RDF, on its own.',
@@ -1181,7 +1183,7 @@ export const CANDIDATE_SET_TEXT = {
  * candidates, as a writer is.
  */
 function refuseCandidateSet({ action, target, options }, rep) {
-  const kind = options.sink && !readsCandidates(options) ? 'candidate-set-not-a-dataset' : action === 'convert' && (target === 'tables' || isLpfTarget(target)) ? 'candidate-set-target' : null;
+  const kind = options.sink && !readsCandidates(options) ? 'candidate-set-not-a-dataset' : action === 'convert' && (target === 'tables' || target === 'table-flat' || isLpfTarget(target)) ? 'candidate-set-target' : null;
   if (!kind) return null;
   rep.error(kind, CANDIDATE_SET_TEXT[kind]);
   return { report: rep.toJSON(), outputs: [], incomplete: true };
@@ -1476,6 +1478,26 @@ async function makeWriter(target, env, rep, options, typing, outputs, input) {
     };
   }
   if (target === 'tables') return tablesWriter(env, rep, options, outputs, stem, loss);
+  if (target === 'table-flat') {
+    // One row for each place (src/formats/flat.js). The rows are held until the end: the identity
+    // relations a document lists after its places are matches of those places.
+    const sink = await open(TARGETS[target].ext);
+    const flat = new FlatTable({ loss, withdrawn: options.withdrawn, note: (kind, value, n = 1) => rep.add('note', kind, LOSS_TEXT[kind] || kind, value, n) });
+    return {
+      header(h) { tableLosses(h, loss); relationTypeLosses(h, loss); if (h?.gazetteer && typeof h.gazetteer === 'object' && Object.keys(h.gazetteer).length) loss({ kind: 'flat-gazetteer' }); },
+      event(ev) {
+        if (ev.type === 'record') flat.record(ev);
+        else if (ev.type === 'idr') flat.identity(ev.value);
+        else if (ev.type === 'attestation') loss({ kind: 'attestation-centric', value: ev.value?.['@id'] || `item ${ev.n}` });
+      },
+      async close() {
+        const { text, rows } = flat.csv();
+        sink.write(text);
+        rep.count('table rows', rows);
+        outputs.push(await sink.close());
+      },
+    };
+  }
   throw new Error(`Unknown target: ${target}`);
 }
 

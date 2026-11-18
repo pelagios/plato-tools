@@ -105,7 +105,7 @@ node bin/plato-tools.mjs preview --limit 5 my-places.csv                 # the f
 | Command | What it does |
 |---|---|
 | `check [--whg] INPUT…` | Reports on each input in turn, then gives a total. It applies PLATO's rules; with `--whg` it also says which places the World Historical Gazetteer would accept, and why it would refuse the others |
-| `convert --to TARGET INPUT…` | Also writes each input as `plato-jsonl`, `plato-json`, `ntriples`, `tables`, `lpf-seq`, `lpf`, `lpf2-seq` or `lpf2`, into `--out` (by default the current directory), named after the input |
+| `convert --to TARGET INPUT…` | Also writes each input as `plato-jsonl`, `plato-json`, `ntriples`, `tables`, `table-flat`, `lpf-seq`, `lpf`, `lpf2-seq` or `lpf2`, into `--out` (by default the current directory), named after the input |
 | `cluster --column NAME [--method M] INPUT` | Proposes groups of similar spellings in one column of a table of places, as JSON for review, and applies nothing ([below](#grouping-similar-spellings)) |
 | `preview [--limit N] [--split …] [--clusters FILE] INPUT` | Shows the first N records (10 unless `--limit` says otherwise) of a table of places, a TEI edition or W3C Web Annotations, as a run reads them, and writes nothing ([below](#previewing-the-first-records)) |
 | `compare EARLIER LATER` | Checks that a published dataset was only added to ([what it reports](https://plato.pelagios.org/guide/tools.html#comparing-two-versions)) |
@@ -183,6 +183,44 @@ node bin/plato-tools.mjs preview --limit 5 my-places.csv                 # the f
   afterwards. It needs room for about one and a half times the uncompressed input (twice the text,
   for spreadsheet tables). If the temporary directory is held in
   memory (a `tmpfs`), point `--work-dir` at a real disk.
+
+### One flat table, one row per place
+
+`convert --to table-flat` writes a dataset as one CSV file (`NAME.flat.csv`) to open in Excel,
+LibreOffice or any spreadsheet: one row for each place, with what your own table said of it and
+what became of it. The ten spreadsheet tables (`--to tables`) are the dataset itself, a place's
+names, locations and matches each in a sheet of their own; the flat table is a summary of it to
+read, sort and filter, and cannot be read back.
+
+```sh
+node bin/plato-tools.mjs convert --to table-flat --out . my-places.json   # my-places.flat.csv
+```
+
+| Column | What it holds |
+|---|---|
+| `place_id`, `label`, `alternative_names`, `kind` | The place's id in your table (its web address where it has no such id), its name, its other names and its types, each list joined with `; ` |
+| *your own columns* | Each column of your table that was kept in the notes (as `column: value`), under its own heading again; at most 50 |
+| `notes` | Any other note, whole: a reviewer's, a tool's, or one not in that form |
+| `start`, `end` | The dates as the dataset writes them |
+| `match_status` | `same place (exact match)`, `much the same place (close match)`, `a related place`, `a match, its kind not stated`, or `no match recorded` |
+| `match_id`, `matches_count`, `match_source` | The matched record's web address and its gazetteer (from the address). With several matches, the strongest is first and gives `match_status`, the addresses and gazetteers are joined with ` ; `, and `matches_count` says how many |
+| `match_given_by` | `the table` (your table gave the match), `the reviewer NAME`, `bulk accept by NAME`, or `the dataset (no reviewer recorded)` |
+| `lat`, `lon`, `geometry_wkt` | The place's first location: a point as latitude and longitude; a shape as Well-Known Text, with a representative point |
+| `geometry_note` | Where the location comes from: `own to the table`, `copied from RECORD (licence …) by NAME`, or `drawn by NAME`; and, for a shape, whether the point is the dataset's or was worked out |
+| `source` | The sources cited for the place |
+| `is_region` | `yes` for a place that another place of the dataset lies in (a region made from your table's columns); regions have rows of their own |
+
+A dataset records the matches that were made, and nothing of how a place came to have none: `no
+match recorded` covers places never looked up, places a reviewer skipped, and places for which no
+candidate was found or accepted. Which is which is in the review's work file, not in the dataset,
+and the report says how many such places there are. A match that was withdrawn, or a statement
+that two places are *not* the same, is not a match. The report also names what the table leaves
+out: a second location or date of one place, relations and property values, and the dataset's own
+description.
+
+The file is UTF-8 with a byte-order mark, so that Excel reads accents and other scripts, and a
+cell a spreadsheet would run as a formula (one beginning `=` or `@`) is written with an apostrophe
+before it, and counted in the report.
 
 ### Tables of figures (a census, a return)
 

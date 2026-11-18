@@ -147,7 +147,9 @@ export function groups(action) {
     { severity: 'warning', title: 'Warnings', intro: 'Worth a look; the data can still be used.' },
     { severity: 'loss', title: checking ? 'Would not be carried over' : 'Not carried over',
       intro: checking ? 'PLATO JSON has no place for these, so a conversion to it would leave them out.' : 'The target format has no place for these, so they are left out.' },
-    ...(checking ? [{ severity: 'note', title: 'Notes', intro: 'Not problems: what this check could not do with what it was given, and how to let it.' }] : []),
+    // A conversion's notes (the flat table's, src/formats/flat.js): what a reader of the output should know.
+    checking ? { severity: 'note', title: 'Notes', intro: 'Not problems: what this check could not do with what it was given, and how to let it.' }
+      : { severity: 'note', title: 'Notes', intro: 'Not problems, and nothing to fix: what to know when reading the output.' },
   ];
 }
 

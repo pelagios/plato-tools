@@ -212,6 +212,21 @@ Object.assign(LOSS_TEXT, {
   'address-not-a-place': "The address names a gazetteer's list, search or map page, or is garbled, not a place's record, so it is not carried over (on Pleiades, a place's address is https://pleiades.stoa.org/places/ and its number; on GeoNames, the place's number follows the host). The example gives the address as written.",
   'address-web-page': 'The address is a web page, not a gazetteer record (a Wikipedia article, a Google Maps page or short link): it is carried as given, but check it names the place you mean. Beside a gazetteer address for the same place (the idnos of a place in a TEI list of places, the addresses of a ref), it is not used as an identifier: the attestation is about the gazetteer address, and its note names the page.',
 });
+// The flat table, one row for each place (src/formats/flat.js): what it is, and what it leaves out.
+// The first three are notes (nothing is wrong, and nothing can be fixed); the rest are losses.
+Object.assign(LOSS_TEXT, {
+  'flat-summary': 'The flat table is a summary for reading in a spreadsheet, one row for each place: its names, kind, dates, one location, its matches and its sources. It is not the whole dataset (it leaves out how certain each statement is, the language of each name, and which source and date go with which statement), and it cannot be read back as a dataset. Keep the PLATO JSON, or the ten spreadsheet tables, as the dataset itself.',
+  'flat-no-match-recorded': 'These places have "no match recorded" in match_status. That is all the dataset says of them: it records the matches made, and nothing of how a place came to have none. So these include places never looked up, places a reviewer skipped or left for later, and places looked up for which no candidate was found or none was accepted. Which is which is in the review\'s work file, not in the dataset.',
+  'flat-notes-columns': "The columns of your table that were kept in the notes (as \"column: value\") are columns again, under their own headings (the example names them). A heading that is also one of the flat table's own is followed by \"(note)\". A note that is not in that form is in the notes column, whole.",
+  'flat-formula-guard': 'A cell that begins with =, @, or + or - before anything but a number would be run as a formula by a spreadsheet, so it is written with an apostrophe before it. The example gives the first such cell.',
+  'flat-gazetteer': "The dataset's own description (its title, licence, authors and version) has no place in the flat table, which holds the places alone.",
+  'flat-facet-not-carried': "A place's relations to other places (the region it lies in, a route it is on) and its property values have no columns in the flat table and are left out. The example names the place and which.",
+  'flat-more-locations': 'A place has more than one location in the dataset; the flat table has one row for each place, so it shows the first, and geometry_note says how many more there are. The example names the place.',
+  'flat-more-dates': 'A place has more than one date in the dataset (statements dated differently); the flat table shows the first in start and end. The example names the place.',
+  'flat-date-in-words': "A date given only in words (a date as the source wrote it, or a period's name), with no years, has no place in start and end, and is left out. The example names the place and the date.",
+  'flat-denied': 'A statement the source denies (that a place did not have a name, a location or a type) has no column here, so it is left out: written here, it would say the opposite. The example names it.',
+  'flat-match-without-place': 'An identity match whose place is not in the file has no row to go on in the flat table, so it is left out. The example gives the place and the record.',
+});
 // A table of places, CSV or plain GeoJSON (src/engine/hermes/columns.js, generic.js): what a row holds
 // that is not carried, and what is carried but worth a look. The severity of each is GENERIC_KINDS's.
 Object.assign(LOSS_TEXT, {
@@ -410,7 +425,7 @@ export function droppedText(key, format) {
   return `${words[0].toUpperCase()}${words.slice(1)}: ${format[0].toUpperCase()}${format.slice(1)} no place for this, so it is left out.`;
 }
 // Each format with its verb, so that "the spreadsheet tables have" agrees.
-export const FORMAT_WORDS = { lpf: 'Linked Places Format has', 'lpf-seq': 'Linked Places Format has', lpf2: 'Linked Places Format has', 'lpf2-seq': 'Linked Places Format has', tables: 'the spreadsheet tables have', ntriples: 'RDF has', 'plato-json': 'PLATO JSON has', 'plato-jsonl': 'PLATO JSON has' };
+export const FORMAT_WORDS = { lpf: 'Linked Places Format has', 'lpf-seq': 'Linked Places Format has', lpf2: 'Linked Places Format has', 'lpf2-seq': 'Linked Places Format has', 'table-flat': 'the flat table has', tables: 'the spreadsheet tables have', ntriples: 'RDF has', 'plato-json': 'PLATO JSON has', 'plato-jsonl': 'PLATO JSON has' };
 
 // What reading a workbook reports (pipeline.js, workbookSheetCsv).
 export const WORKBOOK_TEXT = {
