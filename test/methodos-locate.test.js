@@ -35,7 +35,8 @@ function memoryHost(initial) {
   };
 }
 /** The workflow with its decisions recorded (the step "apply" done with the fixture's dataset), about to take the locations. */
-async function decided({ answers = ANSWERS, attribution = ATTRIBUTION, host: more = {} } = {}) {
+const YES = { locate: async () => ({ use: true }) };   // a host that is asked, and says to take them
+async function decided({ answers = ANSWERS, attribution = ATTRIBUTION, host: more = YES } = {}) {
   const { table, file } = await recorded();
   const work = new File([serialiseWork(workOf(table, { late: false, attribution }))], 'bay.krisis.json');
   const columns = new File(['{}'], 'columns.json');
@@ -99,7 +100,7 @@ test('the locations are in the file the workflow carries on with: checked, compa
   const g = out.spatialEntities.find((e) => e['@id'] === P + 'gdansk').attestations.find((x) => x.geometries);
   assert.deepEqual([g.geometries[0].geojson.coordinates, g.contributor, g.citations[0].locator], [[18.6466384, 54.3520252], WHO, W3 + 'place:gn:1']);
   // Who took them: the review's reviewer here; the host's (the page's remembered name) when it gives one.
-  const named = await decided({ host: { reviewer: () => ({ name: 'Bea Mapper' }) } });
+  const named = await decided({ host: { ...YES, reviewer: () => ({ name: 'Bea Mapper' }) } });
   const n = await drive(named.state, named.host);
   const by = (await docOf(named.host, step(n.state, 'locate').outputs.dataset[0])).spatialEntities.flatMap((e) => e.attestations).filter((x) => x.geometries && x.contributor).map((x) => x.contributor.name);
   assert.deepEqual(by, ['Bea Mapper', 'Bea Mapper', 'Bea Mapper', 'Bea Mapper']);
@@ -116,16 +117,53 @@ test('a host that can ask is shown the counts first: declined, the dataset goes 
   assert.ok(![...no.host.store.keys()].some((k) => k.includes('.located.')), [...no.host.store.keys()].join(' '));
   assert.ok(no.host.store.has('bay.krisis-dataset.json'));
   // Agreed, as it is: the four with a licence, and Hel left out.
-  const yes = await decided({ host: { locate: async () => ({}) } });
+  const yes = await decided({ host: { locate: async () => ({ use: true }) } });
   const y = await drive(yes.state, yes.host);
   assert.deepEqual(located(await docOf(yes.host, step(y.state, 'locate').outputs.dataset[0])), ['gdansk', 'oliva', 'puck', 'tczew', 'gdynia']);
   // And with the source whose licence is not stated: Hel too, its note saying whose choice that was.
-  const all = await decided({ host: { locate: async () => ({ allowUnknown: true }) } });
+  // (That choice is recorded in the name the host gives for it: with none, the step stops and nothing is written.)
+  const nameless = await decided({ host: { locate: async () => ({ use: true, allowUnknown: true }) } });
+  const stopped = await drive(nameless.state, nameless.host);
+  assert.deepEqual([stopped.state.status, step(stopped.state, 'locate').state], ['stopped', 'stopped']);
+  assert.match(step(stopped.state, 'locate').problem.words, /Using a source with no licence stated is your choice, recorded in your name/);
+  assert.ok(![...nameless.host.store.keys()].some((k) => k.includes('.located.')));
+  const all = await decided({ host: { locate: async () => ({ use: true, allowUnknown: true }), reviewer: () => WHO } });
   const l = await drive(all.state, all.host);
   const doc = await docOf(all.host, step(l.state, 'locate').outputs.dataset[0]);
   assert.deepEqual(located(doc), ['gdansk', 'oliva', 'hel', 'puck', 'tczew', 'gdynia']);
   assert.match(doc.spatialEntities.find((e) => e['@id'] === P + 'hel').attestations.find((x) => x.geometries).notes, /Ada Surveyor chose to use it all the same, for this batch\.$/);
   assert.equal(l.reports.locate.counts.unknownLicence, 0);
+  // What was chosen is kept with the step in the workflow's record (and so in a project file), and goes when the step is done again.
+  assert.deepEqual(step(l.state, 'locate').result, { locate: { taken: 5, batch: step(l.state, 'locate').result.locate.batch, by: 'Ada Surveyor', allowUnknown: true, unknown: 1 } });
+  assert.deepEqual(runner.deserialise(runner.serialise(l.state)).steps.find((x) => x.id === 'locate').result, step(l.state, 'locate').result);
+  assert.deepEqual(step(y.state, 'locate').result.locate, { taken: 4, batch: step(y.state, 'locate').result.locate.batch, by: 'Ada Surveyor', allowUnknown: false, unknown: 0 });
+  assert.deepEqual(step(n.state, 'locate').result, { locate: { taken: 0, why: 'declined' } });
+  const again = runner.invalidate({ ...l.state, status: 'idle', current: null, steps: l.state.steps.map((x) => (x.id === 'see' ? { ...x, state: 'pending' } : x)) }, 'locate');
+  assert.equal(step(again, 'locate').result, undefined);
+});
+
+test('a host that is not asked, or that answers nothing, takes no location: only an explicit yes copies', async () => {
+  const answers = [['no way to ask', {}], ['answers nothing', { locate: async () => undefined }], ['answers null', { locate: async () => null }], ['answers without saying yes', { locate: async () => ({}) }],
+    ['says only that unlicensed sources may be used', { locate: async () => ({ allowUnknown: true }) }]];
+  for (const [what, host] of answers) {
+    const a = await decided({ host });
+    const b = await drive(a.state, a.host);
+    assert.equal(b.state.current, 'see', what);
+    assert.deepEqual(step(b.state, 'locate').outputs.dataset, step(b.state, 'apply').outputs.dataset, what);
+    assert.ok(![...a.host.store.keys()].some((k) => k.includes('.located.')), `${what}: ${[...a.host.store.keys()].join(' ')}`);
+    assert.deepEqual(located(await docOf(a.host, step(b.state, 'locate').outputs.dataset[0])), ['gdynia'], what);
+    // Said, with what would have been done: four could have been taken (the presence: there was something to copy).
+    assert.deepEqual(b.reports.locate.items[0], { severity: 'warning', kind: 'locate-not-asked', message: 'Nobody was asked whether to take the matched places\' locations, so none was taken: the dataset is as it was.', count: 1, examples: [] }, what);
+    assert.equal(b.reports.locate.counts.use, 4, what);
+    assert.deepEqual(step(b.state, 'locate').result, { locate: { taken: 0, why: 'not-asked' } }, what);
+  }
+  // The same workflow, asked and answered yes, takes them.
+  const yes = await decided({ host: YES });
+  const y = await drive(yes.state, yes.host);
+  assert.deepEqual(located(await docOf(yes.host, step(y.state, 'locate').outputs.dataset[0])), ['gdansk', 'oliva', 'puck', 'tczew', 'gdynia']);
+  // What a step did is a plain record, or it is refused.
+  const w = runner.next((await decided()).state);
+  assert.throws(() => runner.complete(w, 'locate', { dataset: step(w, 'apply').outputs.dataset }, { result: 'yes' }), /not a plain record of what it did/);
 });
 
 test('with nothing that can be used the step is done with the dataset as it was, and says why; undone, the workflow is back at the step with that dataset', async () => {

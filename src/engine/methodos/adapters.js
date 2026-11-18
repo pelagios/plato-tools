@@ -30,6 +30,7 @@ import { publish } from '../agora/index.js';
 import { match, gather } from '../krisis/match.js';
 import { apply } from '../krisis/apply.js';
 import { locate } from '../chora/locate.js';
+import { LOCATE_TEXT } from '../words.js';
 import { runLookup, runLevel, runPlaces, newWork } from '../krisis/lookup.js';
 import { readWork, serialiseWork } from '../krisis/work.js';
 import { seedRegions, levelsOf, regionNodes, regionProgress } from '../krisis/regions.js';
@@ -261,26 +262,32 @@ export const ADAPTERS = {
   },
   // The matched places' locations, taken into the dataset the decisions were recorded in (chora/locate.js):
   // from the review's work file, which keeps each candidate's point and the sources' licences, so nothing is
-  // asked of the gazetteer. Who takes them is the host's reviewer (as a revision's), unless the options name one,
-  // else the review's own. A host that can ask (host.locate(plan, withUnknown), the page's one press) is shown
-  // what would be done first, and answers { use: false } to decline, or { allowUnknown: true } to use sources
-  // whose licence is not stated too; one that cannot gets the default, which never uses those. Nothing to use,
-  // or declined: the dataset is handed on as it was.
+  // asked of the gazetteer. NOTHING is copied unless the host is asked and says so: what would be done is
+  // counted first, and shown to host.locate(plan, withUnknown) (the page's one press); only its { use: true }
+  // takes the locations ({ use: true, allowUnknown: true }: those of sources with no licence stated too, which
+  // needs a name from the options or the host, never the review's). A host that cannot ask, or answers nothing,
+  // takes none: the dataset is handed on as it was, and the report says nobody was asked. Who takes them is the
+  // host's reviewer (as a revision's), unless the options name one, else the review's own.
   async locate({ inputs, options, host, signal }) {
     const subjects = await inputOf(inputs.dataset, host, 'dataset');
     const [wf] = await filesFor(inputs.work, host);
     const work = await wf.text();
     const contributor = options.contributor ?? (typeof host.reviewer === 'function' ? host.reviewer() : host.reviewer) ?? undefined;
-    let choice = {};
-    if (typeof host.locate === 'function') {
-      const p = await engine(host, null, (env) => locate({ subjects, work, options: { planOnly: true, signal } }, env));
-      if (p.problem) return p;
-      choice = (await host.locate(p.result.plan, p.result.withUnknown)) || {};
-      if (choice.use === false) return { report: p.report, outputs: { dataset: inputs.dataset } };
+    const p = await engine(host, null, (env) => locate({ subjects, work, options: { planOnly: true, signal } }, env));
+    if (p.problem) return p;
+    const asked = typeof host.locate === 'function';
+    const choice = asked ? await host.locate(p.result.plan, p.result.withUnknown) : null;
+    if (!choice || choice.use !== true) {
+      const why = asked && choice && choice.use === false ? 'declined' : 'not-asked';
+      const item = { severity: 'warning', kind: `locate-${why}`, message: why === 'declined' ? LOCATE_TEXT.declined : LOCATE_TEXT.notAsked, count: 1, examples: [] };
+      return { report: { ...p.report, items: [item, ...p.report.items] }, outputs: { dataset: inputs.dataset }, kept: { locate: { taken: 0, why } } };
     }
-    const r = await engine(host, 'dataset', (env) => locate({ subjects, work, options: { ...without(options, 'contributor'), contributor, allowUnknown: choice.allowUnknown === true, reopen: (o) => host.file(o), signal } }, env));
+    const allowUnknown = choice.allowUnknown === true;
+    const r = await engine(host, 'dataset', (env) => locate({ subjects, work, options: { ...without(options, 'contributor'), contributor, allowUnknown, reopen: (o) => host.file(o), signal } }, env));
     if (r.problem) return r;
-    return { report: r.report, outputs: { dataset: r.outputs.length ? r.outputs : inputs.dataset } };
+    const b = r.result.batch;
+    return { report: r.report, outputs: { dataset: r.outputs.length ? r.outputs : inputs.dataset },
+      kept: { locate: b ? { taken: b.used.length, batch: b.id, by: b.contributor.name, allowUnknown: b.allowUnknown, unknown: b.unknown } : { taken: 0, why: 'nothing-usable' } } };
   },
   // The lookup is made on the page thread, through the permissions module (host.lookup); the places
   // are gathered by the engine, as the worker's 'places' command gathers them. Its work file is written
@@ -389,7 +396,8 @@ export async function runStep(state, host, { signal, adapters = ADAPTERS } = {})
     if (step.options?.problems === 'report' && !r.incomplete) return { state: runner.complete(state, id, r.outputs || {}, { findings: r.problem }), report: r.report };
     return { state: runner.stop(state, id, r.problem), report: r.report };
   }
-  return { state: runner.complete(state, id, r.outputs), report: r.report };
+  // What the step did that its files do not say (an adapter's `kept`: the locate step's choice) is kept in the record.
+  return { state: runner.complete(state, id, r.outputs, r.kept ? { result: r.kept } : {}), report: r.report };
 }
 
 /**

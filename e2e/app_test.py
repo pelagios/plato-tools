@@ -4806,7 +4806,7 @@ def map_your_data_checks(pw, url, tmp):
         after = {'message': track()['message'], 'chosen': page.evaluate(SEAM_CHOSEN), 'undo': page.is_visible('#methodos-locate-undo'), 'steps': track()['steps']}
         r['located'] = download(page, after['chosen'][0], out / after['chosen'][0])
         e = mydata_ends(json.loads(r['located'].read_text())); r['located ends'] = e
-        return (before['step'] == 'current' and before['message'] == 'Use the locations of 8 of 8 matched places. Nothing is taken until you press the button.'
+        return (before['step'] == 'current' and before['message'] == 'Use the locations of 8 of 8 matched places. Each location is the one point the gazetteer gives for the record (its representative point), not the record\'s full shape. Nothing is taken until you press the button.'
                 and before['go'] == 'Use the locations of 8 places' and before['skip'] == 'Go on without them' and before['box'] is False
                 and not any(n.endswith('.located.json') for n in before['chosen'])
                 and after['message'].startswith('The locations of 8 places were added, each with where it came from (') and after['undo'] is True
@@ -6093,7 +6093,7 @@ def locate_checks(pw, url, tmp):
         r['twice'] = e
         alpha, beta = e.get('Alpha Ford') or [{}], e.get('Beta Mill') or [{}]
         chose = "The gazetteer does not state a licence for this record's source: Locate Reviewer chose to use it all the same, for this batch."
-        return (b['message'] == 'Use the locations of 1 of 3 matched places; 1 has no location on record; 1 left out because its licence is not stated. Nothing is taken until you press the button.'
+        return (b['message'] == 'Use the locations of 1 of 3 matched places; 1 has no location on record; 1 left out because its licence is not stated. Each location is the one point the gazetteer gives for the record (its representative point), not the record\'s full shape. Nothing is taken until you press the button.'
                 and b['box'] is True and b['ticked'] is False and (b['boxWords'] or '').startswith('1 left out because its licence is not stated: use it anyway (recorded)')
                 and 'your name and this choice are written into the note of each of those locations' in (b['boxWords'] or '')
                 and r['once'].get('Beta Mill') == [] and len(r['once'].get('Alpha Ford') or []) == 1
@@ -6101,7 +6101,7 @@ def locate_checks(pw, url, tmp):
                 and r['after once']['undo'] == 'Undo: take those locations out again' and r['after once']['chosen'] == ['fords.krisis-dataset.located.json']
                 and undone['message'].startswith('The locations are taken out again: the workflow is back at “Use the locations of the places you matched”, with the dataset as it was before them.')
                 and undone['message'].endswith(b['message']) and undone['chosen'] == [r['applied'].name]
-                and ticked['message'].endswith(' Use the locations of 2 of 3 matched places; 1 has no location on record. Nothing is taken until you press the button.') and ticked['step'] == 'current'
+                and ticked['message'].endswith(' Use the locations of 2 of 3 matched places; 1 has no location on record. Each location is the one point the gazetteer gives for the record (its representative point), not the record\'s full shape. Nothing is taken until you press the button.') and ticked['step'] == 'current'
                 and s['message'].startswith('The locations of 2 places were added, each with where it came from (') and '1 of them from a source whose licence is not stated, by your choice, which is recorded with each.' in s['message']
                 and len(alpha) == 1 and alpha[0]['at'] == LOCATE_ALPHA and alpha[0]['licence'] == BY and chose not in alpha[0]['note']
                 and len(beta) == 1 and beta[0]['at'] == LOCATE_BETA and beta[0]['licence'] is None and chose in beta[0]['note'] and beta[0]['who'] == 'Locate Reviewer'

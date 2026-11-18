@@ -9,7 +9,7 @@ import { env, textFile } from './engine.js';
 import { detect } from '../src/engine/input.js';
 import { apply } from '../src/engine/krisis/apply.js';
 import { readWork, serialiseWork } from '../src/engine/krisis/work.js';
-import { P, W3, WHO, AT, DECIDED, FEATURES, datasetText, workOf, recorded } from './locate-fixture.js';
+import { P, W3, WHO, AT, DECIDED, FEATURES, ATTRIBUTION, datasetText, workOf, recorded } from './locate-fixture.js';
 import { locate, plan, acceptedMatches, placeFacts, locationAttestations, LOCATED_WORD } from '../src/engine/chora/locate.js';
 import { CITES_AS_EVIDENCE } from '../src/engine/chora/adopt.js';
 import { locateWords, LOCATE_TEXT } from '../src/engine/words.js';
@@ -39,7 +39,8 @@ test('what would be done is counted first, every matched place in exactly one co
   // With the sources whose licence is not stated used too: one more, and none left out for that.
   assert.deepEqual([r.withUnknown.use, r.withUnknown.unknownLicence, r.withUnknown.matched], [4, 0, 10]);
   assert.equal(r.words, 'Use the locations of 3 of 10 matched places; 1 already has a location; 1 has no location on record; 1 left out because its licence is not stated; '
-    + '1 left out because its source does not allow copying; 2 left for you to place by hand (more than one possible location, or a match that is not the same place); 1 skipped because its match is not recorded in this dataset.');
+    + '1 left out because its source does not allow copying; 2 left for you to place by hand (1: the record gives more than one location; 1: more than one record was matched, each with a location); 1 skipped because its match is not recorded in this dataset.');
+  assert.deepEqual(r.plan.leftWhy, { 'several-locations': 1, 'several-matches': 1 });
   // Each place not used is named in the report, with why.
   const said = r.report.items.flatMap((i) => i.examples.map((x) => `${i.kind}: ${x}`));
   assert.ok(said.includes('locate-several-matches: Wejherowo: more than one record was matched, each with a location'), said.join('\n'));
@@ -52,6 +53,17 @@ test('the counts in the words of the confirmation, as the page says them', () =>
   assert.equal(locateWords({ matched: 1, use: 1 }), 'Use the locations of 1 of 1 matched place.');
   assert.equal(locateWords({ matched: 2, use: 0, unknownLicence: 2 }), 'None of the 2 matched places has a location that can be used; 2 left out because their licence is not stated.');
   assert.equal(locateWords({ matched: 0 }), 'No place was matched in the review, so there is no location to use.');
+  // The places left for the person are said with why each is, never under one reason that is not theirs.
+  assert.equal(locateWords({ matched: 3, use: 1, leftForYou: 2 }, { 'bad-location': 1, 'no-record': 1 }),
+    'Use the locations of 1 of 3 matched places; 2 left for you to place by hand (1: the record\'s location cannot be held as it is; 1: the record matched has no address in the gazetteer).');
+  assert.equal(locateWords({ matched: 3, use: 1, leftForYou: 2 }), 'Use the locations of 1 of 3 matched places; 2 left for you to place by hand.');
+  // The box: how many ticking it would use, and how many of those left out for the licence it would not.
+  assert.equal(LOCATE_TEXT.unknownBox(1, 1), '1 left out because its licence is not stated: use it anyway (recorded)');
+  assert.equal(LOCATE_TEXT.unknownBox(6, 7), '6 left out because their licence is not stated: use them anyway (recorded). The other 1 would then have more than one location that may be used, and stays left for you');
+  assert.match(LOCATE_TEXT.point, /its representative point\), not the record's full shape\.$/);
+  assert.equal(LOCATE_TEXT.who('Ada Surveyor', false), 'They will be recorded in the name of Ada Surveyor.');
+  assert.match(LOCATE_TEXT.who('Ada Surveyor', true), /Ada Surveyor, the reviewer named in the review \(no name is held on this page\)\.$/);
+  assert.match(LOCATE_TEXT.who(null, false), /^No name is held yet/);
   assert.equal(LOCATE_TEXT.go(5), 'Use the locations of 5 places');
   assert.equal(LOCATE_TEXT.unknownLabel(1), 'Use it anyway (recorded)');
 });
@@ -78,8 +90,8 @@ test('the locations are written into the dataset: one geometry for each place us
   assert.deepEqual(g.contributor, WHO);
   assert.equal(g.created, AT);
   assert.deepEqual(g.citations, [{ source: { ...g.citations[0].source, title: 'World Historical Gazetteer', licence: 'https://spdx.org/licenses/CC-BY-4.0' }, locator: W3 + 'place:gn:1', citationFunction: CITES_AS_EVIDENCE }]);
-  assert.equal(g.notes, `World Historical Gazetteer's representative point for record ${W3}place:gn:1 ("Gdańsk"; upstream source: GeoNames (gn); id 1; licence CC-BY-4.0; World Historical Gazetteer's own licence: CC-BY-4.0), `
-    + `copied from its answer to the lookup, of 2026-11-16; coordinates rounded to 7 decimal places; in PLATO tools, with the locations of the other matched places (batch ${AT}). `
+  assert.equal(g.notes, `World Historical Gazetteer's representative point for record ${W3}place:gn:1 ("Gdańsk"; upstream source: GeoNames (gn); id 1; licence CC-BY-4.0; World Historical Gazetteer's own licence: CC-BY-4.0) `
+    + `(one point standing for the place, not the record's full shape), copied from its answer to the lookup, of 2026-11-16; coordinates rounded to 7 decimal places; in PLATO tools, with the locations of the other matched places (batch ${AT}). `
     + 'The review had recorded this record as a match (exactMatch); only the location is added here, and how the two are matched is not changed.');
   // Tczew's record was read by the caller: of its area and its one point, the point, and the note says it is the record's own.
   const [t] = geometries(r.doc, 'tczew');
@@ -220,4 +232,103 @@ test('the parts, pure: the matches a review accepted, a plan from the dataset\'s
   const rel = JSON.parse(JSON.stringify(work));
   rel.candidates.find((c) => c.id === 'l1-2').decision.identityType = 'related';
   assert.deepEqual([plan({ work: rel, facts: read.facts }).places.find((x) => x.id === P + 'oliva').status, p.places.find((x) => x.id === P + 'oliva').status], ['related', 'use']);
+});
+
+// ---- what "a licence stated" means, several records for one place, and whose name an opt-in carries ----------------------
+const sources = (gn) => ({ ...ATTRIBUTION, sources: { ...ATTRIBUTION.sources, gn } });
+/** The review, with one candidate's source changed (its namespace: where its licence is looked for). */
+function workWith(table, id, namespace, more = {}) {
+  const w = workOf(table, { late: false, ...more });
+  w.candidates.find((c) => c.id === id).gazetteer.namespace = namespace;
+  return w;
+}
+
+test('a licence is stated only when it is one the tools recognise: "All rights reserved", "unknown" and other words are not, and nothing is copied under them unasked', async () => {
+  for (const words of ['All rights reserved', 'unknown', 'see the website', 'CC-BY-9.9']) {
+    // GeoNames' licence given as those words, as a string and as the service's object, and nothing said about passing on.
+    for (const license of [words, { spdx_id: words, permits_commercial: null, no_derivatives: null }]) {
+      const r = await located({ features: null }, { attribution: sources({ name: 'GeoNames', license }) });
+      assert.deepEqual([statuses(r.plan).gdansk, statuses(r.plan).oliva, r.plan.counts.use], ['unknown-licence', 'unknown-licence', 0], JSON.stringify(license));
+      assert.deepEqual(r.outputs, [], 'nothing is written');
+      // The presence: the same places, the same points, counted as left out for the licence (Gdańsk, Oliva, Puck, Tczew, Hel, and Wejherowo's two).
+      assert.equal(r.plan.counts.unknownLicence, 6);
+    }
+  }
+  // Ticked, such a source is used as one with no licence stated: no licence is claimed for it, in the citation or the note.
+  const yes = await located({ features: null, allowUnknown: true }, { attribution: sources({ name: 'GeoNames', license: 'All rights reserved' }) });
+  const [g] = geometries(yes.doc, 'gdansk');
+  assert.equal(g.citations[0].source.licence, undefined);
+  assert.equal(g.citations[0].locator, W3 + 'place:gn:1');
+  assert.match(g.notes, /licence not stated;/);
+  assert.match(g.notes, /Ada Surveyor chose to use it all the same, for this batch\.$/);
+  assert.doesNotMatch(JSON.stringify(g), /spdx\.org/);
+  // A licence the tools do recognise, however it is cased, is one: used unasked, and written as its SPDX address.
+  const ok = await located({ features: null }, { attribution: sources({ name: 'GeoNames', license: 'cc-by-sa-4.0' }) });
+  assert.equal(statuses(ok.plan).gdansk, 'use');
+  assert.equal(geometries(ok.doc, 'gdansk')[0].citations[0].source.licence, 'https://spdx.org/licenses/CC-BY-SA-4.0');
+});
+
+test('a place matched to two records: the licensed one is used only when it is the only one that may be, and the note names the other; two that may be used are never chosen between', async () => {
+  const data = await recorded();
+  // Wejherowo's second record from a source with no licence stated. Unticked, only the first may be used: used, and said.
+  const mixed = () => workWith(data.table, 'l1-11', 'wd');
+  const no = await located({ features: null }, { dataset: data, work: mixed() });
+  const w = no.plan.places.find((x) => x.id === P + 'wejherowo');
+  assert.deepEqual([w.status, w.record, w.passedOver], ['use', W3 + 'place:gn:10', [{ record: W3 + 'place:gn:11', why: 'unknown-licence' }]]);
+  const [g] = geometries(no.doc, 'wejherowo');
+  assert.deepEqual([g.geometries[0].geojson.coordinates, g.citations[0].locator], [[18.23, 54.6], W3 + 'place:gn:10']);
+  assert.match(g.notes, new RegExp(` The place was matched to 2 records; this is the only one whose location may be used \\(not used: ${W3}place:gn:11, no licence is stated for its source\\)\\.`));
+  // A place matched to one record says nothing of the kind (the absence, beside the presence above, in one file).
+  assert.doesNotMatch(geometries(no.doc, 'gdansk')[0].notes, /was matched to/);
+  // Ticked, both may be used, and they differ: nothing chooses. The place is left for the person and counted, and is not located.
+  const yes = await located({ features: null, allowUnknown: true }, { dataset: data, work: mixed() });
+  assert.equal(statuses(yes.plan).wejherowo, 'several-matches');
+  assert.equal(geometries(yes.doc, 'wejherowo').length, 0);
+  assert.equal(geometries(yes.doc, 'hel').length, 1, 'the same press did use a source with no licence stated');
+  assert.deepEqual([no.plan.counts.leftForYou, yes.plan.counts.leftForYou], [0, 1]);
+  // What the box may promise: unticked, the plan says how many ticking would use (Hel alone), not every place left out or matched so.
+  // Unticked, five are used (Gdańsk, Oliva, Puck, Tczew, Wejherowo); ticking takes Wejherowo out and brings Hel in: five again.
+  assert.deepEqual([no.plan.unknownUsed, no.withUnknownPlan.unknownUsed, no.plan.counts.unknownLicence, no.plan.counts.use, no.withUnknown.use], [0, 1, 1, 5, 5]);
+  assert.deepEqual([no.batch.used.includes(P + 'wejherowo'), yes.batch.used.includes(P + 'wejherowo'), yes.batch.used.includes(P + 'hel')], [true, false, true]);
+  // The other record from a source that may not be passed on: the same, with its own reason; and never used, ticked or not.
+  for (const allowUnknown of [false, true]) {
+    const r = await located({ features: null, allowUnknown }, { dataset: data, work: workWith(data.table, 'l1-11', 'tgn') });
+    assert.equal(statuses(r.plan).wejherowo, 'use');
+    assert.match(geometries(r.doc, 'wejherowo')[0].notes, /not used: \S+place:gn:11, its source does not allow copying\)/);
+    assert.equal(geometries(r.doc, 'wejherowo')[0].citations[0].locator, W3 + 'place:gn:10');
+  }
+  // Both licensed, each with a point: never chosen between (as the fixture is).
+  const both = await located({ features: null }, { dataset: data });
+  assert.equal(statuses(both.plan).wejherowo, 'several-matches');
+  assert.equal(geometries(both.doc, 'wejherowo').length, 0);
+});
+
+test('the choice to use a source with no licence stated is recorded in the name given with it: never the review\'s own reviewer, and with no name nothing is written', async () => {
+  // The review names its reviewer; no name is given with the press. Unticked, the review's reviewer is taken (the presence).
+  const plain = await located({ contributor: undefined });
+  assert.deepEqual(geometries(plain.doc, 'gdansk')[0].contributor, WHO);
+  // Ticked, that name is not taken for the choice: nothing is written, and it is said why.
+  const r = await located({ contributor: undefined, allowUnknown: true });
+  assert.deepEqual(r.outputs, []);
+  assert.deepEqual(Object.keys(r.e.outs), []);
+  assert.deepEqual(r.report.items.filter((i) => i.severity === 'error').map((i) => [i.kind, i.message]), [['locate-no-name-for-choice', LOCATE_TEXT['no-name-for-choice']]]);
+  // With the name given at the press, it is that name the choice and every location carry, not the review's.
+  const named = await located({ contributor: { name: 'Bea Mapper' }, allowUnknown: true });
+  assert.match(geometries(named.doc, 'hel')[0].notes, /Bea Mapper chose to use it all the same, for this batch\.$/);
+  assert.deepEqual(geometries(named.doc, 'hel')[0].contributor, { name: 'Bea Mapper' });
+  assert.doesNotMatch(geometries(named.doc, 'hel')[0].notes, /Ada Surveyor/);
+  assert.equal(named.batch.contributor.name, 'Bea Mapper');
+});
+
+test('each location says what it is: the gazetteer\'s one point for the record, not its full shape', async () => {
+  const r = await located({ features: null });
+  for (const slug of ['gdansk', 'oliva', 'puck', 'tczew']) {
+    const [g] = geometries(r.doc, slug);
+    assert.equal(g.geometries[0].geojson.type, 'Point');
+    assert.match(g.notes, /^World Historical Gazetteer's representative point for record .* \(one point standing for the place, not the record's full shape\), copied from its answer to the lookup/);
+  }
+  // Only a record a caller read itself is said to be copied from the record (no page does: nothing is fetched).
+  const read = await located();
+  assert.match(geometries(read.doc, 'tczew')[0].notes, /^Copied from World Historical Gazetteer record/);
+  assert.doesNotMatch(geometries(read.doc, 'tczew')[0].notes, /representative point/);
 });

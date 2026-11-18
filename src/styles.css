@@ -640,6 +640,7 @@ code.code-chip { font-family: var(--font-mono); font-size: .85em; padding: 0 .3e
 /* The step that takes the matched places' locations: the box for sources with no licence stated, above its buttons. */
 .methodos-locate-unknown { margin: .6rem 0 0; }
 .methodos-locate-unknown .warn { display: block; margin-top: .25rem; }
+.methodos-locate-who { margin: .5rem 0 0; font-size: .95rem; }
 .methodos-tracker { border-color: var(--accent); }
 .track-where { margin: 0 0 .5rem; font-weight: 700; }
 .track { list-style: none; margin: 0; padding: 0; counter-reset: track; }

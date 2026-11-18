@@ -17,11 +17,21 @@
 //     (an adoption in Chora adds an exactMatch where the link is not exact, adopt.js: a close match stays close here);
 //   - copy from a source that says it may not be passed on (`redistributable === false`);
 //   - copy from a source whose licence is not stated, unless the person says so for this batch
-//     (`allowUnknown`), which is then written into the note of each such location, with their name;
-//   - choose among several possible locations: a place matched to several records that each have one, or a
-//     record with several geometries and no single point among them, is left for the person, and counted;
+//     (`allowUnknown`), which is then written into the note of each such location, with the name the person gave
+//     for that press (never a name taken from the review instead). "Stated" means a licence these tools
+//     recognise (agora/licence.js, by SPDX id): any other words ("All rights reserved", "unknown") are not one;
+//   - choose among several possible locations. A place matched to several records is located only when exactly
+//     ONE of them has a location that may be used (with a recognised licence; or, if allowed, with none stated):
+//     the note then says that the others were matched and not used, and why. Two or more that may be used are
+//     never chosen between: the place is left for the person, and counted. So ticking `allowUnknown` can take a
+//     place OUT of those used (one licensed record and one unlicensed are then two that may be used);
 //   - add to a place that has a location already.
 // Every matched place is in exactly one count (counts.matched is their sum).
+//
+// What a location is here: the ONE point the gazetteer answered with for the record (its representative point,
+// kept in the work file), never the record's full shape. The rule for a record with several geometries (below,
+// in assess) is reached only when a caller gives the record itself (`features`); no page or adapter does, and
+// nothing is fetched, so on the page every location is a representative point, and its note says so.
 //
 // plan() is pure. locate() reads the dataset, plans, and (unless `planOnly`) writes the dataset with the
 // locations added, through Chora's save (save.js): nothing else in it changes, shown by the version check.
@@ -30,6 +40,7 @@ import { DataError } from '../input.js';
 import { run, stoppable } from '../pipeline.js';
 import { readWork, checkReviewer, DATE_TIME } from '../krisis/work.js';
 import { isWhg } from '../gazetteer/index.js';
+import { licenceTerms } from '../agora/licence.js';
 import { normaliseWhgIri } from '../gazetteer/whg.js';
 import { candidateStatus, featureGeometries, geometryFrom, spdxUri, whgSource, whgLicenceOf, recordWordsOf, AdoptError, CITES_AS_EVIDENCE } from './adopt.js';
 import { newGeometryAttestation, DrawError } from './draw.js';
@@ -101,8 +112,11 @@ function assess(work, c, features) {
     if (!(e instanceof DrawError) && !(e instanceof AdoptError)) throw e;
     return { ...a, kind: 'bad-location', reason: e.message };
   }
-  if (!st.licence || !st.licence.spdx) return { ...a, kind: 'unknown-licence', geometry };
-  return { ...a, kind: 'ok', geometry };
+  // A licence is stated only when it is one these tools recognise (the table of agora/licence.js, by SPDX id): words
+  // that merely look like an id ("unknown"), or are not one ("All rights reserved"), are no licence to copy under.
+  const terms = typeof st.licence?.spdx === 'string' ? licenceTerms(st.licence.spdx.trim()) : null;
+  if (!terms) return { ...a, kind: 'unknown-licence', geometry };
+  return { ...a, kind: 'ok', geometry, licenceId: terms.id };
 }
 
 /** One place's part of a plan, from what its accepted matches offer. */
@@ -112,12 +126,16 @@ function decide(fact, offers, allowUnknown) {
   // Only a match this dataset records as a review's: an identity with a contributor (a table's own has none).
   const recorded = offers.filter((o) => o.record && fact.reviewed.has(same(o.record)));
   if (!recorded.length) return { status: 'not-recorded' };
-  const pick = (list, unknown) => (list.length === 1 ? { status: 'use', offer: list[0], unknown } : { status: 'several-matches' });
-  const ok = recorded.filter((o) => o.kind === 'ok');
-  if (ok.length) return pick(ok, false);
-  // A source with a licence is used first; one without, only when there is no other, and only if allowed.
-  const unknown = recorded.filter((o) => o.kind === 'unknown-licence');
-  if (unknown.length) return allowUnknown ? pick(unknown, true) : { status: 'unknown-licence' };
+  // The records whose location may be used: with a recognised licence; and, if allowed, with none stated. Exactly one:
+  // it is used, and the others matched are named with it (passedOver), never passed over in silence. Two or more:
+  // nothing here chooses between them.
+  const usable = recorded.filter((o) => o.kind === 'ok' || (allowUnknown && o.kind === 'unknown-licence'));
+  if (usable.length > 1) return { status: 'several-matches' };
+  if (usable.length === 1) {
+    const passedOver = recorded.filter((o) => o !== usable[0]).map((o) => ({ record: o.record, why: o.kind }));
+    return { status: 'use', offer: usable[0], unknown: usable[0].kind === 'unknown-licence', ...(passedOver.length ? { passedOver } : {}) };
+  }
+  if (recorded.some((o) => o.kind === 'unknown-licence')) return { status: 'unknown-licence' };
   for (const k of ['several-locations', 'bad-location', 'not-redistributable', 'no-location', 'related', 'no-record']) {
     const o = recorded.find((x) => x.kind === k);
     if (o) return { status: k, ...(o.reason ? { reason: o.reason } : {}) };
@@ -132,7 +150,9 @@ function decide(fact, offers, allowUnknown) {
  *   allowUnknown   use a source whose licence is not stated (the person's choice, for this batch)
  *   features       optionally, records read by the caller, by id or address (LPF Features)
  * Returns { counts: { matched, use, located, noLocation, unknownLicence, notRedistributable, leftForYou,
- * notRecorded }, places: [{ id, label, status, count, record?, reason?, unknown?, offer? }] } in the review's order.
+ * notRecorded }, leftWhy: { <status>: n } (why each place left for the person is), unknownUsed (how many of those
+ * used have no licence stated), places: [{ id, label, status, count, record?, reason?, unknown?, passedOver?, offer? }] }
+ * in the review's order.
  */
 export function plan({ work, facts, allowUnknown = false, features = null }) {
   const counts = Object.fromEntries(['matched', ...COUNTS].map((k) => [k, 0]));
@@ -144,11 +164,13 @@ export function plan({ work, facts, allowUnknown = false, features = null }) {
     counts.matched++; counts[count]++;
     places.push({ id, label: work.places[id].label, count, ...d, ...(d.offer ? { record: d.offer.record } : {}) });
   }
-  return { counts, places };
+  const leftWhy = {};
+  for (const x of places) if (x.count === 'leftForYou') leftWhy[x.status] = (leftWhy[x.status] || 0) + 1;
+  return { counts, leftWhy, unknownUsed: places.filter((x) => x.status === 'use' && x.unknown).length, places };
 }
 
 /** The same plan without what only the engine uses (each place's offer), for a page to show. */
-const shown = (p) => ({ counts: p.counts, places: p.places.map(({ offer, ...x }) => x) });
+const shown = (p) => ({ counts: p.counts, leftWhy: p.leftWhy, unknownUsed: p.unknownUsed, places: p.places.map(({ offer, ...x }) => x) });
 
 /**
  * The geometry attestations of a plan's places to use: [{ placeId, attestation }], each citing the gazetteer
@@ -159,12 +181,14 @@ export function locationAttestations(p, { contributor, created, batch }) {
   const out = [];
   for (const place of p.places) {
     if (place.status !== 'use') continue;
-    const o = place.offer, licenceUri = spdxUri(o.st.licence), source = whgSource();
+    // The licence written is the recognised one's SPDX address (assess: licenceId), never an address made of unrecognised words.
+    const o = place.offer, licenceUri = o.licenceId ? spdxUri({ spdx: o.licenceId }) : null, source = whgSource();
     const attestation = newGeometryAttestation({
       geojson: o.geometry.geojson, role: o.geometry.role, contributor, created,
       citation: { source: licenceUri ? { ...source, licence: licenceUri } : { ...source }, locator: o.record, citationFunction: CITES_AS_EVIDENCE },
-      notes: locateGeometryNote({ ...recordWordsOf(o.candidate, null, o.st, o.attribution), licence: o.st.licence?.spdx ?? null, whgLicence: whgLicenceOf(o.attribution),
-        answered: o.answered ?? created, fromRecord: o.geometry.fromRecord, identityType: o.identityType, batch, unknownBy: place.unknown ? contributor.name.trim() : null }),
+      notes: locateGeometryNote({ ...recordWordsOf(o.candidate, null, o.st, o.attribution), licence: o.licenceId ?? null, whgLicence: whgLicenceOf(o.attribution),
+        answered: o.answered ?? created, fromRecord: o.geometry.fromRecord, identityType: o.identityType, batch, unknownBy: place.unknown ? contributor.name.trim() : null,
+        passedOver: place.passedOver || [] }),
     });
     if (o.geometry.timespans?.length) attestation.timespans = o.geometry.timespans;
     out.push({ placeId: place.id, attestation });
@@ -202,11 +226,14 @@ export async function placeFacts(subjects, ids, env, { signal } = {}) {
  *   planOnly      say what would be done (the counts), and write nothing;
  *   allowUnknown  use sources whose licence is not stated too: the person's choice for this batch, written
  *                 into the note of each such location with their name;
- *   contributor   who takes them ({ name, orcid? }; else the review's reviewer): each location records it;
+ *   contributor   who takes them ({ name, orcid? }; else the review's reviewer): each location records it. With
+ *                 allowUnknown it MUST be given: that choice is recorded in the name of whoever made it, at this
+ *                 press, never in a name taken from the review;
  *   created       when (an ISO date-time; now by default); batch: the name of this go (by default, `created`);
  *   features      records read by the caller, by id or address (none is fetched here);
  *   reopen, discard   as save() takes them: the file written, read back for the version check, and removed if refused.
- * Returns { report, outputs, plan: { counts, places }, withUnknown: counts with such sources used, batch?, incomplete? }.
+ * Returns { report, outputs, plan: { counts, leftWhy, unknownUsed, places }, withUnknown: the counts with such sources used,
+ * withUnknownPlan: { leftWhy, unknownUsed } of that plan, batch?, incomplete? }.
  * `outputs` is empty when nothing was written (planOnly, or no location to use: the dataset is as it was).
  */
 export async function locate({ subjects, work, options = {} }, env) {
@@ -223,15 +250,18 @@ async function locating({ subjects, work, options }, env) {
   if (read.incomplete) { rep.error('locate-dataset-not-read', LOCATE_TEXT['dataset-not-read'], read.report.items.find((i) => i.severity === 'error')?.message); return fail(); }
   const allowUnknown = options.allowUnknown === true;
   const p = plan({ work: w, facts: read.facts, allowUnknown, features: options.features || null });
-  const withUnknown = allowUnknown ? p.counts : plan({ work: w, facts: read.facts, allowUnknown: true, features: options.features || null }).counts;
+  const pu = allowUnknown ? p : plan({ work: w, facts: read.facts, allowUnknown: true, features: options.features || null });
+  const withUnknown = pu.counts;
   rep.counts = { ...p.counts };
   for (const k of COUNTS.filter((x) => x !== 'use')) {
     for (const x of p.places.filter((y) => y.count === k)) rep.add('warning', `locate-${x.status}`, LOCATE_TEXT[k], `${x.label || x.id}${LOCATE_TEXT.why[x.status] ? `: ${LOCATE_TEXT.why[x.status]}` : ''}${x.reason ? ` (${x.reason})` : ''}`);
   }
-  const result = { plan: shown(p), withUnknown, words: locateWords(p.counts) };
+  const result = { plan: shown(p), withUnknown, withUnknownPlan: { leftWhy: pu.leftWhy, unknownUsed: pu.unknownUsed }, words: locateWords(p.counts, p.leftWhy), reviewer: w.reviewer?.name ?? null };
   if (options.planOnly) return { report: rep.toJSON(), outputs: [], ...result };
   if (!p.counts.use) { rep.warning('locate-nothing', LOCATE_TEXT.nothing); return { report: rep.toJSON(), outputs: [], ...result }; }
 
+  // The choice to use a source with no licence stated is recorded in the name given with it, never one taken from the review.
+  if (allowUnknown && !options.contributor) { rep.error('locate-no-name-for-choice', LOCATE_TEXT['no-name-for-choice']); return fail(result); }
   const contributor = options.contributor || w.reviewer;
   if (!contributor) { rep.error('locate-no-name', LOCATE_TEXT['no-name']); return fail(result); }
   try { checkReviewer(contributor, 'Whoever takes the locations'); } catch (e) { if (!(e instanceof DataError)) throw e; rep.error('locate-bad-name', LOCATE_TEXT['bad-name'], e.message); return fail(result); }

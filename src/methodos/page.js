@@ -902,7 +902,9 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   const locSkipB = el('button', { type: 'button', id: 'methodos-locate-skip', hidden: true });
   const locAgainB = el('button', { type: 'button', id: 'methodos-locate-again', hidden: true, textContent: 'Count again' });
   const locUndoB = el('button', { type: 'button', id: 'methodos-locate-undo', hidden: true, textContent: 'Undo: take those locations out again' });
-  locEl.append(locUnknownP, el('p', { className: 'methodos-buttons' }, locGoB, ' ', locSkipB, ' ', locAgainB, ' ', locUndoB));
+  // In whose name the locations will be recorded, said beside the button before it is pressed.
+  const locWho = el('p', { id: 'methodos-locate-who', className: 'methodos-locate-who', hidden: true });
+  locEl.append(locUnknownP, el('p', { className: 'methodos-buttons' }, locGoB, ' ', locSkipB, ' ', locAgainB, ' ', locUndoB), locWho);
   tMsg.after(locEl);
   let loc = null;   // what the engine said it would do: { key, state: 'asking' | 'ready' | 'failed', refs, files, text, plan, withUnknown, words }
   /** The dataset and the review the locate step `s` takes: their references, and the files held here (null where one is no longer held). */
@@ -927,7 +929,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       if (loc !== mine) return;
       const problem = problemOf(r);
       if (problem || !r.plan) Object.assign(mine, { state: 'failed', words: `The locations could not be counted: ${problem?.words || 'the engine gave no answer.'}` });
-      else Object.assign(mine, { state: 'ready', plan: r.plan, withUnknown: r.withUnknown });
+      else Object.assign(mine, { state: 'ready', plan: r.plan, withUnknown: r.withUnknown, withUnknownPlan: r.withUnknownPlan || { leftWhy: {}, unknownUsed: 0 }, reviewer: r.reviewer || null });
       render(false);
     }, (e) => {
       if (loc !== mine) return;
@@ -954,18 +956,21 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     if (!s || active) return;
     const went = loc?.refs || locateInputs(s)?.refs;
     if (!went) return;
-    wf = runner.complete(locateTake(s), s.id, { dataset: went });
+    wf = runner.complete(locateTake(s), s.id, { dataset: went }, { result: { locate: { taken: 0, why: 'declined' } } });
     loc = null;
     say(`No location was taken from the matches: the workflow goes on with ${names(went)}, as it was.`);
     await keep(); render(false);
   }));
   // The one press: the locations counted are taken, in the name the page holds for the reviewer (asked once, for the review:
   // not asked again here); with none held, the engine takes the review's own reviewer, and with neither stops, saying so.
+  // Not so with the box ticked: using a source with no licence stated is recorded in the name held on this page at this
+  // press, never one taken from the review, so with none held nothing is run, and the tracker asks for it.
   locGoB.addEventListener('click', () => chain(async () => {
     const s = atLocate(), mine = loc, counts = locCounts();
     if (!s || active || !counts?.use) return;
     const allowUnknown = locUnknown.checked;
     const who = page.contributor?.() || undefined;
+    if (allowUnknown && !who) { say(LOCATE_TEXT['no-name-for-choice'], true); render(false); return; }
     wf = locateTake(s); active = { id: s.id, op: 'locate' };
     say(null); render(false);
     const end = (fn) => chain(async () => {
@@ -979,7 +984,10 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       if (problem) { wf = runner.stop(wf, s.id, problem); return; }
       const files = await Promise.all((r.outputs || []).map((o) => page.output(o.name)));
       const made = files.length ? await refsHeld(files, 'dataset') : mine.refs;
-      wf = runner.complete(wf, s.id, { dataset: made });
+      // What was chosen is kept with the step, in the workflow's record (and so in a project file): whether a source with no
+      // licence stated was used, how many, and in whose name; beside the note on each such location in the dataset itself.
+      const b = r.batch;
+      wf = runner.complete(wf, s.id, { dataset: made }, { result: { locate: b ? { taken: b.used.length, batch: b.id, by: b.contributor.name, allowUnknown: b.allowUnknown, unknown: b.unknown } : { taken: 0, why: 'nothing-usable' } } });
       const done = files.length ? LOCATE_TEXT.done(r.batch?.used?.length ?? counts.use, names(files), r.batch?.unknown || 0) : LOCATE_TEXT.nothing;
       say(done);
       // Chosen in step 1, so that the next step takes it and the map, opened, shows it; what the tracker says of the file
@@ -1268,7 +1276,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     else if (s && s.op === 'locate' && wf && !changed && s.state !== 'running') {
       locateAsk(s);
       next = loc.state === 'asking' ? 'Counting the matched places whose location can be used…' : loc.state === 'failed' ? loc.words
-        : `${locateWords(locCounts())}${locCounts().use ? ' Nothing is taken until you press the button.' : ''}`;
+        : `${locateWords(locCounts(), locUnknown.checked ? loc.withUnknownPlan.leftWhy : loc.plan.leftWhy)}${locCounts().use ? ` ${LOCATE_TEXT.point} Nothing is taken until you press the button.` : ''}`;
     }
     // The places seen on the map: said with how many locations there are to see, or that there is none yet.
     else if (s && s.op === VIEW && wf && !changed) {
@@ -1302,8 +1310,18 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     // The locate step's own controls: the box for sources with no licence stated (only where ticking it would use more), the one
     // press, a way on without, a way to count again after a failure; and, once done, a way to undo while it is the last step done.
     const atLoc = !!(s && s.op === 'locate' && wf && !changed && !viewing && s.state !== 'running' && loc), lc = atLoc ? locCounts() : null;
-    locUnknownP.hidden = !(lc && loc.withUnknown.use > loc.plan.counts.use);
-    if (lc) locUnknownWords.textContent = `${loc.plan.counts.unknownLicence} left out because ${loc.plan.counts.unknownLicence === 1 ? 'its' : 'their'} licence is not stated: ${lower(LOCATE_TEXT.unknownLabel(loc.plan.counts.unknownLicence))}`;
+    // The box: only where ticking it would use a source with no licence stated, and in the number it would use (a place
+    // matched to two such records, or to one beside a licensed one, would then have two that may be used, and is not among them).
+    locUnknownP.hidden = !(lc && loc.withUnknownPlan.unknownUsed > 0);
+    if (lc) locUnknownWords.textContent = LOCATE_TEXT.unknownBox(loc.withUnknownPlan.unknownUsed, loc.plan.counts.unknownLicence);
+    const held = lc?.use ? page.contributor?.() || null : null;
+    locWho.hidden = !lc?.use;
+    if (lc?.use) {
+      // With the box ticked, only the name held on this page will do; without, the review's own reviewer is taken where none is held.
+      const fromReview = !held && !locUnknown.checked && loc.reviewer;
+      locWho.textContent = LOCATE_TEXT.who(held?.name || (fromReview ? loc.reviewer : null), !!fromReview);
+      locWho.classList.toggle('warn', !held && !fromReview);
+    }
     locGoB.hidden = !(lc && lc.use);
     if (lc?.use) locGoB.textContent = LOCATE_TEXT.go(lc.use);
     locSkipB.hidden = !(atLoc && loc.state !== 'asking');

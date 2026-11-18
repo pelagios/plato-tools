@@ -670,22 +670,27 @@ export const choraAdoptGeometryNote = ({ licence, whgLicence, fetched, fallback 
  * record (as choraAdoptGeometryNote's); `licence` its source's SPDX id or null; `answered` when the gazetteer gave
  * the answer the location was in (with `fromRecord`, when the record itself was read); `identityType` how the
  * review recorded the match, which this does not change; `batch` the one go it was part of; `unknownBy` the name of
- * whoever chose to use a source whose licence is not stated, for this batch (recorded here, on the location itself).
+ * whoever chose to use a source whose licence is not stated, for this batch (recorded here, on the location itself);
+ * `passedOver` the other records the place was matched to, none of which may be used, each { record, why }.
  */
-export const locateGeometryNote = ({ licence, whgLicence, answered, fromRecord = false, identityType, batch, unknownBy = null, ...r }) => {
+const LOCATE_PASSED = { 'unknown-licence': 'no licence is stated for its source', 'not-redistributable': 'its source does not allow copying', 'no-location': 'it has no location on record',
+  related: 'matched as related, not as the same place', 'several-locations': 'it gives more than one location', 'bad-location': 'its location cannot be held as it is', 'no-record': 'it has no address in the gazetteer' };
+export const locateGeometryNote = ({ licence, whgLicence, answered, fromRecord = false, identityType, batch, unknownBy = null, passedOver = [], ...r }) => {
   const record = recordWords(r, [`licence ${licence || 'not stated'}`, `World Historical Gazetteer's own licence: ${whgLicence || 'not stated'}`]);
-  return `${fromRecord ? `Copied from World Historical Gazetteer record ${record}` : `World Historical Gazetteer's representative point for record ${record}, copied from its answer to the lookup`}, of ${String(answered).slice(0, 10)};`
+  return `${fromRecord ? `Copied from World Historical Gazetteer record ${record}` : `World Historical Gazetteer's representative point for record ${record} (one point standing for the place, not the record's full shape), copied from its answer to the lookup`}, of ${String(answered).slice(0, 10)};`
     + ` coordinates rounded to 7 decimal places; in PLATO tools, with the locations of the other matched places (batch ${batch}).`
     + ` The review had recorded this record as a match (${identityType}); only the location is added here, and how the two are matched is not changed.`
+    + (passedOver.length ? ` The place was matched to ${passedOver.length + 1} records; this is the only one whose location may be used (not used: ${passedOver.map((x) => `${x.record}, ${LOCATE_PASSED[x.why] || x.why}`).join('; ')}).` : '')
     + (unknownBy ? ` The gazetteer does not state a licence for this record's source: ${unknownBy} chose to use it all the same, for this batch.` : '');
 };
 const nPlaces = (n, word = 'place') => `${n.toLocaleString('en-GB')} ${n === 1 ? word : `${word}s`}`;
 /**
  * What taking the matched places' locations would do, in one sentence, before anything is done (chora/locate.js,
  * the counts of a plan): "Use the locations of 5 of 7 matched places; 1 has no location on record; 1 left out
- * because its licence is not stated." Every place matched is in exactly one of the counts.
+ * because its licence is not stated." Every place matched is in exactly one of the counts. `leftWhy` (a plan's:
+ * { <status>: n }) says why the places left for the person are, each in its own words; without it, only how many.
  */
-export function locateWords(c) {
+export function locateWords(c, leftWhy = null) {
   const n = (k) => c?.[k] || 0, s = (k, one, many) => (n(k) === 1 ? one : many);
   const head = n('use') ? `Use the locations of ${n('use').toLocaleString('en-GB')} of ${nPlaces(n('matched'), 'matched place')}`
     : n('matched') ? `None of the ${nPlaces(n('matched'), 'matched place')} has a location that can be used` : 'No place was matched in the review, so there is no location to use';
@@ -694,7 +699,7 @@ export function locateWords(c) {
     n('noLocation') ? `${n('noLocation')} ${s('noLocation', 'has', 'have')} no location on record` : null,
     n('unknownLicence') ? `${n('unknownLicence')} left out because ${s('unknownLicence', 'its', 'their')} licence is not stated` : null,
     n('notRedistributable') ? `${n('notRedistributable')} left out because ${s('notRedistributable', 'its source does', 'their sources do')} not allow copying` : null,
-    n('leftForYou') ? `${n('leftForYou')} left for you to place by hand (more than one possible location, or a match that is not the same place)` : null,
+    n('leftForYou') ? `${n('leftForYou')} left for you to place by hand${leftWhy && Object.keys(leftWhy).length ? ` (${Object.entries(leftWhy).map(([k, m]) => `${m}: ${LOCATE_TEXT.why[k] || k}`).join('; ')})` : ''}` : null,
     n('notRecorded') ? `${n('notRecorded')} skipped because ${s('notRecorded', 'its match is', 'their matches are')} not recorded in this dataset` : null,
   ].filter(Boolean);
   return [head, ...parts].join('; ') + '.';
@@ -702,6 +707,13 @@ export function locateWords(c) {
 /** What the step that takes the matched places' locations says (chora/locate.js; src/methodos/page.js). */
 export const LOCATE_TEXT = {
   'work-unreadable': 'The review cannot be read, so no location was taken',
+  'no-name-for-choice': 'Using a source with no licence stated is your choice, recorded in your name with each such location: give your name (“Your name”, under the review), and press again. Nothing was written.',
+  notAsked: 'Nobody was asked whether to take the matched places\' locations, so none was taken: the dataset is as it was.',
+  declined: 'The matched places\' locations were not taken: the dataset is as it was.',
+  /** What a location is, said before any is taken. */
+  point: 'Each location is the one point the gazetteer gives for the record (its representative point), not the record\'s full shape.',
+  /** In whose name the locations will be recorded, said beside the button. */
+  who: (name, fromReview) => (name ? `They will be recorded in the name of ${name}${fromReview ? ', the reviewer named in the review (no name is held on this page)' : ''}.` : 'No name is held yet: give yours (“Your name”, under the review) before you press.'),
   'no-name': 'Each location is recorded in the name of whoever took it: give your name (as for the review), and try again. Nothing was written.',
   'bad-name': 'The name given cannot be recorded with the locations, so nothing was written',
   'dataset-not-read': 'The dataset could not be read to the end, so no location was taken',
@@ -722,6 +734,9 @@ export const LOCATE_TEXT = {
   },
   /** Beside the box that lets a source with no stated licence be used. */
   unknownLabel: (n) => `Use ${n === 1 ? 'it' : 'them'} anyway (recorded)`,
+  /** The box's own words: how many ticking it would add, and, of the places left out for the licence, how many it would not. */
+  unknownBox: (adds, left) => `${adds} left out because ${adds === 1 ? 'its' : 'their'} licence is not stated: use ${adds === 1 ? 'it' : 'them'} anyway (recorded)`
+    + (left > adds ? `. The other ${left - adds} would then have more than one location that may be used, and ${left - adds === 1 ? 'stays' : 'stay'} left for you` : ''),
   unknownWarning: 'The gazetteer does not say under what licence these may be reused. If you use them, your name and this choice are written into the note of each of those locations, where anyone reusing your data can read it.',
   go: (n) => `Use the locations of ${nPlaces(n)}`,
   skip: (n) => (n ? 'Go on without them' : 'Go on'),

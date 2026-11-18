@@ -183,7 +183,7 @@ function current(out, stepId, states, doing) {
   if (out.current !== stepId || !states.includes(s.state)) no(`The step ${titleOf(s)} cannot be ${doing}: it is ${s.state}${out.current && out.current !== stepId ? `, and the workflow is at ${titleOf(stepOf(out, out.current))}` : ''}.`);
   return s;
 }
-const clean = (s) => { for (const k of ['why', 'problem', 'error', 'partial', 'discarded', 'progress', 'findings']) delete s[k]; };
+const clean = (s) => { for (const k of ['why', 'problem', 'error', 'partial', 'discarded', 'progress', 'findings', 'result']) delete s[k]; };
 
 /** The outputs given exactly as the operation declares them: each one, of its type. */
 function checkOutputs(s, outputs) {
@@ -199,9 +199,10 @@ function checkOutputs(s, outputs) {
  * The step is done, with its outputs (references, of the types its operation gives). `findings`, given
  * only for a step whose problems do not stop the workflow (its options say `problems: 'report'`: the check
  * of the other dataset of a match), is what its report found, as stop() takes it ({ words, errors? }):
- * kept with the step, "done, with a report", and shown with it.
+ * kept with the step, "done, with a report", and shown with it. `result`, if given, is kept with the step too (s.result),
+ * until the step is done again.
  */
-export function complete(state, stepId, outputs, { findings } = {}) {
+export function complete(state, stepId, outputs, { findings, result } = {}) {
   const out = clone(state);
   const s = current(out, stepId, ['running', 'waiting'], 'done');
   if (s.state === 'waiting' && OPERATIONS[s.op].kind !== 'interactive') no(`The step ${titleOf(s)} is waiting to run, not done: it is resumed, and it is done when it has run.`);
@@ -210,6 +211,12 @@ export function complete(state, stepId, outputs, { findings } = {}) {
   s.outputs = checkOutputs(s, outputs);
   clean(s);
   if (findings) s.findings = { words: findings.words, ...(Number.isSafeInteger(findings.errors) ? { errors: findings.errors } : {}) };
+  // What the step did that its files do not say on their face, kept with it in the workflow's record (and so in a
+  // project file): a plain object of plain values (the locate step: whether a source with no licence stated was used, and by whom).
+  if (result !== undefined) {
+    if (!result || typeof result !== 'object' || Array.isArray(result)) no(`The step ${titleOf(s)} cannot be done with a result that is not a plain record of what it did.`);
+    s.result = clone(result);
+  }
   s.state = 'done';
   out.current = null; out.status = 'idle';
   return out;
