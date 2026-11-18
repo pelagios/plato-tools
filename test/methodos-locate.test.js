@@ -55,7 +55,7 @@ const seen = (state) => runner.complete(state, 'see', { dataset: runner.inputsOf
 
 test('the recipe: the locations are taken from the dataset the decisions were recorded in and the review\'s work file, and every later step takes the dataset that step made', () => {
   assert.equal(checkRecipe(MAP), MAP);
-  assert.equal(MAP.version, 6);
+  assert.equal(MAP.version, 7);
   const by = Object.fromEntries(MAP.steps.map((s) => [s.id, s]));
   assert.deepEqual(by.locate.from, { dataset: 'relate.dataset ?? apply.dataset', work: 'wikidata.work ?? review.work' });
   // The review is taken, not only the dataset: the sources' licences are kept nowhere else.
@@ -68,7 +68,7 @@ test('the recipe: the locations are taken from the dataset the decisions were re
   const ids = MAP.steps.map((s) => s.id);
   assert.equal(ids[ids.indexOf('out') - 1], 'see');
   assert.deepEqual([by.see.title, by.see.when, OPERATIONS[by.see.op].kind], ['See your places on a map', undefined, 'interactive']);
-  assert.equal(by.locate.title, 'Use the locations of the places you matched');
+  assert.equal(by.locate.title, 'Use the locations of the matches');
   for (const draw of [false, true]) assert.deepEqual(planOf('map-your-data', { ...ANSWERS, 'will-draw': draw }).steps.map((s) => s.id).slice(-3), ['compare', 'see', 'out']);
   assert.equal(MAP.asks['will-draw'].question, 'Some places may not be found. Do you want to place them by hand on a map afterwards?');
   // No new word of the tools' own in what the user reads of the two steps.

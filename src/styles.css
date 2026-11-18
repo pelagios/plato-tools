@@ -939,3 +939,22 @@ section.chora .chora-mapwrap { container: chora-map / inline-size; }
 .outcome-examples { color: var(--muted); font-size: .92rem; overflow-wrap: anywhere; }
 .outcome-note { margin: .6rem 0 0; line-height: 1.5; }
 .outcome-scope { margin: .6rem 0 0; color: var(--muted); font-size: .88rem; line-height: 1.45; }
+
+/* ---- The plain-language layer (src/engine/plain.js): a tool's plain name first, its own (Greek) name small and
+   grey beside it; a scholar-facing workflow's steps, the act first; what is not the step's own, in one fold. */
+.greek-name { font-family: var(--font-text); font-size: .78rem; font-weight: 400; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+h2 .greek-name { margin-left: .45rem; }
+.tool .label .greek-name { font-size: inherit; letter-spacing: inherit; }
+.track.plain .track-tool { font: 400 .72rem/1 var(--font-text); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); white-space: nowrap; cursor: help; }
+.track.plain .track-step.is-current .track-tool { font-weight: 400; }
+.for-tool .greek-name { margin-left: .5rem; }
+.expert { margin: 1rem 0 .4rem; border-top: 1px dashed var(--line); padding-top: .6rem; }
+.expert > summary { cursor: pointer; color: var(--muted); font-size: .95rem; }
+.expert[open] > summary { color: var(--fg); }
+.expert-note { margin: .4rem 0 .6rem; color: var(--muted); font-size: .92rem; }
+.candidate .acts-hint { margin: .45rem 0 .1rem; color: var(--muted); font-size: .88rem; line-height: 1.4; }
+.candidate .kind .type-code { color: var(--muted); font-size: .85rem; }
+.columns-table .column-hint { display: block; margin-top: .3rem; color: var(--muted); font-size: .85rem; line-height: 1.35; }
+details.item .in-full { margin: .3rem 0 .4rem; color: var(--muted); font-size: .92rem; }
+/* A heading put away (step 2's own, at a step of a scholar-facing workflow): h2 is a flex row, which [hidden] alone does not hide. */
+h2[hidden] { display: none; }

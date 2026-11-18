@@ -17,7 +17,7 @@ import { outputStore } from './outputs.js';
 import { stepAt, currentInput, startFiles, keptBy, keptFor, keptWords, distinct, projectWords, notKept } from './seams.js';
 import { regionsSettled, notReviewed, relateProblem, unexported, reviewDiffers, writesItself, columnsProblem } from '../engine/methodos/containment.js';
 import { stepMark, whereWords, lower } from './layout.js';
-import { lossyWords } from '../engine/plain.js';
+import { lossyWords, toolTip, PLAIN_WAITS } from '../engine/plain.js';
 import { whyWords, shareLink, ENROL, WorkbenchError, WORDS, capWords } from '../engine/workbench.js';
 import { stateOf, fromSnapshot } from './whg.js';
 
@@ -37,6 +37,19 @@ const CHORA_STEPS = new Set(['place', 'trace', 'map.export']);
 const VIEW = 'map.view';
 const onMap = (op) => CHORA_STEPS.has(op) || op === VIEW;
 const mapWords = (op) => (op === VIEW ? 'See your places on the map' : 'Open Chora');
+/**
+ * A step's tool and what it does, in a row of a list of steps: "Hermes: Match the columns to PLATO"; in a workflow in plain
+ * words (a recipe's `plain`), the act first and the tool's own name after it, small, titled "Hermes: the tool that does this".
+ */
+function stepWords(s, plain, now = false) {
+  const act = el('span', { className: 'track-act', textContent: s.title });
+  if (!s.tool) return [act];
+  const tool = el('span', { className: 'track-tool', textContent: s.tool });
+  if (!plain) return [tool, ': ', act];
+  // Its tooltip (src/lib/tooltip.js, data-tip: never a title attribute) at the step at hand alone: a tooltip's element is a stop for the keyboard, and a list of eleven steps would add eleven.
+  if (now) tool.dataset.tip = toolTip(s.tool);
+  return [act, ' ', tool];
+}
 /** What to put right, from a run's report with errors or a run that did not finish (as adapters.js's problemOf, without the engine). */
 function problemOf(r) {
   const errors = r?.report?.errors || 0;
@@ -119,13 +132,12 @@ const show = (node) => { node.scrollIntoView({ behavior: reduceMotion() ? 'auto'
  * A list of a workflow's steps, each with its state in words (not only in colour): done, now, to come,
  * or not yet available and why (skipped, and not counted); the last says what was not done (`notes`).
  */
-function stepList(list, steps, at, done, notes = []) {
+function stepList(list, steps, at, done, notes = [], plain = false) {
   list.replaceChildren();
+  list.classList.toggle('plain', plain);
   for (const [n, s] of steps.entries()) {
     const st = s.available !== true ? 'unavailable' : done.includes(s.id) ? 'done' : s.id === at ? 'current' : 'todo';
-    list.append(stepRow(s.id, st,
-      s.tool ? el('span', { className: 'track-tool', textContent: s.tool }) : null, s.tool ? ': ' : null,
-      el('span', { className: 'track-act', textContent: s.title }),
+    list.append(stepRow(s.id, st, ...stepWords(s, plain, st === 'current'),
       st === 'unavailable' ? el('span', { className: 'track-why', textContent: s.available }) : null,
       n === steps.length - 1 && notes.length ? el('span', { className: 'track-end', textContent: notes.join(' ') }) : null));
   }
@@ -282,7 +294,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     verdict.textContent = `Your workflow: ${p.title}, in ${runs(p).length} steps.`;
     const list = el('ol', { className: 'track' });
     list.setAttribute('role', 'list');   // list-style: none drops the list's semantics in Safari without it
-    stepList(list, p.steps, null, [], p.notes);
+    stepList(list, p.steps, null, [], p.notes, !!RECIPES[p.key]?.plain);
     planEl.append(list);
     if (p.left.length) planEl.append(el('p', { className: 'track-left', textContent: `Left out by your answers: ${p.left.map((s) => lower(s.title)).join('; ')}.` }));
     // What the workflow cannot carry from the files it begins with (the recipe's `cannot`), said before it is followed.
@@ -1215,7 +1227,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     // A workflow shared from WHG (viewShared) is shown in place of this browser's own, read-only, until closed or copied.
     const shown = viewing ? viewing.read.record : wf || changed?.record;
     const own = viewing ? null : changed;   // what the version rule said of this browser's own workflow, if it is shown
-    if (!pending && !shown) { tracker.hidden = true; delete tracker.dataset.status; closeStrip(); stripAt = null; onStep(null); sharedEl.hidden = true; stepButtons(); return; }
+    if (!pending && !shown) { tracker.hidden = true; delete tracker.dataset.status; delete tracker.dataset.plain; closeStrip(); stripAt = null; onStep(null); sharedEl.hidden = true; stepButtons(); return; }
     tracker.hidden = false;
     let steps, at, rows;
     if (!shown) {
@@ -1235,7 +1247,10 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       });
       tracker.dataset.status = viewing ? 'shared' : own ? 'changed' : shown.status;
     }
-    trackList(tList, rows, pendingNotes(shown));
+    // In plain words (a recipe's `plain`, Map your data): no tool's name in the headline, the act first in each row.
+    const plain = !!(shown ? recipeOf(shown) : RECIPES[pending.key])?.plain;
+    if (plain) tracker.dataset.plain = ''; else delete tracker.dataset.plain;
+    trackList(tList, rows, pendingNotes(shown), plain);
     lateEl.replaceChildren(...lateRows(shown, pending));
     lateEl.hidden = !lateEl.childNodes.length;
     // What the workflow cannot carry from its files, folded below the buttons; hidden for a recipe that names nothing.
@@ -1244,7 +1259,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     cannotEl.querySelector('ul').replaceChildren(...cannotItems(cannot));
     const i = at ? steps.findIndex((s) => s.id === at.id) : -1;
     const s = i >= 0 ? steps[i] : null;
-    const title = s ? whereWords(i, steps.length, OPERATIONS[s.op].tool, s.title) : null;   // also the centre's title, and the strip's words
+    const title = s ? whereWords(i, steps.length, OPERATIONS[s.op].tool, s.title, plain) : null;   // also the centre's title, and the strip's words
     const where = s ? `${title}.`
       : own ? own.words : `Every one of the ${steps.length} steps is done.${pendingNotes(shown).length ? ` ${pendingNotes(shown).join(' ')}` : ''}`;
     tWhere.textContent = where;
@@ -1284,10 +1299,11 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
         : `Open the map (“${mapWords(VIEW)}”)${n ? `: ${n.toLocaleString('en-GB')} ${n === 1 ? 'location is' : 'locations are'} on record` : ''}. Say when you have looked, and the step is done. A place you put there by hand is kept by saving on the map: the workflow then carries on with the file saved.`;
     }
     // The map's step has no "This step is done": its download in Chora does it, and nothing else can.
-    else if (s && op.kind === 'interactive') next = `This step is yours: it waits for ${op.waitsFor}.${s.op === 'map.export' ? ' Open Chora, frame the view, and make the map there (“Make a map”).' : ' Say when it is done.'}`;
+    else if (s && op.kind === 'interactive') next = `This step is yours: it waits for ${(plain && PLAIN_WAITS[s.op]) || op.waitsFor}.${s.op === 'map.export' ? ' Open Chora, frame the view, and make the map there (“Make a map”).' : ' Say when it is done.'}`;
     else if (ready) next = `Ready to download: ${names(main)} is already in the format this workflow writes, so it is not converted into itself. Download it, and the step is done.`;
     else if (toCompare && sameRefs(main, chosenRefs)) next = `Press “Compare with ${names(toCompare)}”: the workflow kept that file for you, so there is none to find.`;
     else if (toReview && RECORDS.has(s.op)) next = `Press “Open the review (${toReview.name})”: the decisions you made are in it. Then press Finish, below the review.`;
+    else if (s && !run && plain && WHG_STEPS.has(s.op)) next = 'Below, see what would be sent to the World Historical Gazetteer, then send it. The step is done when the answers are back.';
     else if (s && !run) next = PRESS[s.op] ? `Press ${PRESS[s.op]} below.` : `Run ${OPERATIONS[s.op].tool ? `${OPERATIONS[s.op].tool}'s` : 'its'} ${lower(OPERATIONS[s.op].title)}; the step is done when the run finishes.`;
     // Written out in a format that cannot hold all the review decided: said before the run, with what does (rich R1).
     // (src/engine/plain.js, lossyWords: Linked Places Format and the tables keep each match as a link; the flat table also who decided it.)
@@ -1347,7 +1363,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     if (s && !changed && !viewing) {
       const p = wf ? { title: recipeOf(wf)?.title } : plan(pending.key, pending.answers);
       // The locate step has no tool of its own in the centre: what it would do is said there too, as in the tracker.
-      onStep({ id: s.id, n: i, title, tool: PAGE_TOOL[s.op] ?? null, text: `Methodos, ${p.title}.${op.kind === 'interactive' && op.waitsFor ? ` This step is yours: it waits for ${op.waitsFor}.` : ''}${s.op === 'locate' && next ? ` ${next}` : ''}`,
+      onStep({ id: s.id, n: i, title, tool: PAGE_TOOL[s.op] ?? null, text: `${plain ? '' : 'Methodos, '}${p.title}.${op.kind === 'interactive' && op.waitsFor ? ` This step is yours: it waits for ${(plain && PLAIN_WAITS[s.op]) || op.waitsFor}.` : ''}${s.op === 'locate' && next ? ` ${next}` : ''}`,
         link: onMap(s.op) ? { href: '#chora', words: mapWords(s.op) } : null });
     } else onStep(null);
     // Ready to download as it is: Download is the one primary action, so Convert, beside it in the centre, is not marked as one (simple S12).
@@ -1402,13 +1418,12 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     : plan(pending.key, pending.answers).notes);
 
   /** The tracker's list: each step with its checkbox and its state in words, and the step at hand with how its run went. */
-  function trackList(list, rows, notes) {
+  function trackList(list, rows, notes, plain = false) {
     list.replaceChildren();
+    list.classList.toggle('plain', plain);
     for (const [n, s] of rows.entries()) {
       const words = s.run && RUN_WORDS[s.run.state] ? RUN_WORDS[s.run.state](s.run) : '';
-      const li = stepRow(s.id, s.st,
-        s.tool ? el('span', { className: 'track-tool', textContent: s.tool }) : null, s.tool ? ': ' : null,
-        el('span', { className: 'track-act', textContent: s.title }),
+      const li = stepRow(s.id, s.st, ...stepWords(s, plain, s.st === 'current'),
         s.st === 'unavailable' ? el('span', { className: 'track-why', textContent: s.available }) : null,
         words ? el('span', { className: `track-run${['stopped', 'failed'].includes(s.run.state) ? ' warn' : ''}`, textContent: words }) : null,
         s.findings ? el('span', { className: 'track-findings warn', textContent: findingsWords(s.findings) }) : null,
@@ -2021,10 +2036,13 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
    * (the formats listed first, in plain words), and none for a step whose format is fixed.
    */
   const targetAt = () => {
-    const s = wf && !changed && !viewing ? atStep() : null;
-    if (!s || s.op !== 'convert') return null;
-    const asked = recipeOf(wf)?.steps.find((x) => x.id === s.id)?.options?.target === '$target';
-    return { step: s.id, value: typeof s.options?.target === 'string' ? s.options.target : null, choices: asked ? recipeOf(wf).asks?.target?.choices || [] : [] };
+    if (!wf || changed || viewing) return null;
+    const asks = (x) => recipeOf(wf)?.steps.find((r) => r.id === x.id)?.options?.target === '$target';
+    const s = atStep();
+    // Every step done, the last of them the one that wrote the result: the same list, so that the result can be written in another format too.
+    if (!s) { const last = followed(wf).at(-1); return last?.op === 'convert' && last.state === 'done' && asks(last) ? { step: last.id, value: null, choices: recipeOf(wf).asks?.target?.choices || [], ended: true } : null; }
+    if (s.op !== 'convert') return null;
+    return { step: s.id, value: typeof s.options?.target === 'string' ? s.options.target : null, choices: asks(s) ? recipeOf(wf).asks?.target?.choices || [] : [] };
   };
   const stepNow = () => { const s = wf && !changed && !viewing ? atStep() : null; return s ? { id: s.id, op: s.op, answers: { ...wf.answers } } : null; };
   return { open, chosen, placed, mapped, began, ended, dropped, keepChanged, detected, baseChanged, targetAt, id: () => wf?.id || null, step: stepNow, following: () => !!(wf || pending || changed), takenUp: () => takenUp,

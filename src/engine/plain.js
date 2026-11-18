@@ -5,6 +5,17 @@
 // every item, in its own words, under the plain ones.
 
 /**
+ * The tools in plain words, by their own names: what each is called first in the list of tools and in a
+ * scholar-facing workflow's steps, its own (Greek) name kept beside it, small, with toolTip() as its title.
+ */
+export const PLAIN_TOOLS = {
+  Methodos: 'Guided steps', Hermes: 'Read my table', Elenchos: 'Check', Metaphrasis: 'Convert', Arithmos: 'Count and compare',
+  Krisis: 'Find in gazetteers', Chora: 'Map', Agora: 'Publish', Mneme: 'Compare versions',
+};
+/** The title of a tool's own name where it stands beside the plain one: "Krisis: the tool that does this". */
+export const toolTip = (tool) => `${tool}: the tool that does this`;
+
+/**
  * The formats a scholar asks for first, in plain words, by a conversion's target key: the names they have
  * in the list beside Convert at the step that writes the result, where a workflow's recipe offers them.
  */
@@ -89,3 +100,54 @@ export function outcome(report) {
   }
   return null;
 }
+
+/**
+ * A report's items said in one plain sentence, by kind, where the engine's own words are an expert's: the
+ * page shows these first in a scholar-facing workflow, with the engine's words in full below them.
+ */
+const WORKING_IDS = 'Your places have working ids for now, which is all you need to carry on. Permanent web addresses are only needed if you publish (or send the file to a gazetteer), and are asked for then.';
+export const PLAIN_REPORT = {
+  'generic-stand-in-base': WORKING_IDS,
+  'stand-in-written': WORKING_IDS,
+  'attestations-unaddressed': 'These decisions have no web address of their own yet (your places have working ids for now), so if you change one of them later, the earlier answer cannot be taken back for you. To avoid that, give the web address your places will live under, in Options, before you save your decisions.',
+  'whg-temporary-ids': 'Your places have working ids for now. WHG would keep those ids as they are: before you send this file to WHG, give the web address your places will live under, or publish first.',
+};
+
+/**
+ * What recording a review's decisions came to, in plain words (the page's summary of Finish in a scholar-facing
+ * workflow), from the run's counts: "Recorded 7 decisions: 8 matches accepted, 0 places said to be different."
+ * Returns { problems, counted } as words.js summary() does, or null where the counts are not Finish's.
+ */
+export function decisionsSummary(report) {
+  const c = report?.counts || {}, nErr = report?.errors || 0, v = c.versionCheck;
+  if (c.attestations === undefined) return null;
+  const many = (k, one, more) => `${n(k || 0)} ${k === 1 ? one : more}`;
+  const made = `Recorded ${many(c.attestations, 'decision', 'decisions')}: ${many((c.relations || 0) - (c.distinctAttestations || 0), 'match', 'matches')} accepted, ${many(c.distinctAttestations, 'place', 'places')} said to be different`
+    + `${c.retracted ? `, ${many(c.retracted, 'earlier answer', 'earlier answers')} withdrawn` : ''}.`
+    + (c.replaced ? ` ${many(c.replaced, 'earlier answer was', 'earlier answers were')} taken out and replaced.` : '')
+    + (c.unchanged ? ` ${many(c.unchanged, 'decision was', 'decisions were')} already in your data, saying the same, and not written again.` : '');
+  const problems = nErr ? `${many(nErr, 'problem', 'problems')} found.` : !c.attestations ? 'Nothing to save.' : v ? 'Your decisions were saved with your places.' : 'Your decisions were saved.';
+  if (!v) return { problems, counted: made };
+  const kept = v.changed || v.lost ? `the check of what was there before found ${[v.changed ? `${many(v.changed, 'statement', 'statements')} changed` : '', v.lost ? `${many(v.lost, 'statement', 'statements')} no longer there` : ''].filter(Boolean).join(' and ')}`
+    : 'nothing that was there before was deleted or changed';
+  return { problems, counted: `${made} Your ${many(c.places, 'place', 'places')} had ${many(v.earlier, 'statement', 'statements')} about them, and now have ${n(v.later)}, with ${n(v.added)} added; ${kept}.` };
+}
+
+/**
+ * What a step that is the scholar's own waits for, in plain words, by its operation, where the tools' own words
+ * (operations.js, waitsFor) are an expert's: completes "This step is yours: it waits for …".
+ */
+export const PLAIN_WAITS = {
+  review: 'you to decide on each suggested match, in the review below',
+};
+/** Under a candidate's buttons in the review: what the two ways of saying no each do. */
+export const DECISION_HINT = '“Not this one” sets this suggestion aside and writes nothing to your data. “Different places” records, with your reason, that the two are known to be different places.';
+/** The label of the list that says what a "Same place" is recorded as (exact match, close match). */
+export const SAME_PLACE_LABEL = 'Record “Same place” as';
+/** Beside a column read as the country each place lies in: what else it does (a lookup's hint, never a filter). */
+export const COUNTRY_HINT = 'Also a hint when your places are looked up in a gazetteer: candidates in this country are listed first, and none is left out.';
+/** Before a type's code that has no readable name in the data, in the review. */
+export const TYPE_CODE = 'type code';
+/** The fold that holds what is not the step's own, in a scholar-facing workflow. */
+export const EXPERT_SUMMARY = 'More options (for experts)';
+export const EXPERT_NOTE = 'Everything else these tools can do with the file chosen. None of it is needed for this workflow.';

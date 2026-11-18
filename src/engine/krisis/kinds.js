@@ -107,6 +107,18 @@ function word(s) {
   for (const x of singulars(w)) if (Object.hasOwn(WORDS, x)) return WORDS[x];
   return null;
 }
+/**
+ * A type's code in words, where the data at hand names it: a Wikidata class these tables know ("wikidata:Q515" is a
+ * city), or a source's own word for the kind ("osm:isolated_dwelling" is an isolated dwelling, "kain_par:parish" a
+ * parish). Null for a code that is only a code (an AAT number, which the page names from WHG's labels; a GeoNames
+ * feature code; a Wikidata class not in the tables): the page shows it as a code, and says that it is one.
+ */
+export function typeWord(id) {
+  const m = /^([^:]+):(.+)$/.exec(typeof id === 'string' ? id.trim() : '');
+  if (!m || m[1] === 'aat' || m[1] === 'gn') return null;
+  if (m[1] === 'wikidata' || m[1] === 'wd') return WIKIDATA[m[2]] ?? null;
+  return /^[A-Za-z][A-Za-z _-]*$/.test(m[2]) ? m[2].replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase() : null;
+}
 /** The reconciliation protocol's own type ("Place", WHG's schema address), which every candidate has: not a kind. */
 export const isProtocolType = (t) => typeof t === 'string' && /^(place|https?:\/\/whgazetteer\.org\/static\/whg_schema\.jsonld#place)$/i.test(t.trim());
 

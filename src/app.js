@@ -42,12 +42,13 @@ import { mountMethodos } from './methodos/page.js';
 import { version as TOOLS_VERSION } from '../package.json';
 import { mountScope, aatLabels, BUNDLED_AAT_LABELS } from './scope-page.js';
 import { normaliseScope } from './engine/krisis/scope.js';
-import { kindFit, candidateTypes } from './engine/krisis/kinds.js';
+import { kindFit, candidateTypes, typeWord } from './engine/krisis/kinds.js';
 import { workflowStore } from './methodos/store.js';
 import { whgProjects } from './methodos/whg.js';
 import { workbench, sharedToken, isId } from './engine/workbench.js';
 import { chosenWords, wentOn, resultLabel } from './methodos/layout.js';
-import { outcome, targetList } from './engine/plain.js';
+import { outcome, targetList, PLAIN_TOOLS, toolTip, PLAIN_REPORT, decisionsSummary, DECISION_HINT, COUNTRY_HINT, TYPE_CODE, EXPERT_SUMMARY, EXPERT_NOTE } from './engine/plain.js';
+import { isCountryHeading } from './engine/hermes/columns.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
@@ -325,7 +326,7 @@ function onDone({ report, outputs, work: found, incomplete }) {
   if (runOp) { methodos.ended({ op: runOp, report, outputs: outputs || [], incomplete: !!incomplete }); runOp = null; }
   buttons(false);
   $('progress').hidden = true; $('result').hidden = false;
-  const { problems, counted } = summary(report, state.action);
+  const { problems, counted } = (isPlain() && state.action === 'apply' && decisionsSummary(report)) || summary(report, state.action);
   $('summary').innerHTML = `<span class="${report.errors ? 'warn' : 'good'}">${problems}</span> ` + escapeHtml(counted);
   const saves = $('saves'); saves.innerHTML = '';
   for (const o of outputs || []) {
@@ -390,8 +391,10 @@ function reportHtml(report, action) {
   for (const { severity: sev, title, intro } of groups(action)) {
     const items = report.items.filter((i) => i.severity === sev);
     if (!items.length) continue;
+    // In a scholar-facing workflow an item with a plain sentence (plain.js PLAIN_REPORT) says that first; the engine's own words, in full, open with it.
+    const said = (i) => (isPlain() && PLAIN_REPORT[i.kind]) || null;
     out.push(`<div class="report-group ${sev}"><h3>${title}</h3><p>${intro}</p>` + items.map((i) =>
-      `<details class="item"><summary>${escapeHtml(i.message)}<span class="count">× ${i.count.toLocaleString('en-GB')}</span></summary>${i.examples.length ? `<ul>${i.examples.map((e) => `<li>${escapeHtml(String(e))}${explained(i, e)}</li>`).join('')}</ul>` : ''}</details>`).join('') + '</div>');
+      `<details class="item" data-kind="${escapeHtml(String(i.kind ?? ''))}"><summary>${escapeHtml(said(i) || i.message)}<span class="count">× ${i.count.toLocaleString('en-GB')}</span></summary>${said(i) ? `<p class="in-full">${escapeHtml(i.message)}</p>` : ''}${i.examples.length ? `<ul>${i.examples.map((e) => `<li>${escapeHtml(String(e))}${explained(i, e)}</li>`).join('')}</ul>` : ''}</details>`).join('') + '</div>');
   }
   return out.join('');
 }
@@ -612,7 +615,9 @@ function extraControls(h, i) {
   const W = COLUMN_WORDS, c = columns;
   if (c.mapping[h] === 'within' && Object.hasOwn(c.levels, h)) {
     const options = levelChoices(c.levels[h], usedLevels()).map((l) => `<option value="${l}"${l === c.levels[h] ? ' selected' : ''}>${l}</option>`).join('');
-    return ` <label class="column-level" data-tip="${escapeHtml(W.levelTip)}">${escapeHtml(W.level)} <select id="column-level-${i}" data-level-column="${i}" aria-label="${escapeHtml(W.levelLabel(h))}">${options}</select></label>`;
+    // A column headed as a country is also the lookup's country hint (hermes/columns.js isCountryHeading), said beside it.
+    const hint = isCountryHeading(h) ? `<small class="column-hint" data-hint="country">${escapeHtml(COUNTRY_HINT)}</small>` : '';
+    return hint + ` <label class="column-level" data-tip="${escapeHtml(W.levelTip)}">${escapeHtml(W.level)} <select id="column-level-${i}" data-level-column="${i}" aria-label="${escapeHtml(W.levelLabel(h))}">${options}</select></label>`;
   }
   if (c.mapping[h] === 'split' && Object.hasOwn(c.splits, h)) {
     const sp = c.splits[h];
@@ -1102,7 +1107,7 @@ let tool = null;
 // Hermes chosen: it narrows nothing, and is not kept in the address, but its card is marked and #for-tool
 // says what it reads, until another card or a file's action is chosen.
 let hermesChosen = false;
-const HERMES = 'For <strong>Hermes</strong>, the readers: your file is read when you drop it, whether annotations from Recogito, a TEI edition, a CSV file or workbook, or GeoJSON. Then choose what to do with it.';
+const HERMES = 'For <strong>Read my table</strong> <span class="greek-name" data-tip="Hermes: the tool that does this">Hermes</span>, the readers: your file is read when you drop it, whether annotations from Recogito, a TEI edition, a CSV file or workbook, or GeoJSON. Then choose what to do with it.';
 let workflowStep = null;   // the step of a Methodos workflow the user is at, if they follow one: { id, n, title, tool, text, link, op }
 // The result of the run that did an earlier step, once the workflow has gone on (workflowMode): `lingering`
 // while it is still shown, labelled as that step's, until the user first acts on the new step; then `parked`,
@@ -1112,6 +1117,40 @@ let lingering = null, parked = null;
 const hashParam = (name) => { try { return new URLSearchParams(location.hash.replace(/^#/, '')).get(name); } catch { return null; } };
 const toolFromHash = () => { const k = hashParam('tool'); return k && /^[a-z]+$/.test(k) && TOOLS[k] ? k : null; };
 const reduceMotion = () => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+/** Whether the workflow followed is a scholar-facing one, said in plain words (a recipe's `plain`: src/methodos/page.js sets the tracker's data-plain). */
+const isPlain = () => document.body.dataset.plain !== undefined;
+// What step 2 holds besides a workflow step's own action, by a key: in a scholar-facing workflow each is put into the fold
+// "More options (for experts)" (#expert) unless it is the step's own, and put back where it was when the workflow is left.
+const EXPERT_PARTS = {
+  main: '#action > .actions[data-tools="check convert figures"]', cubing: '#action > .actions.cubing', candidates: '#action > .actions.candidates', versions: '#action > .actions.versions',
+  publishing: '#action > .actions.publishing', matching: '#action > .actions.matching', mapping: '#action > .actions.mapping', lookup: '#lookup',
+};
+const expertNodes = Object.fromEntries(Object.entries(EXPERT_PARTS).map(([k, sel]) => [k, document.querySelector(sel)]));
+const expertMarks = new Map();
+/**
+ * In a scholar-facing workflow, step 2 shows the step's own action and nothing else: Check or Convert at a step that
+ * checks or converts, Prepare at a publishing step, the lookup's panel at the steps that look up and review; the rest
+ * (the Data Cube, candidate sets, the version check and revision, publishing, matching with another dataset, the map's
+ * link) is in one fold, closed, "More options (for experts)". Outside such a workflow every part is where it was.
+ */
+function expertFold() {
+  const plain = isPlain(), op = workflowStep?.op || '', body = $('expert-body'), box = $('expert');
+  // (Convert stays once the workflow has written its result, as its last step: the result may be wanted in another format too.)
+  const own = { main: op === 'check' || op === 'convert' || (!workflowStep && !!methodos?.targetAt?.()?.ended), publishing: op.startsWith('publish.'), lookup: workflowStep?.tool === 'match' };
+  for (const [key, node] of Object.entries(expertNodes)) {
+    if (!node) continue;
+    const fold = plain && !own[key];
+    if (fold && node.parentElement !== body) { const mark = document.createComment(`expert: ${key}`); node.before(mark); expertMarks.set(key, mark); body.append(node); }
+    if (!fold && node.parentElement === body) { expertMarks.get(key).replaceWith(node); expertMarks.delete(key); }
+  }
+  box.hidden = !plain || !body.children.length;
+  if (!plain) box.open = false;
+  box.querySelector('summary').textContent = EXPERT_SUMMARY; box.querySelector('.expert-note').textContent = EXPERT_NOTE;
+  // The step is said in the centre's title: step 2's own heading ("Check it, convert it, …") is for the tools used on their own.
+  $('action-h').hidden = plain && !tool;
+  // With every step done, Convert is what is left of step 2: it stands alone, as the main button, without Check.
+  if (plain && own.main && !workflowStep) { $('check').hidden = true; for (const o of expertNodes.main.querySelectorAll('.or')) o.hidden = true; $('convert').classList.add('primary'); }
+}
 function chooseTool(key) {
   const was = tool;
   tool = TOOLS[key] ? key : null;
@@ -1150,15 +1189,20 @@ function chooseTool(key) {
     }
     note.append(w, ' ');
   }
-  if (tool) {
-    const [anchor, words] = TOOLS[tool].guide;
-    note.insertAdjacentHTML('beforeend', `For <strong>${TOOLS[tool].name}</strong>, ${escapeHtml(TOOLS[tool].what)}. <a href="${GUIDE}#${anchor}">${words}</a>. `);
+  if (tool && isPlain()) {
+    // A scholar-facing workflow: the step is said in its title; here only where the guide explains it, and the tool's own name, small.
+    const [anchor, words] = TOOLS[tool].guide, name = TOOLS[tool].name;
+    note.insertAdjacentHTML('beforeend', `<a href="${GUIDE}#${anchor}">${words}</a> <span class="greek-name" data-tip="${escapeHtml(toolTip(name))}">${escapeHtml(PLAIN_TOOLS[name])} · ${name}</span>`);
+  } else if (tool) {
+    const [anchor, words] = TOOLS[tool].guide, name = TOOLS[tool].name;
+    note.insertAdjacentHTML('beforeend', `For <strong>${escapeHtml(PLAIN_TOOLS[name])}</strong> <span class="greek-name" data-tip="${escapeHtml(toolTip(name))}">${name}</span>, ${escapeHtml(TOOLS[tool].what)}. <a href="${GUIDE}#${anchor}">${words}</a>. `);
     const all = document.createElement('button');
     all.type = 'button'; all.className = 'link'; all.id = 'every-action'; all.textContent = 'Show every action';
     all.onclick = () => { chooseTool(null); setHash(null); focusStep1(); };
     note.appendChild(all);
     if (tool === 'figures' && !asCheck) presetFigures();
   }
+  expertFold();
   if (hermesChosen) note.insertAdjacentHTML('beforeend', HERMES);
   // In a workflow #for-tool sits under the step's title (workflowMode): the two shown or hidden together.
   if (note.parentElement === $('workflow-head')) $('workflow-head').hidden = $('workflow-title').hidden && note.hidden;
@@ -1474,6 +1518,7 @@ function workflowMode(step) {
   const tracker = $('methodos-tracker'), on = !tracker.hidden, note = $('for-tool'), head = $('workflow-head');
   const began = on && !document.body.dataset.workflow;
   if (on) document.body.dataset.workflow = tracker.dataset.recipe || 'workflow'; else delete document.body.dataset.workflow;
+  if (on && tracker.dataset.plain !== undefined) document.body.dataset.plain = ''; else delete document.body.dataset.plain;
   if (on && note.parentElement !== head) head.append(note);
   if (!on && note.parentElement === head) $('files-h').after(note);
   $('workflow-title').textContent = on && step ? step.title : '';
@@ -1497,6 +1542,7 @@ function workflowMode(step) {
       if (n.top < r.top || n.bottom > r.bottom) list.scrollTop += n.top - r.top - r.height / 3;
     }
   }
+  expertFold();   // a scholar-facing workflow begun or left: step 2's other parts folded away, or put back
 }
 /** The label that says which step a result shown was of (#result-of), or none. */
 function resultOf(label) { $('result-of').textContent = label || ''; $('result-of').hidden = !label; }
@@ -1523,6 +1569,8 @@ const stepHead = () => (document.body.dataset.workflow && !$('workflow-head').hi
  * The view is scrolled to `from` (the heading's section, unless given: a workflow's title above it).
  */
 function showNext(heading, { asked = false, from } = {}) {
+  // Step 2's own heading is not shown at a step of a scholar-facing workflow that narrows to no tool (expertFold): the step's title stands for it.
+  if (heading === $('action-h') && heading.hidden && !$('workflow-title').hidden) heading = $('workflow-title');
   if (!heading || !heading.getClientRects().length) return;
   const a = document.activeElement;
   // A field being typed in (the pasted list in step 1, a field of Options) keeps the focus, and the view.
@@ -1813,6 +1861,7 @@ function candidateHtml(c, i) {
     + `<div class="acts">${btn('match', 'Same place', 'a')}${btn('not-this', 'Not this one', 'n')}${btn('distinct', 'Different places', 'd')}`
     + (d ? `<button type="button" data-act="undo" data-id="${id}">Undo</button>` : '')
     + `<button type="button" data-act="flag" data-id="${id}" aria-pressed="${!!c.flagged}">${escapeHtml(c.flagged ? RW.flagged : RW.flag)}</button>` + '</div>'
+    + (i === current ? `<p class="acts-hint">${escapeHtml(DECISION_HINT)}</p>` : '')
     + `<form class="note" data-id="${id}"><label>${escapeHtml(RW.noteLabel)} <input type="text" name="note" value="${escapeHtml(c.note || '')}" autocomplete="off"></label>`
     + `<button type="submit">${escapeHtml(RW.noteSave)}</button></form>`
     + (basisFor === c.id ? `<form class="basis" data-id="${id}"><label for="basis-input">${escapeHtml(W.basisLabel)}</label>`
@@ -2462,7 +2511,10 @@ const aatName = (id) => (typeof id === 'string' && /^aat:\d+$/.test(id) && kindL
 function kindHtml(c) {
   askKindLabels();
   const types = candidateTypes(c), chip = (t) => `<code class="code-chip">${escapeHtml(t)}</code>`;
-  const items = types.map((t) => (aatName(t) ? `${escapeHtml(aatName(t))} ${chip(t)}` : chip(t)));
+  // By its name where there is one (WHG's label for an AAT id; kinds.js typeWord for a Wikidata class or a source's own word),
+  // the code small beside it; a code with no name is shown as one, and said to be ("type code").
+  const named = (t) => aatName(t) || typeWord(t);
+  const items = types.map((t) => (named(t) ? `<span class="kind-name">${escapeHtml(named(t))}</span> ${chip(t)}` : `<span class="type-code">${escapeHtml(TYPE_CODE)} ${chip(t)}</span>`));
   const place = work.places[c.candidate_source], fit = kindFit(place, types);
   // The place's kind in the dataset's own word where it has one: a type given by address and label is one type.
   const own = Array.isArray(place?.types) && place.types.length === 1 ? place.types[0] : null;

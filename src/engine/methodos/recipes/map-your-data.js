@@ -20,7 +20,10 @@ const result = 'see.dataset';
 export default {
   key: 'map-your-data',
   title: 'Map your data',
-  version: 6,   // 6 (18 November 2026): the result may be written as one flat table (table-flat) or as Linked Places Format v2 for WHG (lpf2), the two offered first; 5 (18 November 2026): the matched places' locations taken in a step of their own (locate), and the places seen on a map before they are written out (see); 4 (13 November 2026): the dataset step's standInRegions and the mint step's base, for a table with regions and no base address
+  // The scholar-facing workflow: its steps are named by what the scholar does, the page says each without its tool's name in
+  // the headline (the tool's name small, beside it), and puts what is not the step's own behind "More options (for experts)".
+  plain: true,
+  version: 7,   // 7 (18 November 2026): the steps named by what the scholar does, in plain words (and `plain`: the page names no tool in the step's headline); 6 (18 November 2026): the result may be written as one flat table (table-flat) or as Linked Places Format v2 for WHG (lpf2), the two offered first; 5 (18 November 2026): the matched places' locations taken in a step of their own (locate), and the places seen on a map before they are written out (see); 4 (13 November 2026): the dataset step's standInRegions and the mint step's base, for a table with regions and no base address
   files: {
     files: { words: 'The table of place names (a spreadsheet: .xlsx or .csv)', types: ['files'] },
   },
@@ -45,21 +48,21 @@ export default {
     maintainers: { question: 'Who maintains the permanent addresses on w3id.org (GitHub user names)?', kind: 'list', optional: true },
   },
   steps: [
-    { id: 'columns', op: 'read.columns', title: 'Match the columns to PLATO', from: { files: '$files' } },
+    { id: 'columns', op: 'read.columns', title: 'Check your columns', from: { files: '$files' } },
     { id: 'check', op: 'check', title: 'Check the table', from: { files: '$files', mapping: 'columns.mapping' } },
-    { id: 'dataset', op: 'convert', title: 'Make a PLATO dataset of it', from: { files: '$files', mapping: 'columns.mapping' }, options: { target: 'plato-json', base: '$base', standInRegions: '$has-regions' } },
-    { id: 'regions', op: 'lookup.levels', title: 'Identify the regions, the widest first', from: { subjects: 'dataset.dataset' }, when: 'has-regions' },
-    { id: 'lookup', op: 'lookup', title: 'Look the places up in the World Historical Gazetteer', from: { subjects: 'dataset.dataset', work: 'regions.work' } },
-    { id: 'review', op: 'review', title: 'Decide which candidates are the same place', from: { work: 'lookup.work' } },
+    { id: 'dataset', op: 'convert', title: 'Prepare your places', from: { files: '$files', mapping: 'columns.mapping' }, options: { target: 'plato-json', base: '$base', standInRegions: '$has-regions' } },
+    { id: 'regions', op: 'lookup.levels', title: 'Find the regions your places are in, the widest first', from: { subjects: 'dataset.dataset' }, when: 'has-regions' },
+    { id: 'lookup', op: 'lookup', title: 'Find your places in WHG', from: { subjects: 'dataset.dataset', work: 'regions.work' } },
+    { id: 'review', op: 'review', title: 'Decide which matches are right', from: { work: 'lookup.work' } },
     { id: 'wikidata', op: 'wikidata.items', title: 'Create Wikidata items for the places no gazetteer knows', from: { subjects: 'dataset.dataset', work: 'review.work' }, when: 'will-mint' },
-    { id: 'apply', op: 'apply', title: 'Record the decisions in the dataset', from: { subjects: 'dataset.dataset', work: 'wikidata.work ?? review.work' }, when: '!has-regions' },
-    { id: 'relate', op: 'relate.containment', title: 'Record the decisions, with the region each place is in', from: { subjects: 'dataset.dataset', work: 'wikidata.work ?? review.work' }, options: { base: '$base' }, when: 'has-regions' },
-    { id: 'locate', op: 'locate', title: 'Use the locations of the places you matched', from: { dataset: decided, work: 'wikidata.work ?? review.work' } },
+    { id: 'apply', op: 'apply', title: 'Save your decisions', from: { subjects: 'dataset.dataset', work: 'wikidata.work ?? review.work' }, when: '!has-regions' },
+    { id: 'relate', op: 'relate.containment', title: 'Save your decisions, with the region each place is in', from: { subjects: 'dataset.dataset', work: 'wikidata.work ?? review.work' }, options: { base: '$base' }, when: 'has-regions' },
+    { id: 'locate', op: 'locate', title: 'Use the locations of the matches', from: { dataset: decided, work: 'wikidata.work ?? review.work' } },
     { id: 'place', op: 'place', title: 'Draw or trace the places still without a location', from: { dataset: located }, when: 'will-draw' },
     { id: 'again', op: 'check', title: 'Check the result', from: { files: placed } },
-    { id: 'compare', op: 'compare', title: 'Compare the result with the dataset made from the table', from: { earlier: 'dataset.dataset', later: placed } },
+    { id: 'compare', op: 'compare', title: 'Compare the result with what you began with', from: { earlier: 'dataset.dataset', later: placed } },
     { id: 'see', op: 'map.view', title: 'See your places on a map', from: { dataset: placed } },
-    { id: 'out', op: 'convert', title: 'Write it out', from: { files: result }, options: { target: '$target' } },
+    { id: 'out', op: 'convert', title: 'Download your results', from: { files: result }, options: { target: '$target' } },
     { id: 'mint', op: 'publish.mint', title: 'Give every place and source a permanent address', from: { dataset: result }, options: { release: '$release', base: '$base' }, when: 'will-publish' },
     { id: 'report', op: 'publish.report', title: 'Write the FAIR report', from: { dataset: 'mint.dataset' }, options: { release: '$release' }, when: 'will-publish' },
     { id: 'site', op: 'publish.site', title: 'Build the web site', from: { dataset: 'mint.dataset' }, options: { release: '$release', repo: '$repo' }, when: 'will-publish' },

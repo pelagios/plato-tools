@@ -20,10 +20,11 @@ export const lower = (t) => (/^[A-Z]{2,}\b/.test(t) ? t : t.charAt(0).toLowerCas
 
 /**
  * Where a workflow is, as the tracker says it, the centre's title and the strip at a phone's width show it:
- * "Step 2 of 10: Elenchos, check the table" (`n` counts from 0; no tool, no tool's name).
+ * "Step 2 of 10: Elenchos, check the table" (`n` counts from 0; no tool, no tool's name). In a workflow in plain
+ * words (`plain`, a recipe's own), the act alone, as it is titled, whatever its tool: "Step 2 of 11: Check the table".
  */
-export function whereWords(n, of, tool, title) {
-  return `Step ${n + 1} of ${of}: ${tool ? `${tool}, ` : ''}${lower(title)}`;
+export function whereWords(n, of, tool, title, plain = false) {
+  return `Step ${n + 1} of ${of}: ${plain ? title : `${tool ? `${tool}, ` : ''}${lower(title)}`}`;
 }
 
 /** The files chosen in step 1, in the one line it folds to: their names (or how many) and size. */
