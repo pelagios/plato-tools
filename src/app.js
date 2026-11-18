@@ -47,7 +47,7 @@ import { workflowStore } from './methodos/store.js';
 import { whgProjects } from './methodos/whg.js';
 import { workbench, sharedToken, isId } from './engine/workbench.js';
 import { chosenWords, wentOn, resultLabel } from './methodos/layout.js';
-import { outcome, targetList, PLAIN_TOOLS, toolTip, PLAIN_REPORT, decisionsSummary, DECISION_HINT, COUNTRY_HINT, TYPE_CODE, EXPERT_SUMMARY, EXPERT_NOTE } from './engine/plain.js';
+import { outcome, targetList, PLAIN_TOOLS, PLAIN_REPORT, decisionsSummary, DECISION_HINT, COUNTRY_HINT, TYPE_CODE, EXPERT_SUMMARY, EXPERT_NOTE } from './engine/plain.js';
 import { isCountryHeading } from './engine/hermes/columns.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
@@ -355,8 +355,11 @@ function renderReport(report) { $('report').innerHTML = reportHtml(report, state
 function renderOutcome(report) {
   const o = state.action === 'convert' ? outcome(report) : null, box = $('outcome');
   box.hidden = !o; box.dataset.kind = o?.kind || ''; box.dataset.tone = o?.tone || '';
+  // "No problems found." directly above "None of the 6 places would be accepted by WHG" would be read as WHG's word: it is said whose rules found none.
+  const found = $('summary').querySelector('.good');
+  if (o?.kind === 'whg' && o.tone === 'warn' && found) { found.textContent = "The file was written, and by PLATO's rules nothing is wrong with it."; found.dataset.said = 'plato-rules'; }
   if (!o) { box.innerHTML = ''; return; }
-  const examples = (list) => (list.length ? `<span class="outcome-examples">For example: ${list.slice(0, 3).map((e) => escapeHtml(e)).join('; ')}${list.length > 3 ? '; …' : ''}.</span>` : '');
+  const examples = (list) => (list.length ? `<span class="outcome-examples">For example: ${list.slice(0, 3).map((e) => escapeHtml(e)).join('; ')}${list.length > 3 ? ' (more in the report below)' : ''}.</span>` : '');
   box.innerHTML = `<p class="outcome-head ${o.tone}">${escapeHtml(o.head)}</p>`
     + (o.reasons.length ? `<ul class="outcome-reasons">${o.reasons.map((r) => `<li><strong>${escapeHtml(r.words)}</strong> ${examples(r.examples)}${r.remedy ? ` <span class="outcome-remedy">${escapeHtml(r.remedy)}</span>` : ''}</li>`).join('')}</ul>` : '')
     + o.notes.map((w) => `<p class="outcome-note">${escapeHtml(w)}</p>`).join('')
@@ -1107,7 +1110,7 @@ let tool = null;
 // Hermes chosen: it narrows nothing, and is not kept in the address, but its card is marked and #for-tool
 // says what it reads, until another card or a file's action is chosen.
 let hermesChosen = false;
-const HERMES = 'For <strong>Read my table</strong> <span class="greek-name" data-tip="Hermes: the tool that does this">Hermes</span>, the readers: your file is read when you drop it, whether annotations from Recogito, a TEI edition, a CSV file or workbook, or GeoJSON. Then choose what to do with it.';
+const HERMES = 'For <strong>Read my table</strong> <span class="greek-name">Hermes</span>, the readers: your file is read when you drop it, whether annotations from Recogito, a TEI edition, a CSV file or workbook, or GeoJSON. Then choose what to do with it.';
 let workflowStep = null;   // the step of a Methodos workflow the user is at, if they follow one: { id, n, title, tool, text, link, op }
 // The result of the run that did an earlier step, once the workflow has gone on (workflowMode): `lingering`
 // while it is still shown, labelled as that step's, until the user first acts on the new step; then `parked`,
@@ -1192,10 +1195,10 @@ function chooseTool(key) {
   if (tool && isPlain()) {
     // A scholar-facing workflow: the step is said in its title; here only where the guide explains it, and the tool's own name, small.
     const [anchor, words] = TOOLS[tool].guide, name = TOOLS[tool].name;
-    note.insertAdjacentHTML('beforeend', `<a href="${GUIDE}#${anchor}">${words}</a> <span class="greek-name" data-tip="${escapeHtml(toolTip(name))}">${escapeHtml(PLAIN_TOOLS[name])} · ${name}</span>`);
+    note.insertAdjacentHTML('beforeend', `<a href="${GUIDE}#${anchor}">${words}</a> <span class="greek-name">${escapeHtml(PLAIN_TOOLS[name])} · ${name}</span>`);
   } else if (tool) {
     const [anchor, words] = TOOLS[tool].guide, name = TOOLS[tool].name;
-    note.insertAdjacentHTML('beforeend', `For <strong>${escapeHtml(PLAIN_TOOLS[name])}</strong> <span class="greek-name" data-tip="${escapeHtml(toolTip(name))}">${name}</span>, ${escapeHtml(TOOLS[tool].what)}. <a href="${GUIDE}#${anchor}">${words}</a>. `);
+    note.insertAdjacentHTML('beforeend', `For <strong>${escapeHtml(PLAIN_TOOLS[name])}</strong> <span class="greek-name">${name}</span>, ${escapeHtml(TOOLS[tool].what)}. <a href="${GUIDE}#${anchor}">${words}</a>. `);
     const all = document.createElement('button');
     all.type = 'button'; all.className = 'link'; all.id = 'every-action'; all.textContent = 'Show every action';
     all.onclick = () => { chooseTool(null); setHash(null); focusStep1(); };

@@ -240,8 +240,8 @@ a:visited { color: var(--accent); }
 .tools.choose .tool:has(.tool-link[aria-current]) { background: color-mix(in srgb, var(--gold) 26%, var(--bg)); }
 .tool.coming { color: var(--muted); border: 1px dashed var(--soon); background: transparent; }
 .tool.coming h4 { color: var(--muted); }
-.badge { position: absolute; top: .55rem; right: .6rem; font-size: .72rem; letter-spacing: .05em; text-transform: uppercase; border: 1px solid var(--soon); border-radius: 999px; padding: .05rem .5rem; color: var(--soon); }
-.badge.partly { background: var(--gold); border-color: var(--gold-edge); color: var(--pupil); }
+.tool .badge { position: absolute; top: .55rem; right: .6rem; font-size: .72rem; letter-spacing: .05em; text-transform: uppercase; border: 1px solid var(--soon); border-radius: 999px; padding: .05rem .5rem; color: var(--soon); }
+.tool .badge.partly { background: var(--gold); border-color: var(--gold-edge); color: var(--pupil); }
 .follow { display: inline-block; margin-top: .45rem; font-size: .88rem; color: var(--soon); }
 /* Each name carries a tooltip saying why it was chosen; dotted, as abbreviations are, and reachable
    by keyboard as well as by pointer. */
@@ -295,7 +295,8 @@ a:visited { color: var(--accent); }
 .columns-table caption { text-align: left; color: var(--muted); padding-bottom: .35rem; }
 .columns-table th, .columns-table td { border-top: 1px solid var(--line); padding: .4rem .5rem .4rem 0; text-align: left; vertical-align: top; }
 .columns-table thead th { border-top: 0; font-weight: 700; }
-.columns-table th[scope=row] code { overflow-wrap: anywhere; }
+.columns-table th[scope=row] { min-width: 5.5rem; max-width: 12rem; }
+.columns-table th[scope=row] code { overflow-wrap: break-word; }
 .columns-table select { max-width: 14rem; }
 .columns-table .examples { list-style: none; margin: 0; padding: 0; font: .8rem/1.45 var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
 .columns-table em { color: var(--muted); }
@@ -958,3 +959,49 @@ h2 .greek-name { margin-left: .45rem; }
 details.item .in-full { margin: .3rem 0 .4rem; color: var(--muted); font-size: .92rem; }
 /* A heading put away (step 2's own, at a step of a scholar-facing workflow): h2 is a flex row, which [hidden] alone does not hide. */
 h2[hidden] { display: none; }
+
+/* ---- Map your data, looked at (18 November 2026): what was broken or ragged on its screens ---------------- */
+/* The review's badges on a candidate: that it passes WHG's guard (and on what), or why not; that it has namesakes. In the
+   card's own flow, small pills; green for a pass, the warning colour for namesakes, never colour alone (the words say it). */
+.candidate .badge { display: inline-block; margin: .3rem .4rem .1rem 0; padding: .05rem .55rem; border: 1px solid var(--line); border-radius: 999px; font-size: .82rem; line-height: 1.5; color: var(--muted); background: var(--card); }
+.candidate .badge.good { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 55%, var(--line)); font-weight: 600; }
+.candidate .badge.namesakes { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); }
+/* The review's two bars of controls: one row each, wrapping as a row, every label beside its own list. */
+.review-bar { gap: .5rem .7rem; margin-bottom: .5rem; }
+.review-bar #review-progress { flex-basis: 100%; margin: 0 0 .15rem; }
+.review-bar label, .review-bulk label { color: var(--muted); font-size: .95rem; }
+.review-bar select, .review-bulk select { max-width: 100%; min-height: 2.25rem; }
+.review-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .7rem; margin: 0 0 .6rem; }
+.review-bulk #bulk-result { flex-basis: 100%; margin: .1rem 0 0; }
+.review-bulk #bulk-result:empty { display: none; }
+/* The place under review: its name, then what the data says of it, with room before its candidates. */
+#review-place > h3 { margin-top: 1rem; }
+.candidate .acts button { min-height: 2.5rem; }
+.candidate form.note { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin-top: .5rem; }
+.candidate form.note label { flex: 1 1 16rem; display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .5rem; color: var(--muted); font-size: .9rem; }
+.candidate form.note input { flex: 1 1 10rem; min-width: 0; min-height: 2.25rem; padding: .2rem .5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); font: inherit; }
+/* A step's tool, small, after what the step does: it never starts a line of its own with a gap above it. */
+.track.plain .track-body { line-height: 1.35; }
+.track.plain .track-tool { margin-left: .15rem; }
+/* The step's own controls in the tracker (the matched places' locations): the choice, who it is recorded for, then the buttons. */
+.methodos-locate-unknown label { display: flex; align-items: flex-start; gap: .45rem; line-height: 1.4; }
+.methodos-locate-unknown input { flex: none; margin: .22rem 0 0; }
+.methodos-locate-unknown .warn { font-size: .92rem; line-height: 1.4; }
+.methodos-locate-who { color: var(--muted); }
+.methodos-locate-who.warn { color: var(--warn); }
+/* Below the width at which the tools are a rail, a scholar-facing workflow shows each tool as it is in the rail, its name and
+   its own name alone: the sentences (which name the Data Cube and the rest) are under "More", and the page ends sooner. */
+@media (width < 78rem) {
+  body[data-plain] #toolbox .tool-link > p:not(.label), body[data-plain] #toolbox .tool.coming > p:not(.label), body[data-plain] #toolbox .tool .go { display: none; }
+  body[data-plain] #toolbox .tool .more-lede { display: block; }
+}
+/* That step's buttons under its title in the centre too, at a desk's width: what it would do is said there, and in the rail its
+   buttons come after the counts, the choice and its warning, which at 900 px of height is below what the rail shows. */
+@media (min-width: 60rem) {
+  body:has(#methodos-track li[data-step="locate"][aria-current]) .workflow-head .step-actions:not([hidden]) { display: flex; margin-top: .7rem; }
+}
+/* The review's two bars in one size of type, so that their lists and the bulk button sit on one line of the same height. */
+.review-bar select, .review-bulk select, .review-bulk button { font-size: .95rem; }
+.review-bulk button { min-height: 2.25rem; padding: .25rem .8rem; }
+/* A row of step 2 put away (the preview's, for a file that has none) stays put away: .actions is a flex row, which [hidden] alone does not hide. */
+.actions[hidden] { display: none; }
