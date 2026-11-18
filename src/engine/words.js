@@ -665,6 +665,69 @@ export const choraAdoptGeometryNote = ({ licence, whgLicence, fetched, fallback 
   + ' coordinates rounded to 7 decimal places; in PLATO tools (Chora). '
   + (linked ? 'The identity with this record was already recorded in the dataset.' : 'The identity with this record is a separate attestation.');
 };
+/**
+ * The notes of a location taken with those of the other matched places, in one go (chora/locate.js). `r` names the
+ * record (as choraAdoptGeometryNote's); `licence` its source's SPDX id or null; `answered` when the gazetteer gave
+ * the answer the location was in (with `fromRecord`, when the record itself was read); `identityType` how the
+ * review recorded the match, which this does not change; `batch` the one go it was part of; `unknownBy` the name of
+ * whoever chose to use a source whose licence is not stated, for this batch (recorded here, on the location itself).
+ */
+export const locateGeometryNote = ({ licence, whgLicence, answered, fromRecord = false, identityType, batch, unknownBy = null, ...r }) => {
+  const record = recordWords(r, [`licence ${licence || 'not stated'}`, `World Historical Gazetteer's own licence: ${whgLicence || 'not stated'}`]);
+  return `${fromRecord ? `Copied from World Historical Gazetteer record ${record}` : `World Historical Gazetteer's representative point for record ${record}, copied from its answer to the lookup`}, of ${String(answered).slice(0, 10)};`
+    + ` coordinates rounded to 7 decimal places; in PLATO tools, with the locations of the other matched places (batch ${batch}).`
+    + ` The review had recorded this record as a match (${identityType}); only the location is added here, and how the two are matched is not changed.`
+    + (unknownBy ? ` The gazetteer does not state a licence for this record's source: ${unknownBy} chose to use it all the same, for this batch.` : '');
+};
+const nPlaces = (n, word = 'place') => `${n.toLocaleString('en-GB')} ${n === 1 ? word : `${word}s`}`;
+/**
+ * What taking the matched places' locations would do, in one sentence, before anything is done (chora/locate.js,
+ * the counts of a plan): "Use the locations of 5 of 7 matched places; 1 has no location on record; 1 left out
+ * because its licence is not stated." Every place matched is in exactly one of the counts.
+ */
+export function locateWords(c) {
+  const n = (k) => c?.[k] || 0, s = (k, one, many) => (n(k) === 1 ? one : many);
+  const head = n('use') ? `Use the locations of ${n('use').toLocaleString('en-GB')} of ${nPlaces(n('matched'), 'matched place')}`
+    : n('matched') ? `None of the ${nPlaces(n('matched'), 'matched place')} has a location that can be used` : 'No place was matched in the review, so there is no location to use';
+  const parts = [
+    n('located') ? `${n('located')} already ${s('located', 'has', 'have')} a location` : null,
+    n('noLocation') ? `${n('noLocation')} ${s('noLocation', 'has', 'have')} no location on record` : null,
+    n('unknownLicence') ? `${n('unknownLicence')} left out because ${s('unknownLicence', 'its', 'their')} licence is not stated` : null,
+    n('notRedistributable') ? `${n('notRedistributable')} left out because ${s('notRedistributable', 'its source does', 'their sources do')} not allow copying` : null,
+    n('leftForYou') ? `${n('leftForYou')} left for you to place by hand (more than one possible location, or a match that is not the same place)` : null,
+    n('notRecorded') ? `${n('notRecorded')} skipped because ${s('notRecorded', 'its match is', 'their matches are')} not recorded in this dataset` : null,
+  ].filter(Boolean);
+  return [head, ...parts].join('; ') + '.';
+}
+/** What the step that takes the matched places' locations says (chora/locate.js; src/methodos/page.js). */
+export const LOCATE_TEXT = {
+  'work-unreadable': 'The review cannot be read, so no location was taken',
+  'no-name': 'Each location is recorded in the name of whoever took it: give your name (as for the review), and try again. Nothing was written.',
+  'bad-name': 'The name given cannot be recorded with the locations, so nothing was written',
+  'dataset-not-read': 'The dataset could not be read to the end, so no location was taken',
+  'not-kept': 'The dataset written with the locations did not pass the check that nothing else in it changed, so it is not kept',
+  nothing: 'No matched place has a location that can be used, so the dataset is as it was.',
+  located: 'Already has a location, so nothing was added.',
+  noLocation: 'The gazetteer gave no location for the record matched.',
+  unknownLicence: 'Left out: the gazetteer does not state a licence for the record\'s source.',
+  notRedistributable: 'Left out: the record\'s source does not allow it to be copied.',
+  leftForYou: 'Left for you to place by hand.',
+  notRecorded: 'Skipped: the match is not recorded in this dataset as one of this review\'s.',
+  why: {
+    'several-matches': 'more than one record was matched, each with a location',
+    'several-locations': 'the record gives more than one location',
+    'bad-location': 'the record\'s location cannot be held as it is',
+    related: 'the record was matched as related, not as the same place',
+    'no-record': 'the record matched has no address in the gazetteer',
+  },
+  /** Beside the box that lets a source with no stated licence be used. */
+  unknownLabel: (n) => `Use ${n === 1 ? 'it' : 'them'} anyway (recorded)`,
+  unknownWarning: 'The gazetteer does not say under what licence these may be reused. If you use them, your name and this choice are written into the note of each of those locations, where anyone reusing your data can read it.',
+  go: (n) => `Use the locations of ${nPlaces(n)}`,
+  skip: (n) => (n ? 'Go on without them' : 'Go on'),
+  done: (n, name, unknown) => `The locations of ${nPlaces(n)} were added, each with where it came from (${name}).${unknown ? ` ${unknown} of them from a source whose licence is not stated, by your choice, which is recorded with each.` : ''}`,
+  undone: (title) => `The locations are taken out again: the workflow is back at “${title}”, with the dataset as it was before them.`,
+};
 /** What an adoption tells the person adopting, beside the attestations (adopt.js, notes), by kind. */
 export const CHORA_ADOPT_TEXT = {
   'already-linked': 'This place is already recorded as the same as this record, so only its location is added.',

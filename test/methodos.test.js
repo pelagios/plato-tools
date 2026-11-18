@@ -125,11 +125,15 @@ test('every transition that does not apply throws, and a transition never change
 
 test('a step not available yet is skipped at the start, with its reason, and the workflow runs on past it; refused only when asked to be', () => {
   // Stephen's rule: a step whose operation is not available is skipped, never refused (unless asked). The
-  // shipped recipes have none now (the regions step is available), so a recipe of its own names one: 'adopt'.
-  assert.notEqual(OPERATIONS.adopt.available, true);
+  // shipped recipes have none now (the regions step is available; so, since 18 November 2026, is the step that takes the
+  // matched places' locations, once the example here), so a recipe of its own names one: making a dataset of the places
+  // found in a text ('text.dataset'), from a finding of them ('text.find') that is not available either.
+  assert.notEqual(OPERATIONS['text.dataset'].available, true);
+  assert.equal(OPERATIONS.locate.available, true);
   const R = recipe([
     { id: 'dataset', op: 'convert', from: { files: '$files' }, options: { target: 'plato-json' } },
-    { id: 'adopt', op: 'adopt', title: 'Adopt the locations', from: { dataset: 'dataset.dataset' }, when: 'adopt' },
+    { id: 'find', op: 'text.find', title: 'Find the places', from: { files: '$files' }, when: 'adopt' },
+    { id: 'adopt', op: 'text.dataset', title: 'Make a dataset of them', from: { work: 'find.work' }, when: 'adopt' },
     { id: 'again', op: 'check', from: { files: 'adopt.dataset ?? dataset.dataset' } },
   ], { asks: { adopt: { question: 'Adopt?', kind: 'yes-no' } } });
   const files = [ref('files', 'places.csv')];
@@ -138,7 +142,7 @@ test('a step not available yet is skipped at the start, with its reason, and the
   const adopt = s.steps.find((x) => x.id === 'adopt');
   // Skipped, and why (the presence): the operation's own reason, not run as something else.
   assert.equal(adopt.state, 'skipped');
-  assert.equal(adopt.unavailable, OPERATIONS.adopt.available);
+  assert.equal(adopt.unavailable, OPERATIONS['text.dataset'].available);
   // A step left out by the answers is skipped too, but has no reason of that kind (the absence, beside the presence above).
   assert.equal(start(R, { adopt: false }, { files }).steps.find((x) => x.id === 'adopt').unavailable, undefined);
   let w = complete(next(s), 'dataset', { dataset: [ref('dataset', 'd.json')] });
@@ -149,7 +153,7 @@ test('a step not available yet is skipped at the start, with its reason, and the
   assert.equal(deserialise(serialise(w)).steps.find((x) => x.id === 'adopt').unavailable, adopt.unavailable);
   assert.equal(invalidate(complete(w, 'again', {}), 'dataset').steps.find((x) => x.id === 'adopt').state, 'skipped');
   // Refused at the start only when asked, in the words it had before.
-  assert.throws(() => start(R, { adopt: true }, { files }, { unavailable: 'refuse' }), /"Adopt the locations" is not available yet\. Adopting a match's location is done by hand/);
+  assert.throws(() => start(R, { adopt: true }, { files }, { unavailable: 'refuse' }), /"Find the places" is not available yet\. Finding places in a text is deferred/);
   assert.doesNotThrow(() => start(R, { adopt: false }, { files }, { unavailable: 'refuse' }));
   assert.throws(() => start(R, { adopt: true }, { files }, { unavailable: 'run' }), /'skip' or 'refuse'/);
   // Map your data with regions: the regions step and the step that records them are pending, not skipped, and nothing is unavailable.

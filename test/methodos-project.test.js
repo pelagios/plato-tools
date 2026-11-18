@@ -131,7 +131,7 @@ test('the manifest round trip: written and read back, every part is what was put
   }
   // Read from bytes in memory too (the tests' source), as from the Blob.
   assert.deepEqual((await readProject(blobSource(bytes), { sink: memorySink })).record, p.record);
-  assert.match(describe(r).join('\n'), /A PLATO tools project, format version 1\.1.*\n.*"Parishes", following map-your-data.*4 of 9 steps done, at "Decide which candidates are the same place"/);
+  assert.match(describe(r).join('\n'), /A PLATO tools project, format version 1\.1.*\n.*"Parishes", following map-your-data.*4 of 11 steps done, at "Decide which candidates are the same place"/);
 });
 
 test('a review saved in a project keeps what its Finishes recorded (finished) and the choice for drafts (draft_answers), and a bad one is refused', async () => {

@@ -100,6 +100,8 @@ function onMessage({ data }) {
   else if (data.type === 'columns') onColumns(data);
   else if (data.type === 'tei-keys') onTeiKeys(data);
   else if (data.type === 'places') onPlaces(data);   // Krisis: gazetteer lookup
+  else if (data.type === 'located') locating?.settle(data);   // the workflow's step that takes the matched places' locations (locateRun)
+  else if (data.type === 'error' && locating) locating.settle(null, new Error(data.message));
   else if (data.type === 'wikidata-collect') onCollected(data);   // Krisis: Wikidata items
   else if (data.type === 'error' && placesWaiting) onPlaces({ subjects: null, places: null, reason: data.message });
   else if (data.type === 'error' && collecting) onCollected({ records: null, gazetteer: null, reason: data.message });   // the panel asks again at its next draw
@@ -303,6 +305,19 @@ function tablesFolder() {
   const [dir] = dirs;
   return dirs.size === 1 && dir ? dir.split('/').pop() : undefined;
 }
+// The workflow's step that takes the matched places' locations (src/engine/chora/locate.js), run from the tracker
+// (src/methodos/page.js): the dataset and the review it takes are the workflow's own, held in this browser, not the
+// files chosen in step 1, so it is not one of start()'s runs. One at a time with them all the same: the engine runs
+// one command at a time (worker.js). A promise of the engine's result ({ report, outputs, plan, withUnknown, batch }).
+let locating = null;
+function locateRun(list, workText, options = {}) {
+  if (busy || looking || locating) return Promise.reject(Object.assign(new Error('Another run is under way: wait for it to end, and try again.'), { kind: 'busy' }));
+  busy = true; buttons(true);
+  return new Promise((resolve, reject) => {
+    locating = { settle: (data, err) => { locating = null; busy = false; buttons(false); if (err) reject(err); else resolve(data); } };
+    worker.postMessage({ cmd: 'locate', subjects: list, work: workText, options });
+  });
+}
 function onProgress(p) {
   $('phase').textContent = progressText(p);
   Object.assign(state, { progress: p });
@@ -371,6 +386,7 @@ function fail(message, words) {
   // said "Build with -sASSERTIONS for more info"): nothing is stuck, and the button pressed again runs.
   // And two more: a browser without the storage the engine writes through (said at load too, engineProbe), and the
   // browser's allowance used up while the result was written (output-file.js), where the result was once cut short.
+  if (locating) { locating.settle(null, new Error(words || message)); return; }   // the tracker says it, at the step
   words ||= storageRefused(message) ? NO_STORAGE : engineStorageLacking(message) ? NO_ENGINE_STORAGE : noRoom(message) ? NO_ROOM : downloadFailed(message) ? NOT_DOWNLOADED : undefined;
   busy = false;
   engineReady(false);
@@ -1333,6 +1349,10 @@ methodos = mountMethodos({
     // The matching a workflow's step kept, shown again for the table chosen, as "Use a saved matching…" shows one: not while the file is still being looked at.
     applyMapping: (m, name) => { if (!isTable(input) || state.phase === 'detecting') return false; requestColumns(m, name); return true; },
     review: () => (work ? { text: serialiseWork(work), name: workName } : null),
+    // The matched places' locations (the step "Use the locations of the places you matched"): counted, then taken, by the engine;
+    // and who takes them, the reviewer's name the page already holds (asked once, for the review), or null with why.
+    locate: (list, workText, options) => locateRun(list, workText, options),
+    contributor: () => (reviewer() && !reviewerProblem() ? reviewer() : null),
     reviewShown: () => !!work && !$('review').hidden,
     openWork: (f) => resume(f),
     pickWork: () => $('workfile').click(),

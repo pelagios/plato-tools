@@ -16,7 +16,9 @@ function atPlace() {
   const MAP = RECIPES['map-your-data'];
   let s = runner.start(MAP, { 'has-regions': false, 'will-draw': true, 'will-publish': false, target: 'lpf' }, { files: [OWN] });
   for (const [id, out] of [['columns', { mapping: [ref('mapping', 'columns.json', 'b')] }], ['check', {}], ['dataset', { dataset: [ref('dataset', 'places.json', 'c')] }],
-    ['lookup', { work: [ref('work.krisis', 'w.krisis.json', 'd')] }], ['review', { work: [ref('work.krisis', 'w.krisis.json', 'e')] }], ['apply', { dataset: [ref('dataset', 'applied.json', 'f')] }]])
+    ['lookup', { work: [ref('work.krisis', 'w.krisis.json', 'd')] }], ['review', { work: [ref('work.krisis', 'w.krisis.json', 'e')] }], ['apply', { dataset: [ref('dataset', 'applied.json', 'f')] }],
+    // The matched places' locations, none taken here: the dataset handed on as it was (the step's own tests: test/methodos-locate.test.js).
+    ['locate', { dataset: [ref('dataset', 'applied.json', 'f')] }]])
     s = runner.complete(runner.next(s), id, out);
   return s;
 }
@@ -32,6 +34,15 @@ test('the step a workflow is at, and the file chosen again for it: the user\'s o
   const p = atPlace();
   assert.equal(stepAt(p).id, 'place');
   assert.deepEqual(currentInput(p), [ref('dataset', 'applied.json', 'f')], 'Chora\'s step: the dataset the decisions were recorded in');
+  // The step before it, which takes the matched places' locations, works on the workflow's own files, held in the browser: nothing is chosen in step 1 for it.
+  const l = runner.invalidate(p, 'locate');
+  assert.equal(stepAt(l).id, 'locate');
+  assert.equal(currentInput(l), null);
+  // Seen on a map before it is written out: the dataset as it then is (here the one saved on the map at "place") is chosen again, so that the map shows it.
+  let v = runner.complete(runner.next(p), 'place', { dataset: [ref('dataset', 'applied.chora.json', '9')] });
+  for (const id of ['again', 'compare']) v = runner.complete(runner.next(v), id, {});
+  assert.equal(stepAt(v).id, 'see');
+  assert.deepEqual(currentInput(v), [ref('dataset', 'applied.chora.json', '9')]);
   // A review's work file is not chosen in step 1: nothing to choose again (the control: a step that has one, above).
   let r = runner.complete(runner.next(checking), 'check', {});
   r = runner.complete(runner.next(r), 'dataset', { dataset: [ref('dataset', 'places.json', 'c')] });
@@ -49,7 +60,8 @@ test('what a workflow keeps is the user\'s own file and every file its steps mad
   const p = atPlace();
   assert.deepEqual(startFiles(p), [OWN]);
   const made = madeBy(p).map((x) => x.name);
-  assert.deepEqual(made, ['columns.json', 'places.json', 'w.krisis.json', 'w.krisis.json', 'applied.json']);
+  // (applied.json twice: recorded by one step, and handed on as it was by the step that takes the matched places' locations, none taken here.)
+  assert.deepEqual(made, ['columns.json', 'places.json', 'w.krisis.json', 'w.krisis.json', 'applied.json', 'applied.json']);
   assert.deepEqual(keptBy(p).map((x) => x.name), ['places.csv', ...made]);
   // The control: before the user's file was kept too, what was let go was the steps' alone.
   assert.ok(!madeBy(p).some((x) => x.sha256 === OWN.sha256));

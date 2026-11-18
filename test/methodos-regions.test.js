@@ -98,6 +98,9 @@ async function begun({ host, adapters, answers = ANSWERS } = {}) {
   return { host, ...d };
 }
 
+// What the step that takes the matched places' locations finds here: two places matched, to records with a point, whose sources' licences this
+// gazetteer does not state (attribution: null): left out unless that is chosen, which a host that cannot ask never does.
+const REGIONS_LOCATE = { matched: 2, use: 0, located: 0, noLocation: 0, unknownLicence: 2, notRedistributable: 0, leftForYou: 0, notRecorded: 0 };
 /** A place's candidates decided: those with a candidate matched (closeMatch), on the work file the lookup step made. */
 async function decided(host, state) {
   const ref = state.steps.find((x) => x.id === 'lookup').outputs.work[0];
@@ -114,6 +117,11 @@ async function decided(host, state) {
   return { refs: await refsOf([f], 'work.krisis'), n };
 }
 
+/** The step "See your places on a map", said done as the page says it ("This step is done"): the dataset shown is handed on as it is. */
+function seen(state) {
+  assert.deepEqual([state.status, state.current], ['waiting', 'see'], JSON.stringify(state.steps.map((s) => [s.id, s.state, s.problem || s.error])));
+  return runner.complete(state, 'see', { dataset: runner.inputsOf(state, 'see').dataset });
+}
 /** What the end of Map your data must hold: every place ContainedIn its parish, every matched region's and place's identity citing the stub, promotedFrom a candidate. */
 function ends(doc) {
   const ents = doc.spatialEntities || [];
@@ -174,7 +182,12 @@ test('Map your data with regions, end to end in Node: the regions level by level
   const { refs, n } = await decided(host, b.state);
   assert.equal(n, 2);
   let s = runner.complete(b.state, 'review', { work: refs });
-  const c = await drive(s, host);
+  // Recorded, then the matched places' locations (this gazetteer states no licence, so none is taken unasked: REGIONS_LOCATE),
+  // checked and compared; then it waits to be seen on a map, and, said seen, is written out.
+  const seenAt = await drive(s, host);
+  assert.deepEqual(seenAt.reports.locate.counts, REGIONS_LOCATE);
+  const c = await drive(seen(seenAt.state), host);
+  Object.assign(c.reports, { ...seenAt.reports, ...c.reports });
   assert.equal(c.state.status, 'completed', JSON.stringify(c.state.steps.filter((x) => x.problem || x.error).map((x) => [x.id, x.problem || x.error])));
   const relate = c.reports.relate.counts.containment;
   assert.deepEqual({ containedIn: relate.containedIn, regions: relate.regions, identities: relate.identities, promoted: relate.promoted, missing: relate.missing }, { containedIn: 10, regions: 6, identities: 5, promoted: 5, missing: [] });
@@ -289,7 +302,7 @@ test('Map your data with regions and no base address: the regions are made, revi
   assert.equal(b.state.current, 'review');
   const { refs } = await decided(host, b.state);
   // Recorded, checked, compared and written out: all under the stand-in. Then the first step of publishing stops.
-  const c = await drive(runner.complete(b.state, 'review', { work: refs }), host);
+  const c = await drive(seen((await drive(runner.complete(b.state, 'review', { work: refs }), host)).state), host);
   const done = (st) => Object.fromEntries(st.steps.map((x) => [x.id, x.state]));
   assert.deepEqual([done(c.state).relate, done(c.state).out, done(c.state).mint, c.state.status], ['done', 'done', 'stopped', 'stopped']);
   const out = JSON.parse(await host.store.get(c.state.steps.find((x) => x.id === 'out').outputs.dataset[0].name).text());

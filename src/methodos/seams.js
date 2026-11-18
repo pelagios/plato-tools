@@ -10,7 +10,8 @@ const MAIN = { check: 'files', 'check.cube': 'dataset', convert: 'files', compar
   'publish.w3id': 'dataset', match: 'subjects', lookup: 'subjects', apply: 'subjects', 'relate.containment': 'subjects' };
 // And of the interactive steps whose work is on a file shown in step 1: the table whose columns are
 // matched, and the dataset drawn on in Chora (chosen again, so that Chora shows it).
-const SHOWN = { 'read.columns': 'files', place: 'dataset' };
+// So is the dataset seen on the map before it is written out ("See your places on a map").
+const SHOWN = { 'read.columns': 'files', place: 'dataset', 'map.view': 'dataset' };
 
 /** The step a workflow's state is at: the one running or waiting, else the one that stopped, failed or was cancelled, else the next to do; null when it is completed. */
 export function stepAt(state) {

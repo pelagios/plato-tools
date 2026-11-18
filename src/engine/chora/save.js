@@ -35,8 +35,8 @@ export function checkAddition(attestation, validators) {
   return v({ label: 'a place', attestations: [attestation] }) ? null : explainSchema(v.errors, false);
 }
 
-/** The name of the saved file: the input's, without its extension, then .chora.json, or .chora.jsonl for `target` 'plato-jsonl'. */
-export const savedName = (name, target = 'plato-json') => String(name).replace(/\.gz$/i, '').replace(/\.[^./]+$/, '') + (target === 'plato-jsonl' ? '.chora.jsonl' : '.chora.json');
+/** The name of the saved file: the input's, without its extension, then .chora.json, or .chora.jsonl for `target` 'plato-jsonl' (`word`: another word than chora, for a save that is not Chora's own: locate.js). */
+export const savedName = (name, target = 'plato-json', word = 'chora') => String(name).replace(/\.gz$/i, '').replace(/\.[^./]+$/, '') + (target === 'plato-jsonl' ? `.${word}.jsonl` : `.${word}.json`);
 
 // What a run reports when the file it wrote cannot hold what was read: part of the input not read
 // (the kinds the version check calls not read, and a file that stops part-way). Mneme would fail each;
@@ -148,6 +148,7 @@ export async function verify(input, later, added, env, { places = 0 } = {}) {
  * - readIncomplete: that reading was cut short, or could not read part of its input (Chora's store,
  *   loaded.incomplete): refused before anything is written, with readReport's errors as why;
  * - attestations: how many the dataset has, when the caller knows, for the progress of the writing;
+ * - word: the word in the saved file's name, in place of "chora" (savedName), for a save that is not Chora's own;
  * - newPlaces: places the dataset does not have, to be added after its own ([{ '@id', label,
  *   attestations }]: the places traced from a map into a new dataset, seed.js). Each is checked as an
  *   addition is, and refused if the dataset has a place of its address already; an addition whose placeId
@@ -237,7 +238,7 @@ export async function save(input, additions, env, options = {}) {
   if (missing.length || taken.length || unlisted.size) return fail();
 
   const { target } = choraSavedFormat(input);
-  const name = savedName(options.name || input.name || input.files[0].name, target);
+  const name = savedName(options.name || input.name || input.files[0].name, target, options.word);
   const placed = new Set();
   progress({ save: 'writing', attestations: 0, ...(options.attestations ? { total: options.attestations } : {}), elapsedMs: Date.now() - t0 });
   const opened = [];

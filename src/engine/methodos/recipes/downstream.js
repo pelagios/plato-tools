@@ -1,8 +1,9 @@
 // What the workflows that begin from a reader's dataset share with Map your data once that dataset is
 // made: the same questions, in the same words (taken from Map your data's recipe, not written again),
 // and the same steps after the dataset, through the same operations and adapters: looked up in the
-// World Historical Gazetteer, reviewed, the decisions recorded, drawn or traced where wanted, checked
-// again, compared with what came in, written out, and published if asked.
+// World Historical Gazetteer, reviewed, the decisions recorded, the matched places' locations taken from
+// their matches, the places still without one drawn or traced where wanted, checked again, compared with
+// what came in, seen on a map, written out, and published if asked.
 //
 // Not shared, by design: Map your data's regions. A TEI edition and a Recogito export do not say which
 // region each place is in as a table's "within" columns do, so there are no regions to identify, and
@@ -33,14 +34,18 @@ export const ASKS = {
  * `from` is what the dataset was made from, in words ("the edition").
  */
 export function afterDataset(from) {
-  const result = 'place.dataset ?? apply.dataset';
+  // As Map your data: the matched places' locations taken (`locate`), the rest put on the map by hand where asked
+  // (`place`), and the result seen on a map before it is written out (`see`, which hands on the dataset, or the one saved there).
+  const placed = 'place.dataset ?? locate.dataset', result = 'see.dataset';
   return [
     { id: 'lookup', op: 'lookup', title: 'Look the places up in the World Historical Gazetteer', from: { subjects: 'dataset.dataset' } },
     { id: 'review', op: 'review', title: 'Decide which candidates are the same place', from: { work: 'lookup.work' } },
     { id: 'apply', op: 'apply', title: 'Record the decisions in the dataset', from: { subjects: 'dataset.dataset', work: 'review.work' } },
-    { id: 'place', op: 'place', title: 'Draw or trace the places still without a location', from: { dataset: 'apply.dataset' }, when: 'will-draw' },
-    { id: 'again', op: 'check', title: 'Check the result', from: { files: result } },
-    { id: 'compare', op: 'compare', title: `Compare the result with the dataset made from ${from}`, from: { earlier: 'dataset.dataset', later: result } },
+    { id: 'locate', op: 'locate', title: 'Use the locations of the places you matched', from: { dataset: 'apply.dataset', work: 'review.work' } },
+    { id: 'place', op: 'place', title: 'Draw or trace the places still without a location', from: { dataset: 'locate.dataset' }, when: 'will-draw' },
+    { id: 'again', op: 'check', title: 'Check the result', from: { files: placed } },
+    { id: 'compare', op: 'compare', title: `Compare the result with the dataset made from ${from}`, from: { earlier: 'dataset.dataset', later: placed } },
+    { id: 'see', op: 'map.view', title: 'See your places on a map', from: { dataset: placed } },
     { id: 'out', op: 'convert', title: 'Write it out', from: { files: result }, options: { target: '$target' } },
     { id: 'mint', op: 'publish.mint', title: 'Give every place and source a permanent address', from: { dataset: result }, options: { release: '$release', base: '$base' }, when: 'will-publish' },
     { id: 'report', op: 'publish.report', title: 'Write the FAIR report', from: { dataset: 'mint.dataset' }, options: { release: '$release' }, when: 'will-publish' },

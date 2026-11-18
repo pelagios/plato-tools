@@ -12,7 +12,7 @@ import * as runner from '../engine/methodos/runner.js';
 import { refsOf, refsDiffer } from '../engine/methodos/handoffs.js';
 import { atBoundary, reconcile, restartRemaining, recordOf } from '../engine/methodos/record.js';
 import { writeProject, readProject, projectName, ProjectError, blobSource, newerWords } from '../engine/methodos/project.js';
-import { fmtBytes } from '../engine/words.js';
+import { fmtBytes, LOCATE_TEXT, locateWords } from '../engine/words.js';
 import { outputStore } from './outputs.js';
 import { stepAt, currentInput, startFiles, keptBy, keptWords, distinct, projectWords, notKept } from './seams.js';
 import { regionsSettled, notReviewed, relateProblem, unexported, reviewDiffers, writesItself, columnsProblem } from '../engine/methodos/containment.js';
@@ -31,6 +31,11 @@ const runOf = (op) => RUN_OF[op] || op;
 // The steps done in Chora, on the map (#chora): drawing on a dataset that went to it, tracing a map into a new one, or
 // making a map of the dataset's places to share ("Make a map", #37).
 const CHORA_STEPS = new Set(['place', 'trace', 'map.export']);
+// The step at which the places are seen on the map before they are written out: it opens the map as those do, in its own
+// words, and is done by saying so (the dataset handed on as it is), or by a dataset saved on the map from it (placed).
+const VIEW = 'map.view';
+const onMap = (op) => CHORA_STEPS.has(op) || op === VIEW;
+const mapWords = (op) => (op === VIEW ? 'See your places on the map' : 'Open Chora');
 /** What to put right, from a run's report with errors or a run that did not finish (as adapters.js's problemOf, without the engine). */
 function problemOf(r) {
   const errors = r?.report?.errors || 0;
@@ -46,15 +51,19 @@ const PRESS = { check: 'Check', 'check.cube': 'Check the Data Cube', convert: 'C
 const RECORDS = new Set(['apply', 'relate.containment']);
 // The formats that cannot hold all a review decided (rich R1), by the name each has in the list beside Convert.
 const LOSSY = { lpf: 'Linked Places Format', 'lpf-seq': 'Linked Places Format', tables: 'The spreadsheet tables' };
-/** How many attestations of a PLATO JSON file say which places are the same (each has "identities"), read as a stream. */
-async function identitiesIn(file) {
+/**
+ * How many attestations of a PLATO JSON file say which places are the same (each has "identities"), read as a stream; or,
+ * with `key` "geometries", how many give a location.
+ */
+async function identitiesIn(file, key = 'identities') {
   const reader = file.stream().pipeThrough(new TextDecoderStream()).getReader();
+  const re = new RegExp(`"${key}"\\s*:`, 'g');
   let n = 0, tail = '';
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
     const text = tail + value;
-    n += (text.match(/"identities"\s*:/g) || []).length;
+    n += (text.match(re) || []).length;
     // A key cut by the end of a chunk is counted with the next: what is kept back is too short to hold a whole one.
     tail = text.slice(-12);
   }
@@ -447,21 +456,24 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   document.getElementById('target')?.addEventListener('change', () => { if (wf && !changed) render(false); });
   const identityCounts = new Map();   // a dataset's SHA-256 to the number of its attestations that say which places are the same; null while it is counted
   /** That number for the files `refs` (a step's dataset, held), or null while it is not known: counted once, and the tracker drawn again. */
-  function identitiesOf(refs) {
+  function identitiesOf(refs, key = 'identities', counts = identityCounts) {
     let n = 0;
     for (const r of refs) {
-      if (!identityCounts.has(r.sha256)) {
+      if (!counts.has(r.sha256)) {
         const f = heldFor(r);
         if (!f) return null;
-        identityCounts.set(r.sha256, null);
-        identitiesIn(f).then((k) => { identityCounts.set(r.sha256, k); render(false); }, () => identityCounts.set(r.sha256, 0));
+        counts.set(r.sha256, null);
+        identitiesIn(f, key).then((k) => { counts.set(r.sha256, k); render(false); }, () => counts.set(r.sha256, 0));
       }
-      const k = identityCounts.get(r.sha256);
+      const k = counts.get(r.sha256);
       if (k === null) return null;
       n += k;
     }
     return n;
   }
+  const locationCounts = new Map();   // a dataset's SHA-256 to the number of its attestations that give a location
+  /** How many locations the files `refs` hold (the dataset seen on the map), or null while it is not known. */
+  const locationsOf = (refs) => identitiesOf(refs, 'geometries', locationCounts);
   let wf = null;            // the runner's state, as a record ({ id, name, created, saved, ...state })
   let wfScope = null;       // the workflow's Scope (Issue #33), kept beside the runner's state and written with it (keep())
   let changed = null;       // a record the version rule would not carry on: { record, words } (reconcile's 'changed' or 'refuse')
@@ -780,6 +792,12 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       if (!files.length) throw new Error('Trace the places in Chora and save the dataset there first: its save chooses it in “Choose your data”, and does this step.');
       return { dataset: await refsHeld(files, 'dataset', { own: true }) };
     }
+    if (s.op === VIEW) {
+      // Seen, and said so: the dataset that was shown is handed on as it is (one saved on the map from it does the step by itself: placed).
+      const went = currentInput(wf, s);
+      if (!went) throw new Error(`The step “${s.title}” has no dataset to hand on: an earlier step is not done.`);
+      return { dataset: went };
+    }
     if (s.op === 'map.export') throw new Error('Make the map in Chora (“Make a map”, under its places) and download it there: its download does this step.');
     throw new Error(`The step “${s.title}” is done by the tools, when its run finishes.`);
   }
@@ -802,7 +820,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     return new Promise((resolve) => chain(async () => {
       const s = wf && !changed ? atStep() : null;
       // Chora's two steps: drawing on a dataset that went to it ("place"), or tracing a map into a new one ("trace").
-      if (!s || !CHORA_STEPS.has(s.op)) { resolve(null); return; }
+      // And the step at which the places are seen on the map: a dataset saved there from the one shown (a place put there by hand) is its result.
+      if (!s || !onMap(s.op)) { resolve(null); return; }
       // The step "trace" takes no dataset to guard by: it is done only by a save of places traced from a map.
       if (s.op === 'trace' && !traced) {
         const why = `It was not saved from a map traced into a new dataset (it adds no place traced from a map), so the step “${s.title}” is not done with it.`;
@@ -869,6 +888,121 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     try { await finishInteractive(s, await resultOf(s)); } catch (e) { say(e.message, true); render(false); return; }
     if (!atStep()) q(tracker, '#methodos-leave').focus();
   }));
+  // ---- The matched places' locations, taken together (the step "Use the locations of the places you matched";
+  // src/engine/chora/locate.js). The tracker first says what would be done, in counts (asked of the engine once for the
+  // dataset and the review the step takes, both the workflow's own, held in this browser: nothing is chosen in step 1, and
+  // nothing is asked of any other site), and waits for one press. Sources whose licence is not stated are used only if the
+  // box is ticked, which the engine writes into the note of each such location. Undone, while it is the last step done, the
+  // workflow is back at the step with the dataset as it was (the dataset written with the locations is a file of its own).
+  const locEl = el('div', { id: 'methodos-locate', className: 'methodos-locate', hidden: true });
+  const locUnknown = el('input', { type: 'checkbox', id: 'methodos-locate-unknown' });
+  const locUnknownWords = el('span');
+  const locUnknownP = el('p', { className: 'methodos-locate-unknown', hidden: true }, el('label', {}, locUnknown, ' ', locUnknownWords), ' ', el('span', { className: 'warn', textContent: LOCATE_TEXT.unknownWarning }));
+  const locGoB = el('button', { type: 'button', id: 'methodos-locate-go', className: 'primary', hidden: true });
+  const locSkipB = el('button', { type: 'button', id: 'methodos-locate-skip', hidden: true });
+  const locAgainB = el('button', { type: 'button', id: 'methodos-locate-again', hidden: true, textContent: 'Count again' });
+  const locUndoB = el('button', { type: 'button', id: 'methodos-locate-undo', hidden: true, textContent: 'Undo: take those locations out again' });
+  locEl.append(locUnknownP, el('p', { className: 'methodos-buttons' }, locGoB, ' ', locSkipB, ' ', locAgainB, ' ', locUndoB));
+  tMsg.after(locEl);
+  let loc = null;   // what the engine said it would do: { key, state: 'asking' | 'ready' | 'failed', refs, files, text, plan, withUnknown, words }
+  /** The dataset and the review the locate step `s` takes: their references, and the files held here (null where one is no longer held). */
+  function locateInputs(s) {
+    let inputs;
+    try { inputs = runner.inputsOf(wf, s.id); } catch { return null; }
+    const files = (inputs.dataset || []).map(heldFor), work = inputs.work?.[0] ? heldFor(inputs.work[0]) : null;
+    return { refs: inputs.dataset, key: [...inputs.dataset, ...(inputs.work || [])].map((r) => r.sha256).join(' '), files: files.length && files.every(Boolean) ? files : null, work: work || null };
+  }
+  /** What the step would do, asked of the engine once for its dataset and review (nothing is written); the tracker is drawn again with the answer. */
+  function locateAsk(s) {
+    const inp = locateInputs(s), key = inp?.key ?? `none ${s.id}`;
+    if (loc?.key === key) return;
+    locUnknown.checked = false;
+    if (!inp?.files || !inp.work || !page.locate) {
+      loc = { key, state: 'failed', refs: inp?.refs || null, files: null,
+        words: 'The dataset and the review this step takes are no longer held in this browser, so the locations cannot be counted: go back a step (“Back a step”) and record the decisions again; or go on without them.' };
+      return;
+    }
+    const mine = loc = { key, state: 'asking', refs: inp.refs, files: inp.files };
+    inp.work.text().then((text) => { mine.text = text; return page.locate(inp.files, text, { planOnly: true }); }).then((r) => {
+      if (loc !== mine) return;
+      const problem = problemOf(r);
+      if (problem || !r.plan) Object.assign(mine, { state: 'failed', words: `The locations could not be counted: ${problem?.words || 'the engine gave no answer.'}` });
+      else Object.assign(mine, { state: 'ready', plan: r.plan, withUnknown: r.withUnknown });
+      render(false);
+    }, (e) => {
+      if (loc !== mine) return;
+      Object.assign(mine, { state: 'failed', words: e?.kind === 'busy' ? 'Another run is under way, so the locations are not counted yet: press “Count again” when it has ended.' : `The locations could not be counted: ${e?.message || e}` });
+      render(false);
+    });
+  }
+  /** The locate step, when the workflow is at it and it is not running; else null. */
+  const atLocate = () => { const s = wf && !changed && !viewing ? atStep() : null; return s && s.op === 'locate' && s.state !== 'running' ? s : null; };
+  /** The counts as they stand: with the sources whose licence is not stated, if the box is ticked. */
+  const locCounts = () => (loc?.state === 'ready' ? (locUnknown.checked ? loc.withUnknown : loc.plan.counts) : null);
+  /** The locate step taken (running), as began() takes a step for a run of the page's. */
+  function locateTake(s) {
+    let w = ['stopped', 'failed', 'cancelled'].includes(s.state) ? runner.invalidate(wf, s.id) : wf;
+    w = w.status === 'waiting' && w.current === s.id ? runner.resume(w, s.id) : runner.next(w);
+    if (w.current !== s.id) throw new Error(`The workflow is not at the step “${s.title}”.`);
+    return w;
+  }
+  locUnknown.addEventListener('change', () => render(false));
+  locAgainB.addEventListener('click', () => { loc = null; render(false); });
+  // Declined, or nothing to use: the dataset is handed on as it was.
+  locSkipB.addEventListener('click', () => chain(async () => {
+    const s = atLocate();
+    if (!s || active) return;
+    const went = loc?.refs || locateInputs(s)?.refs;
+    if (!went) return;
+    wf = runner.complete(locateTake(s), s.id, { dataset: went });
+    loc = null;
+    say(`No location was taken from the matches: the workflow goes on with ${names(went)}, as it was.`);
+    await keep(); render(false);
+  }));
+  // The one press: the locations counted are taken, in the name the page holds for the reviewer (asked once, for the review:
+  // not asked again here); with none held, the engine takes the review's own reviewer, and with neither stops, saying so.
+  locGoB.addEventListener('click', () => chain(async () => {
+    const s = atLocate(), mine = loc, counts = locCounts();
+    if (!s || active || !counts?.use) return;
+    const allowUnknown = locUnknown.checked;
+    const who = page.contributor?.() || undefined;
+    wf = locateTake(s); active = { id: s.id, op: 'locate' };
+    say(null); render(false);
+    const end = (fn) => chain(async () => {
+      if (active?.id !== s.id || wf?.current !== s.id) return;
+      active = null; loc = null;
+      try { await fn(); } catch (e) { wf = runner.fail(wf, s.id, e); }
+      await keep(); render(false);
+    });
+    page.locate(mine.files, mine.text, { allowUnknown, contributor: who }).then((r) => end(async () => {
+      const problem = problemOf(r);
+      if (problem) { wf = runner.stop(wf, s.id, problem); return; }
+      const files = await Promise.all((r.outputs || []).map((o) => page.output(o.name)));
+      wf = runner.complete(wf, s.id, { dataset: files.length ? await refsHeld(files, 'dataset') : mine.refs });
+      const done = files.length ? LOCATE_TEXT.done(r.batch?.used?.length ?? counts.use, names(files), r.batch?.unknown || 0) : LOCATE_TEXT.nothing;
+      say(done);
+      // Chosen in step 1, so that the next step takes it and the map, opened, shows it; what the tracker says of the file
+      // chosen (chosen(), next in the queue) is said after what was done here, not in place of it.
+      if (files.length) { page.choose(files); chain(async () => { if (!wf) return; say(`${done}${note?.words && note.words !== done ? ` ${note.words}` : ''}`, !!note?.warn); render(false); }); }
+    }), (e) => end(async () => { wf = runner.fail(wf, s.id, e); }));
+  }));
+  /** The locate step, when it is the last step done and it added locations: it can be undone. Else null. */
+  function locateUndoable() {
+    if (!wf || changed || viewing || active || wf.current) return null;
+    const last = wf.steps.filter((x) => x.state === 'done').pop();
+    if (!last || last.op !== 'locate') return null;
+    let went = null;
+    try { went = runner.inputsOf(wf, last.id).dataset; } catch { return null; }
+    return sameRefs(went, last.outputs?.dataset) ? null : last;
+  }
+  locUndoB.addEventListener('click', () => chain(async () => {
+    const last = locateUndoable();
+    if (!last) return;
+    const made = last.outputs?.dataset || [];
+    wf = runner.invalidate(wf, last.id); loc = null; asIs = null;
+    await outs.drop(made);
+    say(LOCATE_TEXT.undone(last.title)); await keep(); render(false);
+  }));
   const leaveB = q(tracker, '#methodos-leave'), keptEl = q(tracker, '#methodos-kept'), clearB = q(tracker, '#methodos-clear-kept');
   // Below 60rem the tracker is a strip, folded, and its buttons are inside it: the step's own buttons ("This step is done",
   // "Choose the file", "Use …", "Download …", "Open the review …") are shown under the centre's title as well (styles.css,
@@ -880,7 +1014,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   hereEl.addEventListener('click', (e) => { const b = e.target.closest('button[data-presses]'); if (b) q(tracker, `#${CSS.escape(b.dataset.presses)}`)?.click(); });
   function stepButtons() {
     const focused = hereEl.contains(document.activeElement) ? document.activeElement.dataset.presses : null;
-    const now = tracker.hidden ? [] : [pickB, useB, compareB, downloadB, reviewB, asIsB, doneB].filter((b) => !b.hidden);
+    const now = tracker.hidden ? [] : [pickB, useB, compareB, downloadB, reviewB, locGoB, locSkipB, locAgainB, locUndoB, asIsB, doneB].filter((b) => !b.hidden);
     hereEl.replaceChildren(...now.flatMap((b) => { const c = el('button', { type: 'button', className: b.className, textContent: b.textContent }); c.dataset.presses = b.id; return [c, ' ']; }));
     hereEl.hidden = !now.length;
     if (head && head.lastElementChild !== hereEl) head.append(hereEl);   // after the step's words, which the host puts there
@@ -1122,6 +1256,18 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       // A table may also be pasted, as a list of names (step 1's box): said where the workflow begins with one.
       next = !words ? 'Not started.' : /^The table\b/.test(words) ? 'Not started. Choose your table to begin (or paste a list of names).' : `Not started. Choose ${lower(words)} to begin.`;
     }
+    // The matched places' locations: what would be done, in counts, before anything is (asked of the engine once); then one press.
+    else if (s && s.op === 'locate' && wf && !changed && s.state !== 'running') {
+      locateAsk(s);
+      next = loc.state === 'asking' ? 'Counting the matched places whose location can be used…' : loc.state === 'failed' ? loc.words
+        : `${locateWords(locCounts())}${locCounts().use ? ' Nothing is taken until you press the button.' : ''}`;
+    }
+    // The places seen on the map: said with how many locations there are to see, or that there is none yet.
+    else if (s && s.op === VIEW && wf && !changed) {
+      const went = currentInput(wf, s), n = went ? locationsOf(went) : null;
+      next = n === 0 ? 'None of your places has a location yet, so the map has nothing to show. Say the step is done to go on; or open the map, put the places there by hand, and save there.'
+        : `Open the map (“${mapWords(VIEW)}”)${n ? `: ${n.toLocaleString('en-GB')} ${n === 1 ? 'location is' : 'locations are'} on record` : ''}. Say when you have looked, and the step is done. A place you put there by hand is kept by saving on the map: the workflow then carries on with the file saved.`;
+    }
     // The map's step has no "This step is done": its download in Chora does it, and nothing else can.
     else if (s && op.kind === 'interactive') next = `This step is yours: it waits for ${op.waitsFor}.${s.op === 'map.export' ? ' Open Chora, frame the view, and make the map there (“Make a map”).' : ' Say when it is done.'}`;
     else if (ready) next = `Ready to download: ${names(main)} is already in the format this workflow writes, so it is not converted into itself. Download it, and the step is done.`;
@@ -1143,7 +1289,20 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     restartB.hidden = changed?.action !== 'changed';
     leaveB.textContent = !shown ? 'Discard this workflow' : 'Leave the workflow';
     downloadB.hidden = !ready;
-    choraB.hidden = !(s && CHORA_STEPS.has(s.op) && wf && !changed);
+    choraB.hidden = !(s && onMap(s.op) && wf && !changed);
+    choraB.textContent = mapWords(s?.op);
+    // The locate step's own controls: the box for sources with no licence stated (only where ticking it would use more), the one
+    // press, a way on without, a way to count again after a failure; and, once done, a way to undo while it is the last step done.
+    const atLoc = !!(s && s.op === 'locate' && wf && !changed && !viewing && s.state !== 'running' && loc), lc = atLoc ? locCounts() : null;
+    locUnknownP.hidden = !(lc && loc.withUnknown.use > loc.plan.counts.use);
+    if (lc) locUnknownWords.textContent = `${loc.plan.counts.unknownLicence} left out because ${loc.plan.counts.unknownLicence === 1 ? 'its' : 'their'} licence is not stated: ${lower(LOCATE_TEXT.unknownLabel(loc.plan.counts.unknownLicence))}`;
+    locGoB.hidden = !(lc && lc.use);
+    if (lc?.use) locGoB.textContent = LOCATE_TEXT.go(lc.use);
+    locSkipB.hidden = !(atLoc && loc.state !== 'asking');
+    locSkipB.textContent = LOCATE_TEXT.skip(lc?.use || 0);
+    locAgainB.hidden = !(atLoc && loc.state === 'failed' && !!loc.files);
+    locUndoB.hidden = !locateUndoable();
+    locEl.hidden = locUnknownP.hidden && locGoB.hidden && locSkipB.hidden && locAgainB.hidden && locUndoB.hidden;
     if (ready) {
       downloadB.textContent = `Download ${names(main)}`;
       tList.querySelector('li.is-current .track-body')?.append(el('span', { className: 'track-run', textContent: 'Ready to download' }));
@@ -1162,8 +1321,9 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     if (partial) reopenB.textContent = heldFor(partial) ? `Reopen ${partial.name}` : `Choose ${partial.name} again`;
     if (s && !changed && !viewing) {
       const p = wf ? { title: recipeOf(wf)?.title } : plan(pending.key, pending.answers);
-      onStep({ id: s.id, n: i, title, tool: PAGE_TOOL[s.op] ?? null, text: `Methodos, ${p.title}.${op.kind === 'interactive' && op.waitsFor ? ` This step is yours: it waits for ${op.waitsFor}.` : ''}`,
-        link: CHORA_STEPS.has(s.op) ? { href: '#chora', words: 'Open Chora' } : null });
+      // The locate step has no tool of its own in the centre: what it would do is said there too, as in the tracker.
+      onStep({ id: s.id, n: i, title, tool: PAGE_TOOL[s.op] ?? null, text: `Methodos, ${p.title}.${op.kind === 'interactive' && op.waitsFor ? ` This step is yours: it waits for ${op.waitsFor}.` : ''}${s.op === 'locate' && next ? ` ${next}` : ''}`,
+        link: onMap(s.op) ? { href: '#chora', words: mapWords(s.op) } : null });
     } else onStep(null);
     // Ready to download as it is: Download is the one primary action, so Convert, beside it in the centre, is not marked as one (simple S12).
     if (ready) document.getElementById('convert')?.classList.remove('primary');
@@ -1176,7 +1336,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     sharedEl.hidden = !viewing;
     projectEl.hidden = !!viewing; backB.hidden = !!viewing; leaveB.hidden = !!viewing;
     if (viewing) {
-      for (const b of [doneB, asIsB, pickB, useB, compareB, reopenB, reviewB, restartB, downloadB, choraB]) b.hidden = true;
+      for (const b of [doneB, asIsB, pickB, useB, compareB, reopenB, reviewB, restartB, downloadB, choraB, locEl]) b.hidden = true;
       q(sharedEl, '#methodos-shared-words').textContent = `Read-only: “${viewing.title || shown.name || tTitle.textContent}”, shared with you through the World Historical Gazetteer, as it was last saved there (version ${viewing.version}). Nothing in it can be changed or run here: make your own copy to carry on with it, or download it as a project file.`;
     }
     showKept();

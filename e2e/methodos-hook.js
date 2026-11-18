@@ -57,7 +57,9 @@ if (window.__plato) {
       const files = await refsOf([new File(['name,lat,lon\nAbingdon,51.67,-1.28\n'], 'places.csv')], 'files');
       let s = runner.start(MAP, { 'has-regions': false, 'will-draw': true, 'will-publish': false, target: 'lpf' }, { files });
       for (const [id, out] of [['columns', { mapping: [ref('mapping', 'columns.json')] }], ['check', {}], ['dataset', { dataset: [ref('dataset', 'places.json')] }],
-        ['lookup', { work: [ref('work.krisis', 'places.krisis.json')] }], ['review', { work: [ref('work.krisis', 'places.krisis.json')] }], ['apply', { dataset: [ref('dataset', 'applied.json')] }]])
+        ['lookup', { work: [ref('work.krisis', 'places.krisis.json')] }], ['review', { work: [ref('work.krisis', 'places.krisis.json')] }], ['apply', { dataset: [ref('dataset', 'applied.json')] }],
+        // The matched places' locations, none taken: the dataset handed on as it was (as test/methodos-seams.test.js's atPlace).
+        ['locate', { dataset: [ref('dataset', 'applied.json')] }]])
         s = runner.complete(runner.next(s), id, out);
       const { record } = await store.save({ ...s, id: `e2e-${Date.now().toString(36)}-${(++made).toString(36)}` }, { name });
       return record.id;
@@ -74,7 +76,7 @@ if (window.__plato) {
       await outs.keepOwn(files[0], table); await outs.put(applied, dataset);
       let s = runner.start(MAP, { 'has-regions': false, 'will-draw': true, 'will-publish': false, target: 'lpf' }, { files });
       for (const [id, out] of [['columns', { mapping: [ref('mapping', 'columns.json')] }], ['check', {}], ['dataset', { dataset: [ref('dataset', 'places.json')] }],
-        ['lookup', { work: [ref('work.krisis', 'places.krisis.json')] }], ['review', { work: [ref('work.krisis', 'places.krisis.json')] }], ['apply', { dataset: [applied] }]])
+        ['lookup', { work: [ref('work.krisis', 'places.krisis.json')] }], ['review', { work: [ref('work.krisis', 'places.krisis.json')] }], ['apply', { dataset: [applied] }], ['locate', { dataset: [applied] }]])
         s = runner.complete(runner.next(s), id, out);
       const { record } = await store.save({ ...s, id: `e2e-${Date.now().toString(36)}-${(++made).toString(36)}` }, { name: label });
       return record.id;

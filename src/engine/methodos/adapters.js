@@ -29,6 +29,7 @@ import { revise } from '../revise.js';
 import { publish } from '../agora/index.js';
 import { match, gather } from '../krisis/match.js';
 import { apply } from '../krisis/apply.js';
+import { locate } from '../chora/locate.js';
 import { runLookup, runLevel, runPlaces, newWork } from '../krisis/lookup.js';
 import { readWork, serialiseWork } from '../krisis/work.js';
 import { seedRegions, levelsOf, regionNodes, regionProgress } from '../krisis/regions.js';
@@ -257,6 +258,29 @@ export const ADAPTERS = {
     if (r.problem) return r;
     // The candidate set is written beside the result, not handed on (apply()'s outputs are the result alone).
     return { report: { ...r.report, ...(x ? { counts: { ...(r.report?.counts || {}), candidateSet: x.setIri } } : {}) }, outputs: { dataset: r.outputs } };
+  },
+  // The matched places' locations, taken into the dataset the decisions were recorded in (chora/locate.js):
+  // from the review's work file, which keeps each candidate's point and the sources' licences, so nothing is
+  // asked of the gazetteer. Who takes them is the host's reviewer (as a revision's), unless the options name one,
+  // else the review's own. A host that can ask (host.locate(plan, withUnknown), the page's one press) is shown
+  // what would be done first, and answers { use: false } to decline, or { allowUnknown: true } to use sources
+  // whose licence is not stated too; one that cannot gets the default, which never uses those. Nothing to use,
+  // or declined: the dataset is handed on as it was.
+  async locate({ inputs, options, host, signal }) {
+    const subjects = await inputOf(inputs.dataset, host, 'dataset');
+    const [wf] = await filesFor(inputs.work, host);
+    const work = await wf.text();
+    const contributor = options.contributor ?? (typeof host.reviewer === 'function' ? host.reviewer() : host.reviewer) ?? undefined;
+    let choice = {};
+    if (typeof host.locate === 'function') {
+      const p = await engine(host, null, (env) => locate({ subjects, work, options: { planOnly: true, signal } }, env));
+      if (p.problem) return p;
+      choice = (await host.locate(p.result.plan, p.result.withUnknown)) || {};
+      if (choice.use === false) return { report: p.report, outputs: { dataset: inputs.dataset } };
+    }
+    const r = await engine(host, 'dataset', (env) => locate({ subjects, work, options: { ...without(options, 'contributor'), contributor, allowUnknown: choice.allowUnknown === true, reopen: (o) => host.file(o), signal } }, env));
+    if (r.problem) return r;
+    return { report: r.report, outputs: { dataset: r.outputs.length ? r.outputs : inputs.dataset } };
   },
   // The lookup is made on the page thread, through the permissions module (host.lookup); the places
   // are gathered by the engine, as the worker's 'places' command gathers them. Its work file is written

@@ -89,6 +89,11 @@ async function reviewed(host, state) {
   return { work, bulk, accepted: bulk.accepted, state: runner.complete(state, 'review', { work: await refsOf([f], 'work.krisis') }) };
 }
 /** The lookup step's work file. */
+/** The step "See your places on a map", said done as the page says it ("This step is done"): the dataset shown is handed on as it is. */
+function seen(state) {
+  assert.deepEqual([state.status, state.current], ['waiting', 'see'], JSON.stringify(state.steps.map((s) => [s.id, s.state, s.problem || s.error])));
+  return runner.complete(state, 'see', { dataset: runner.inputsOf(state, 'see').dataset });
+}
 const workOf = async (host, state) => readWork(await host.store.get(state.steps.find((x) => x.id === 'lookup').outputs.work[0].name).text());
 const outOf = async (host, state) => JSON.parse(await host.store.get(state.steps.find((x) => x.id === 'out').outputs.dataset[0].name).text());
 
@@ -115,7 +120,7 @@ test('both recipes are well formed, take Map your data\'s questions in its words
     assert.equal(r.asks['has-regions'], undefined, 'no regions: an edition and an export do not say which region a place is in');
     assert.deepEqual(r.asks.base, RECIPES['publish-a-dataset'].asks.base);
     // The steps: read and made a dataset, then Map your data's own, without regions, by operation and id.
-    assert.deepEqual(r.steps.map((s) => s.op), ['check', 'convert', 'lookup', 'review', 'apply', 'place', 'check', 'compare', 'convert', 'publish.mint', 'publish.report', 'publish.site', 'publish.w3id']);
+    assert.deepEqual(r.steps.map((s) => s.op), ['check', 'convert', 'lookup', 'review', 'apply', 'locate', 'place', 'check', 'compare', 'map.view', 'convert', 'publish.mint', 'publish.report', 'publish.site', 'publish.w3id']);
     const mine = r.steps.slice(2).map((s) => [s.id, s.op, s.when ?? null]);
     // Not Map your data's Wikidata items step either (Issue #36): the editions' and the export's workflows are not among the three that have it.
     const map = MAP.steps.filter((s) => !['columns', 'check', 'dataset', 'regions', 'relate', 'wikidata'].includes(s.id)).map((s) => [s.id, s.op, s.when === '!has-regions' ? null : s.when ?? null]);
@@ -164,7 +169,7 @@ test('the interview: an edition in TEI, or annotations from Recogito, with place
     assert.equal(Object.hasOwn(mint(answersFor(pub, { 'will-draw': false })), 'base'), false);
     // The plan: what it cannot carry, beside its steps; nothing unavailable, nothing noted.
     const p = plan(recipe, answersFor(map, { 'will-draw': true, 'will-publish': false }));
-    assert.deepEqual(p.steps.map((s) => s.id), ['check', 'dataset', 'lookup', 'review', 'apply', 'place', 'again', 'compare', 'out']);
+    assert.deepEqual(p.steps.map((s) => s.id), ['check', 'dataset', 'lookup', 'review', 'apply', 'locate', 'place', 'again', 'compare', 'see', 'out']);
     assert.deepEqual(p.cannot, RECIPES[recipe].cannot);
     assert.deepEqual([p.unavailable, p.notes], [[], []]);
     assert.deepEqual(p.left.map((s) => s.id), ['mint', 'report', 'site', 'w3id']);
@@ -182,6 +187,8 @@ const PLEIADES = ['https://pleiades.stoa.org/places/570106', 'https://pleiades.s
 
 // Argos's ref is Pleiades 570106. WHG answers its record (place:pl:570106, at Argos) and, ranked above it, an Argos in
 // Indiana: WHG's best candidate is some 8,900 km from the ref's record, so the place is flagged and left to the reviewer.
+// What the step that takes the matched places' locations finds here: three places matched, to records this gazetteer answered with no point.
+const TEI_LOCATE = { matched: 3, use: 0, located: 0, noLocation: 3, unknownLicence: 0, notRedistributable: 0, leftForYou: 0, notRecorded: 0 };
 const ARGOS_PL = [22.7278, 37.6331], ARGOS_IN = [-86.2453, 41.2373];
 test('Places from an edition (TEI), end to end in Node: read, checked, looked up in batches, reviewed, recorded, checked again, compared and written out, each place keeping its ref and gaining its WHG identity, Argos flagged', async () => {
   const fake = fakeWhg({ Phlious: [], Argos: [C('place:gn:9300001', 'Argos', ARGOS_IN), { ...C('place:pl:570106', 'Argos', ARGOS_PL), score: 90 }] });
@@ -207,11 +214,19 @@ test('Places from an edition (TEI), end to end in Node: read, checked, looked up
   const { accepted, bulk, state } = await reviewed(a.host, a.state);
   assert.equal(accepted, 3);
   assert.equal(bulk.flagged, 1);
-  const c = await drive(state, a.host);
+  // Recorded; then the matched places' locations. This gazetteer answered the three records matched with no point, so there is
+  // none to take: each is counted as having no location on record, and the dataset goes on as the decisions left it.
+  const b = await drive(state, a.host);
+  assert.deepEqual(b.reports.locate.counts, TEI_LOCATE);
+  const step = (id) => b.state.steps.find((s) => s.id === id);
+  assert.deepEqual(step('locate').outputs.dataset, step('apply').outputs.dataset);
+  // Checked and compared, it waits to be seen on a map; said seen, it is written out.
+  assert.equal(b.reports.again.errors, 0);
+  assert.equal(b.reports.compare.errors, 0, 'only added to: the dataset made from the edition is all still there');
+  const c = await drive(seen(b.state), a.host);
   assert.equal(c.state.status, 'completed', JSON.stringify(c.state.steps.map((s) => [s.id, s.state, s.problem || s.error])));
-  assert.deepEqual(c.state.steps.map((s) => s.state), ['done', 'done', 'done', 'done', 'done', 'skipped', 'done', 'done', 'done', 'skipped', 'skipped', 'skipped', 'skipped']);
-  assert.equal(c.reports.again.errors, 0);
-  assert.equal(c.reports.compare.errors, 0, 'only added to: the dataset made from the edition is all still there');
+  assert.deepEqual(c.state.steps.map((s) => [s.id, s.state]), [['check', 'done'], ['dataset', 'done'], ['lookup', 'done'], ['review', 'done'], ['apply', 'done'], ['locate', 'done'], ['place', 'skipped'],
+    ['again', 'done'], ['compare', 'done'], ['see', 'done'], ['out', 'done'], ['mint', 'skipped'], ['report', 'skipped'], ['site', 'skipped'], ['w3id', 'skipped']]);
   const e = ends(await outOf(a.host, c.state));
   assert.deepEqual(e.addresses, PLEIADES, 'every place keeps the address its ref gave');
   assert.equal(e.stub, 3);
@@ -273,6 +288,8 @@ test('a Pleiades ref checked against WHG: its record (place:pl:...) never sugges
 });
 
 // ---- Places from Recogito, end to end ----------------------------------------------------------------------
+// And here: nine matched, four of them regions the map's georeference had placed already, five to records answered with no point.
+const REC_LOCATE = { matched: 9, use: 0, located: 4, noLocation: 5, unknownLicence: 0, notRedistributable: 0, leftForYou: 0, notRecorded: 0 };
 const PLACED = 7;   // the regions of the constructed export placed through the Rocque map's georeference
 
 test('Places from Recogito, end to end in Node: the export and the map\'s georeference read together, regions placed, the named places looked up, reviewed, recorded and written out, keeping Recogito\'s links and the placed regions', async () => {
@@ -297,10 +314,12 @@ test('Places from Recogito, end to end in Node: the export and the map\'s georef
   assert.match(summary(a.reports.dataset).counted, /7 of 16 regions on images placed on a map/);
   const { accepted, state } = await reviewed(a.host, a.state);
   assert.equal(accepted, 9);
-  const c = await drive(state, a.host);
+  const b = await drive(state, a.host);
+  assert.deepEqual(b.reports.locate.counts, REC_LOCATE);
+  assert.equal(b.reports.again.errors, 0);
+  assert.equal(b.reports.compare.errors, 0);
+  const c = await drive(seen(b.state), a.host);
   assert.equal(c.state.status, 'completed', JSON.stringify(c.state.steps.map((s) => [s.id, s.state, s.problem || s.error])));
-  assert.equal(c.reports.again.errors, 0);
-  assert.equal(c.reports.compare.errors, 0);
   const doc = await outOf(a.host, c.state);
   const e = ends(doc);
   assert.deepEqual(e.addresses, made.addresses);

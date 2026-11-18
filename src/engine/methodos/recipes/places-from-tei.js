@@ -8,7 +8,7 @@ import { ASKS, afterDataset } from './downstream.js';
 export default {
   key: 'places-from-tei',
   title: 'Places from an edition (TEI)',
-  version: 1,
+  version: 2,   // 2 (18 November 2026): as Map your data's version 5, the matched places' locations taken in a step of their own, and the places seen on a map before they are written out
   files: {
     files: { words: 'The edition in TEI XML', types: ['files'] },
   },

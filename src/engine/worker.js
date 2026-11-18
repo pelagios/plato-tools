@@ -10,6 +10,7 @@ import { publish } from './agora/index.js';
 import { match, gather } from './krisis/match.js';
 import { mintCollector } from './krisis/wikidata.js';
 import { apply } from './krisis/apply.js';
+import { locate } from './chora/locate.js';
 import { review, choraLoadFailure } from './words.js';
 import { DataError } from './input.js';
 // A run's output files, each write checked (a full disk ends the run, and is not a short file).
@@ -361,6 +362,23 @@ self.onmessage = async ({ data }) => {
         result = { incomplete: true, outputs: [], report: { counts: {}, errors: 1, items: [{ severity: 'error', kind: 'not-possible', count: 1, message: e.message, examples: [] }] } };
       } finally { tidy(); }
       postMessage({ type: 'done', ...result });
+    } else if (data.cmd === 'locate') {
+      // The matched places' locations taken into the dataset (src/engine/chora/locate.js), for the workflow's step: first what
+      // it would do (options.planOnly: counted, nothing written), then, at the user's one press, the dataset written with them.
+      // The outputs of the run before are left where they are (its "Save …" buttons are still on the page). `id` is the page's.
+      const subjects = await detect(data.subjects);
+      if (!readable(subjects)) { postMessage({ type: 'located', id: data.id, incomplete: true, outputs: [], plan: null, report: { counts: {}, errors: 1, items: [{ severity: 'error', kind: 'not-recognised', count: 1, message: 'The dataset was not recognised as data these tools read, so no location was taken', examples: [subjects.reason] }] } }); return; }
+      const { env, tidy } = await runEnv({ clearOutputs: false });
+      let result;
+      try {
+        result = await locate({ subjects, work: data.work, options: { ...(data.options || {}),
+          reopen: async (o) => (await (await outputsDir(false)).getFileHandle(o.name)).getFile(),
+          discard: async (o) => (await outputsDir(false)).removeEntry(o.name) } }, { ...env, progress: () => {} });
+      } catch (e) {
+        if (!(e instanceof DataError)) throw e;
+        result = { incomplete: true, outputs: [], plan: null, report: { counts: {}, errors: 1, items: [{ severity: 'error', kind: 'not-possible', count: 1, message: e.message, examples: [] }] } };
+      } finally { tidy(); }
+      postMessage({ type: 'located', id: data.id, ...result });
     } else if (typeof data.cmd === 'string' && data.cmd.startsWith('chora-')) {
       await choraCommand(data);
     } else if (data.cmd === 'wikidata-collect') {

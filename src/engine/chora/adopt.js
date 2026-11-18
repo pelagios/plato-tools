@@ -152,7 +152,7 @@ const refusal = (e) => (e instanceof AdoptError ? { kind: 'when', reason: e.mess
 /** The SPDX address of a licence object's id, or null. */
 export const spdxUri = (l) => (typeof l?.spdx === 'string' && /^[A-Za-z0-9.+-]+$/.test(l.spdx) ? SPDX + l.spdx : null);
 /** WHG's own licence's SPDX id (attribution.whg), for the notes only, or null. */
-const whgLicenceOf = (attribution) => { const l = attribution?.whg?.license; return typeof l === 'string' ? l : isObject(l) && typeof l.spdx_id === 'string' ? l.spdx_id : null; };
+export const whgLicenceOf = (attribution) => { const l = attribution?.whg?.license; return typeof l === 'string' ? l : isObject(l) && typeof l.spdx_id === 'string' ? l.spdx_id : null; };
 /** For WHG's own records, place:whg:<dataset>:<id>: the dataset. */
 export const datasetOf = (id) => /^place:whg:([^:]+):/.exec(String(id ?? ''))?.[1] ?? null;
 /** The id a record has in its upstream source: 2641673 for place:gn:2641673. */
@@ -271,7 +271,7 @@ export function adoptionAttestations({ place, candidate, feature = null, fetchEr
 }
 
 /** How the notes name a record: its address, name, upstream source and id there. */
-function recordWordsOf(candidate, feature, st, attribution) {
+export function recordWordsOf(candidate, feature, st, attribution) {
   const sourceName = st.whgNative ? attribution?.datasets?.[datasetOf(candidate?.id)]?.name : attribution?.sources?.[st.namespace]?.name;
   return { record: st.record, name: candidate?.name || feature?.properties?.title || null, sourceName: typeof sourceName === 'string' ? sourceName : null,
     namespace: st.whgNative ? null : st.namespace, localId: localIdOf(candidate?.id), dataset: st.whgNative ? datasetOf(candidate?.id) : null };

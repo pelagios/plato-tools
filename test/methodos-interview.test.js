@@ -37,13 +37,15 @@ test('each pair of answers that names a recipe gives it, with its questions, and
   }
 });
 
-test('Map your data asks nothing that must be answered: a list of names, places on a map, and the plan is its nine steps, every yes-or-no question No until it is changed (S7)', () => {
+test('Map your data asks nothing that must be answered: a list of names, places on a map, and the plan is its eleven steps, every yes-or-no question No until it is changed (S7)', () => {
   const c = choose('table', 'map');
   assert.deepEqual(questionsFor(c).map((q) => [q.key, q.default]), [['has-regions', false], ['will-draw', false], ['will-publish', false], ['will-mint', false]]);
   assert.equal(answered(c, {}), true);
   const a = answersFor(c, {});
   assert.deepEqual(a, { target: 'plato-json', 'has-regions': false, 'will-draw': false, 'will-publish': false, 'will-mint': false });
-  assert.deepEqual(plan(c.recipe, a).steps.map((s) => s.id), ['columns', 'check', 'dataset', 'lookup', 'review', 'apply', 'again', 'compare', 'out']);
+  assert.deepEqual(plan(c.recipe, a).steps.map((s) => s.id), ['columns', 'check', 'dataset', 'lookup', 'review', 'apply', 'locate', 'again', 'compare', 'see', 'out']);
+  // The question about the map, in plain words: what happens to the places not found.
+  assert.equal(questionsFor(c).find((q) => q.key === 'will-draw').question, 'Some places may not be found. Do you want to place them by hand on a map afterwards?');
   // A Yes is still an answer: the default is taken only where none is given (the control).
   assert.ok(plan(c.recipe, answersFor(c, { 'will-draw': true })).steps.some((s) => s.id === 'place'));
   // A workflow whose questions have no default still waits for them (Places from an edition: the control that `answered` can be false).
@@ -92,12 +94,15 @@ test('regions answered Yes: the regions step and the step that records them are 
   assert.deepEqual([no.unavailable, no.notes], [[], []]);
   assert.ok(!no.steps.some((s) => s.id === 'regions' || s.id === 'relate') && no.steps.some((s) => s.id === 'apply'));
   // Stephen's rule, kept: a recipe naming a step not available yet plans it with its reason, skips it, and says so at the end.
-  const R = { ...RECIPES['map-your-data'], steps: [...RECIPES['map-your-data'].steps.slice(0, 3), { id: 'adopt', op: 'adopt', from: { dataset: 'dataset.dataset' } }] };
+  // (Finding places in a text is the one such operation now: taking the matched places' locations, once the example here, is a step of its own.)
+  assert.notEqual(OPERATIONS['text.find'].available, true);
+  assert.equal(OPERATIONS.locate.available, true);
+  const R = { ...RECIPES['map-your-data'], steps: [...RECIPES['map-your-data'].steps.slice(0, 3), { id: 'find', op: 'text.find', from: { files: '$files' } }] };
   const sk = plan('map-your-data', a, { recipes: { 'map-your-data': R } });
-  assert.equal(sk.steps.find((s) => s.id === 'adopt').available, OPERATIONS.adopt.available);
-  assert.deepEqual(sk.unavailable, ['adopt']);
+  assert.equal(sk.steps.find((s) => s.id === 'find').available, OPERATIONS['text.find'].available);
+  assert.deepEqual(sk.unavailable, ['find']);
   assert.equal(sk.blocked, undefined, 'nothing blocks the workflow');
-  assert.deepEqual(sk.notes, ['“Take each identified place\'s location from its match” was not done: it is not yet available.']);
+  assert.deepEqual(sk.notes, ['“Find the places named in a text” was not done: it is not yet available.']);
 });
 
 test('the "no workflow yet" feedback link opens a new issue, labelled Methodos, titled with the two answers in words', () => {

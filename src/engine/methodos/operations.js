@@ -95,11 +95,22 @@ export const OPERATIONS = Object.fromEntries([
   // page it is Krisis's Finish run.
   op({ key: 'relate.containment', title: 'Record the decisions, with the region each place is in', tool: 'Krisis',
     takes: { subjects: { types: ANY }, work: { types: ['work.krisis'] } }, gives: { dataset: 'dataset' } }),
+  // The locations of the places the review matched, taken together (src/engine/chora/locate.js): one geometry
+  // attestation for each place whose accepted match has a location that may be copied, from the point the
+  // gazetteer answered with (kept in the review's work file: no request is made), under the upstream source's
+  // licence, which only the work file keeps (its lookups' attribution): so it takes the review beside the
+  // dataset the decisions were recorded in. It writes no identity: a close match stays close. On the page it is
+  // run from the tracker, which first says what it would do, in counts, and waits for one press (page.js).
+  // Nothing to use, or declined: the dataset is handed on as it was.
+  op({ key: 'locate', title: 'Use the locations of the places you matched', tool: 'Chora',
+    takes: { dataset: { types: ANY }, work: { types: ['work.krisis'] } }, gives: { dataset: 'dataset' } }),
+  // The places seen on the map before they are written out: the dataset shown in Chora (#chora). Said done, it is
+  // handed on as it is; a dataset saved in Chora from it (a place put there by hand) is the step's instead (page.js, placed).
+  op({ key: 'map.view', title: 'See your places on a map', tool: 'Chora', kind: 'interactive',
+    waitsFor: 'you to look at your places on the map, and to say when you have',
+    takes: { dataset: { types: ANY } }, gives: { dataset: 'dataset' } }),
   // Not yet: each declared, with its reason, so that a recipe can name it and the runner can say why
   // it cannot start, rather than doing something else under its name.
-  op({ key: 'adopt', title: "Take each identified place's location from its match", tool: 'Chora',
-    takes: { dataset: { types: ANY } }, gives: { dataset: 'dataset' },
-    available: "Adopting a match's location is done by hand in Chora (\"Find in a gazetteer…\", then \"Adopt: this place is that record, located there\"), within the step that draws or traces the places: it is not a step of its own." }),
   op({ key: 'text.find', title: 'Find the places named in a text', tool: 'Hermes', networked: true, cancel: 'keeps-partial',
     takes: { files: { types: ['files'] } }, gives: { work: 'work.hermes-text' },
     available: 'Finding places in a text is deferred (the llm-extract branch).' }),

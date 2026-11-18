@@ -637,6 +637,9 @@ code.code-chip { font-family: var(--font-mono); font-size: .85em; padding: 0 .3e
 .methodos-verdict { margin: .5rem 0; font-weight: 700; }
 .methodos-plan .meanwhile { margin: .25rem 0; padding-left: 1.25rem; }
 .methodos-buttons { display: flex; flex-wrap: wrap; gap: .5rem; margin: .75rem 0 0; }
+/* The step that takes the matched places' locations: the box for sources with no licence stated, above its buttons. */
+.methodos-locate-unknown { margin: .6rem 0 0; }
+.methodos-locate-unknown .warn { display: block; margin-top: .25rem; }
 .methodos-tracker { border-color: var(--accent); }
 .track-where { margin: 0 0 .5rem; font-weight: 700; }
 .track { list-style: none; margin: 0; padding: 0; counter-reset: track; }
