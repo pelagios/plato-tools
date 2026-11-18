@@ -953,6 +953,17 @@ h2 .greek-name { margin-left: .45rem; }
 .expert > summary { cursor: pointer; color: var(--muted); font-size: .95rem; }
 .expert[open] > summary { color: var(--fg); }
 .expert-note { margin: .4rem 0 .6rem; color: var(--muted); font-size: .92rem; }
+/* The folds within a step's own panel (the lookup's, the review's end): lighter than the step's, with no rule of their own above a boxed panel's contents. */
+.lookup-expert, .finish-expert { margin: .7rem 0 .5rem; border-top: 0; padding-top: 0; }
+.lookup-expert[open], .finish-expert[open] { border-left: 2px solid var(--line); padding-left: .7rem; }
+.finish-expert { align-self: stretch; }
+/* At a publishing step of a scholar-facing workflow the list and its button are the step's own: not "or, to publish it,". */
+body[data-plain] #action > .actions.publishing > .or { display: none; }
+.finish-expert .draft-answers { margin: .4rem 0 .7rem; border: 1px solid var(--line); border-radius: 8px; padding: .3rem .8rem .6rem; }
+.finish-expert .draft-answers label { display: block; margin-top: .3rem; }
+.finish-expert .draft-answers legend { font-family: var(--font-text); font-size: .98rem; }
+.finish-expert .draft-answers small { display: block; margin-top: .4rem; color: var(--muted); }
+.lookup-expert .lookup-sent { margin: .6rem 0 .25rem; }
 .candidate .acts-hint { margin: .45rem 0 .1rem; color: var(--muted); font-size: .88rem; line-height: 1.4; }
 .candidate .kind .type-code { color: var(--muted); font-size: .85rem; }
 .columns-table .column-hint { display: block; margin-top: .3rem; color: var(--muted); font-size: .85rem; line-height: 1.35; }

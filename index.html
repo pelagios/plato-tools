@@ -260,6 +260,10 @@
       <label for="lookup-places">Which places</label>
       <select id="lookup-places"></select>
       <button id="lookup-only-unlinked" type="button" class="link">Only places without a gazetteer link</button>
+      <!-- In a scholar-facing workflow (Map your data) the service, the block below and the queries exactly as sent are put in here, folded
+           (src/app.js, plainWords): which places and the button are the choices left. Outside one it is hidden, and every part is where it was. -->
+      <details id="lookup-expert" class="expert lookup-expert" hidden><summary></summary><p class="expert-note"></p><div id="lookup-expert-body"></div><div id="lookup-expert-sent"></div></details>
+      <div id="lookup-advanced">
       <label><input id="lookup-all-names" type="checkbox"> Also send each place's other names, one query each (the preview shows the cost)</label>
       <!-- Krisis × Methodos: query variants (opt-in); its words are words.js variantWords, put in by src/app.js. -->
       <label><input id="lookup-variants" type="checkbox"> <span id="lookup-variants-text"></span></label>
@@ -276,6 +280,7 @@
       <!-- A place whose own address is a gazetteer's (a TEI ref, a Recogito link) is kept so, and flagged for the reviewer when WHG's best candidate is further than this (lookup.js refCheck). -->
       <label for="lookup-disagree-km">Flag a place whose own gazetteer link is further than this many kilometres from WHG's best candidate (it is then left for you, never accepted in bulk)</label>
       <input id="lookup-disagree-km" type="number" min="1" max="20015" step="1" value="25">
+      </div>
       <!-- Scope (Issue #33): the workflow's, or outside one this tab's, with a way to edit it (src/scope-page.js). -->
       <div id="lookup-scope" class="lookup-scope"></div>
       <div id="lookup-preview"></div>
@@ -462,17 +467,20 @@
         <p id="candidates-status" aria-live="polite" hidden></p>
       </div>
       <fieldset class="finish">
-        <legend>Finish: what to make of your decisions</legend>
-        <label><input type="radio" name="review-output" value="dataset" checked> Your dataset with the new attestations added, as a PLATO JSON document, checked with the version check</label>
-        <label><input type="radio" name="review-output" value="attestations"> A PLATO file of only the new attestations</label>
+        <!-- Each part marked data-plain-words is said in plain words in a scholar-facing workflow (src/engine/plain.js, PLAIN_FINISH, by that key; src/app.js,
+             plainWords), and in these, its own, outside one. There, the changed decision's two ways and the candidate set above are put into the fold below. -->
+        <legend data-plain-words="legend">Finish: what to make of your decisions</legend>
+        <label><input type="radio" name="review-output" value="dataset" checked> <span data-plain-words="dataset">Your dataset with the new attestations added, as a PLATO JSON document, checked with the version check</span></label>
+        <label><input type="radio" name="review-output" value="attestations"> <span data-plain-words="attestations">A PLATO file of only the new attestations</span></label>
         <fieldset class="draft-answers">
-          <legend>If you have changed a decision since you last finished, and your dataset is not yet published</legend>
-          <label><input type="radio" name="draft-answers" value="withdraw" checked> Withdraw the earlier answer, and keep it in the dataset (keep the history)</label>
-          <label><input type="radio" name="draft-answers" value="replace"> Replace the earlier answer: take it out, and write the new one</label>
-          <small>A published dataset always keeps its earlier answers: there, a changed decision withdraws them, whichever you choose.</small>
+          <legend data-plain-words="draft-legend">If you have changed a decision since you last finished, and your dataset is not yet published</legend>
+          <label><input type="radio" name="draft-answers" value="withdraw" checked> <span data-plain-words="withdraw">Withdraw the earlier answer, and keep it in the dataset (keep the history)</span></label>
+          <label><input type="radio" name="draft-answers" value="replace"> <span data-plain-words="replace">Replace the earlier answer: take it out, and write the new one</span></label>
+          <small data-plain-words="draft-note">A published dataset always keeps its earlier answers: there, a changed decision withdraws them, whichever you choose.</small>
         </fieldset>
+        <details id="finish-expert" class="expert finish-expert" hidden><summary></summary><p class="expert-note"></p><div id="finish-expert-body"></div></details>
         <p id="finish-cites" class="note"></p>
-        <button id="finish" type="button" class="primary">Finish</button>
+        <button id="finish" type="button" class="primary" data-plain-words="button">Finish</button>
       </fieldset>
     </div>
   </section>
