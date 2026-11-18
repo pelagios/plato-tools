@@ -47,7 +47,8 @@ import { workflowStore } from './methodos/store.js';
 import { whgProjects } from './methodos/whg.js';
 import { workbench, sharedToken, isId } from './engine/workbench.js';
 import { chosenWords, wentOn, resultLabel } from './methodos/layout.js';
-import { outcome, targetList, PLAIN_TOOLS, PLAIN_REPORT, decisionsSummary, DECISION_HINT, COUNTRY_HINT, TYPE_CODE, EXPERT_SUMMARY, EXPERT_NOTE } from './engine/plain.js';
+import { outcome, targetList, PLAIN_TOOLS, PLAIN_REPORT, decisionsSummary, DECISION_HINT, COUNTRY_HINT, TYPE_CODE, EXPERT_SUMMARY, EXPERT_NOTE,
+  PLAIN_FINISH, PLAIN_PARTS, FINISH_EXPERT_NOTE, LOOKUP_EXPERT_NOTE, LOOKUP_SENT, plainCites, PLAIN_RECORDED } from './engine/plain.js';
 import { isCountryHeading } from './engine/hermes/columns.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
@@ -343,7 +344,7 @@ function onDone({ report, outputs, work: found, incomplete }) {
   if (state.action === 'apply' && found && work && !incomplete) {
     Object.assign(work, { finished: found.finished, draft_answers: found.draft_answers });
     // Said with the result, not in the review's warning, which is for what is wrong with this Finish (a base address that differs).
-    unsaved++; $('summary').insertAdjacentText('beforeend', ' ' + KRISIS_WITHDRAW.recorded);
+    unsaved++; $('summary').insertAdjacentText('beforeend', ' ' + (isPlain() ? PLAIN_RECORDED : KRISIS_WITHDRAW.recorded));
   }
 }
 function renderReport(report) { $('report').innerHTML = reportHtml(report, state.action); renderOutcome(report); }
@@ -1130,6 +1131,39 @@ const EXPERT_PARTS = {
 };
 const expertNodes = Object.fromEntries(Object.entries(EXPERT_PARTS).map(([k, sel]) => [k, document.querySelector(sel)]));
 const expertMarks = new Map();
+// The folds within a step's own panel, in a scholar-facing workflow: in the lookup, the service, the other names and spellings, the language, the
+// filters and the queries exactly as sent (which places, and the button, are the choices left); at the review's end, the two ways of treating a
+// changed decision and the candidate set (but not at the step that records the decisions with the region each place is in, which asks for the
+// suggestions to be exported first: there the candidate set is the step's own, and stays in sight). Each part is put into its fold, closed, and
+// put back where it was when the workflow is left.
+const INNER_FOLDS = [
+  { box: 'lookup-expert', body: 'lookup-expert-body', note: LOOKUP_EXPERT_NOTE, parts: ['#lookup .lookup-service', '#lookup-advanced'] },
+  { box: 'finish-expert', body: 'finish-expert-body', note: FINISH_EXPERT_NOTE, parts: ['.review-end .draft-answers', '.review-end .candidate-export'] },
+].map((f) => ({ ...f, nodes: f.parts.map((sel) => document.querySelector(sel)) }));
+const innerMarks = new Map();
+// The page's own words for what a scholar-facing workflow says in plain ones (index.html, data-plain-words; the list beside "Prepare").
+const OWN_WORDS = new Map([...document.querySelectorAll('[data-plain-words]')].map((e) => [e, e.textContent]));
+const OWN_PARTS = new Map([...document.querySelectorAll('#part option')].map((o) => [o, o.textContent]));
+let plainShown = false;
+/** The lookup's and the review's own parts in plain words, their expert's choices folded (a scholar-facing workflow), or as they are (outside one). */
+function plainWords(plain) {
+  for (const f of INNER_FOLDS) {
+    const box = $(f.box), body = $(f.body);
+    for (const node of f.nodes) {
+      const fold = plain && !(node.classList.contains('candidate-export') && workflowStep?.op === 'relate.containment');
+      if (fold && node.parentElement !== body) { const mark = document.createComment('expert'); node.before(mark); innerMarks.set(node, mark); body.append(node); }
+      if (!fold && node.parentElement === body) { innerMarks.get(node).replaceWith(node); innerMarks.delete(node); }
+    }
+    box.hidden = !plain;
+    if (!plain) box.open = false;
+    box.querySelector('summary').textContent = EXPERT_SUMMARY; box.querySelector('.expert-note').textContent = f.note;
+  }
+  for (const [e, own] of OWN_WORDS) e.textContent = plain ? PLAIN_FINISH[e.dataset.plainWords] : own;
+  for (const [o, own] of OWN_PARTS) o.textContent = plain ? PLAIN_PARTS[o.value] : own;
+  // The preview puts the queries exactly as sent where they belong (the fold, or under its own words), and a review open says what saving cites in the
+  // words of the page as it now is: both drawn again when that changes (once the page's own script has run to its end: this is first called before it has).
+  if (plain !== plainShown) { plainShown = plain; queueMicrotask(() => { refreshPreview(); if (work) $('finish-cites').textContent = (plain ? plainCites : LW.cites)(citedSources()); }); }
+}
 /**
  * In a scholar-facing workflow, step 2 shows the step's own action and nothing else: Check or Convert at a step that
  * checks or converts, Prepare at a publishing step, the lookup's panel at the steps that look up and review; the rest
@@ -1149,6 +1183,7 @@ function expertFold() {
   box.hidden = !plain || !body.children.length;
   if (!plain) box.open = false;
   box.querySelector('summary').textContent = EXPERT_SUMMARY; box.querySelector('.expert-note').textContent = EXPERT_NOTE;
+  plainWords(plain);
   // The step is said in the centre's title: step 2's own heading ("Check it, convert it, …") is for the tools used on their own.
   $('action-h').hidden = plain && !tool;
   // With every step done, Convert is what is left of step 2: it stands alone, as the main button, without Check.
@@ -1799,7 +1834,7 @@ function render(focus) {
   $('review-progress').textContent = W.progress(p, order.length ? cursor + 1 : 0);
   $('review-prev').disabled = step(-1) === null; $('review-next').disabled = $('review-skip').disabled = step(1) === null;
   Object.assign(state, { phase: 'reviewing', work, review: { cursor, subject: order[cursor] || null, current, filter: $('review-filter').value, ...p } });
-  $('finish-cites').textContent = LW.cites(citedSources());   // Krisis: gazetteer lookup, one attestation per source
+  $('finish-cites').textContent = (isPlain() ? plainCites : LW.cites)(citedSources());   // Krisis: gazetteer lookup, one attestation per source
   drawBulk();   // Krisis × Methodos
   drawRegions();   // Krisis: region review
   wikidata.refresh();   // Krisis: Wikidata items (#36)
@@ -2307,8 +2342,8 @@ async function refreshPreview() {
   // Send is offered once the permission allows it; until then, the module's one line in its place.
   needsLine($('lookup-permission'), svc);
   send.hidden = !mayLookUp(svc);
-  if (svc.problem) { const w = document.createElement('p'); w.className = 'warn'; withCodes(w, svc.problem); box.replaceChildren(w); return; }
-  if (!readable(input) && !reviewWork()) { box.innerHTML = `<p>${escapeHtml(LW.noDataset)}</p>`; return; }
+  if (svc.problem) { const w = document.createElement('p'); w.className = 'warn'; withCodes(w, svc.problem); box.replaceChildren(w); $('lookup-expert-sent').replaceChildren(); return; }
+  if (!readable(input) && !reviewWork()) { box.innerHTML = `<p>${escapeHtml(LW.noDataset)}</p>`; $('lookup-expert-sent').replaceChildren(); return; }
   const g = await gatherPlaces();
   if (run !== previewRun) return;
   const places = g?.places ?? null;
@@ -2316,6 +2351,8 @@ async function refreshPreview() {
   showRegionOffer(g);   // Krisis: region review
   const p = planFor(svc, lookupOptions(), places).preview;
   const lines = LOOKUP_WORDS.preview(p);
+  // In a scholar-facing workflow the queries are in the lookup's fold, and the line that leads to them ("The first 6 queries, as sent:") goes there with them.
+  const folded = isPlain(), lead = folded && p.first.length && /as sent:$/.test(lines.at(-1)) ? lines.pop() : LOOKUP_SENT;
   if (svc.whg) lines.splice(1, 0, LW.share(p.requests, WHG_REQUESTS_A_DAY));
   if (!places) lines.push(LOOKUP_WORDS.linksUnknown);
   // Places the table gave no id are not among `places`: said, with how many, and what to do, where the lookup shows it.
@@ -2324,8 +2361,11 @@ async function refreshPreview() {
   const nothing = noIds && !places.length ? LOOKUP_WORDS.allNoIds(noIds) : LOOKUP_WORDS.noPlaces;
   // The dataset's language, where the preview names it, is shown as code.
   const said = lines.map(escapeHtml).join(' '), at = p.lang ? ` sent as ${escapeHtml(p.lang)}, ` : null;
+  // The queries exactly as sent: under the preview's words; in a scholar-facing workflow, in the lookup's fold (plainWords), under a line that says what they are.
+  const queries = p.first.length ? `<ol class="lookup-queries">${p.first.map((q) => `<li><code>${escapeHtml(JSON.stringify(shortTypes(q)))}</code></li>`).join('')}</ol>` + typesSent(p.first) : '';
   box.innerHTML = `<p>${at ? said.replace(at, ` sent as <code class="code-chip">${escapeHtml(p.lang)}</code>, `) : said}</p>`
-    + (p.first.length ? `<ol class="lookup-queries">${p.first.map((q) => `<li><code>${escapeHtml(JSON.stringify(shortTypes(q)))}</code></li>`).join('')}</ol>` + typesSent(p.first) : `<p${nothing === LOOKUP_WORDS.noPlaces ? '' : ' class="warn" id="lookup-no-ids"'}>${escapeHtml(nothing)}</p>`);
+    + (p.first.length ? (folded ? '' : queries) : `<p${nothing === LOOKUP_WORDS.noPlaces ? '' : ' class="warn" id="lookup-no-ids"'}>${escapeHtml(nothing)}</p>`);
+  $('lookup-expert-sent').innerHTML = folded && queries ? `<p class="lookup-sent">${escapeHtml(lead)}</p>${queries}` : '';
   send.textContent = LW.send(p.queries, shortName(svc.service));
   send.disabled = !p.queries || !!looking;
   // `scope`: the keys of the Scope this preview was drawn with, so that a check can wait for the preview of the Scope in force (it is drawn again, asynchronously, after each change).

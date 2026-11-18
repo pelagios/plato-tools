@@ -139,7 +139,75 @@ export function decisionsSummary(report) {
  */
 export const PLAIN_WAITS = {
   review: 'you to decide on each suggested match, in the review below',
+  // The optional steps: the regions (asked for with "the table says which region each place is in"), the Wikidata items, and the places put on the map by hand.
+  'lookup.levels': 'you to settle the regions your places are in, the widest first: press “Review the regions level by level” below, and decide on each region',
+  'wikidata.items': 'you to create the Wikidata items, in the panel “Wikidata items” below the review: search Wikidata for the places with no match, run the batch yourself in QuickStatements, then check and record the new items there',
+  place: 'you to put the places still without a location on the map, by drawing or tracing them, and to save there (saving on the map does this step)',
 };
+
+/**
+ * The step done on the map by hand (drawing or tracing the places still without a location), in plain words: what the
+ * workflow says there in place of the tools' own words, which name the map by its own name (Chora).
+ */
+export const PLAIN_MAP = {
+  open: 'Open the map',
+  chooseSaved: 'Choose the file you saved from the map first, in “Choose your data”.',
+  unchanged: (names) => `${names} is the file that went to the map, as it was: nothing drawn there is in it. Save on the map once you have drawn, or choose the file you saved there in “Choose your data”; or, if there was nothing to draw, say so (“Nothing to draw: go on with this dataset”).`,
+  notFromIt: (names) => `Open ${names} on the map and save there, or choose a file saved from it and say the step is done.`,
+  saved: (names, title) => `${names}, saved on the map: the step “${title}” is done with it.`,
+  nothingDrawn: (names) => `Nothing was drawn on the map: the workflow goes on with ${names}, as it was.`,
+  takenUp: (chosenAgain = '') => `This step is done on the map.${chosenAgain} Open the map to draw: saving there does this step, with the file it writes. Or choose a file you saved from the map before, and say the step is done.`,
+  handback: (names) => ` The map had saved ${names}: choose it in “Choose your data”, and say the step is done.`,
+};
+
+/**
+ * The publishing steps in plain words. PLAIN_PARTS: the entries of the list beside "Prepare", by their values (index.html,
+ * #part), as the list names them in a scholar-facing workflow. PLAIN_PUBLISH: what each step does, by its operation.
+ */
+export const PLAIN_PARTS = {
+  report: 'Check how well the dataset is described, and write the details an archive asks for',
+  mint: 'Give every place and source a permanent web address',
+  site: 'Make a web site of the places (for GitHub Pages)',
+  w3id: 'Write the rules that keep the addresses permanent (w3id.org)',
+};
+export const PLAIN_PUBLISH = {
+  'publish.mint': 'It gives each place, and each statement about it, a permanent web address under the address of your dataset, so that others can cite them; the working ids are replaced.',
+  'publish.report': 'It reports what the description of your dataset still needs for others to find and reuse it (the FAIR report), and writes the details an archive such as Zenodo asks for.',
+  'publish.site': 'It makes a web site of your places, a page for each, ready to be put on GitHub Pages.',
+  'publish.w3id': 'It writes the rules that w3id.org needs, so that the addresses of your places still work if the site ever moves.',
+};
+/** The part of the list beside "Prepare" that a publishing operation prepares, in plain words. */
+export const plainPart = (op) => PLAIN_PARTS[String(op).replace(/^publish\./, '')];
+/** What the workflow says at a publishing step: which entry to choose, what to press, and what it does. */
+export const publishNext = (op) => `In the list below, choose “${plainPart(op)}”, then press Prepare. ${PLAIN_PUBLISH[op]}`;
+
+/**
+ * The end of the review, where the decisions are saved (the tools' "Finish"), in plain words, by the key each part of
+ * it has on the page (index.html, data-plain). The two ways of treating a changed decision, and the set of suggestions
+ * to publish, are behind the fold there.
+ */
+export const PLAIN_FINISH = {
+  legend: 'Save your decisions',
+  dataset: 'Add my decisions to my places (the usual choice). The result is compared with what you began with, to show that nothing was lost or changed.',
+  attestations: 'Only my decisions, as a file of their own, to add to a dataset later',
+  'draft-legend': 'If you have changed your mind about a match since you last saved, and your data is not yet published',
+  withdraw: 'Keep the earlier answer on record, marked as withdrawn (this keeps the history)',
+  replace: 'Remove the earlier answer, and write the new one in its place',
+  'draft-note': 'Once your data is published, its earlier answers are always kept: a changed decision marks them as withdrawn, whichever you choose.',
+  button: 'Save your decisions',
+};
+/** Above the button that saves the decisions: what saving will cite (the tools' own: words.js, LOOKUP_WORDS.cites). `sources` are [{ title, '@id'? }]. */
+export const plainCites = (sources) => (sources.length
+  ? `Each decision is saved with its source: ${sources.map((s) => (s['@id'] ? `${s.title} (${s['@id']})` : s.title)).join('; ')}.`
+  : 'Nothing is decided yet, so there is nothing to save.');
+/** After the decisions are saved, in place of the tools' "This Finish is recorded in the review …". */
+export const PLAIN_RECORDED = 'What was saved, and by whom, is noted in your review, so that saving again later can tell what it wrote before: save the review too (“Save the review”).';
+/** What the workflow says to press at the step that saves the decisions. */
+export const PRESS_SAVE = `“${PLAIN_FINISH.button}”, below the review`;
+/** The fold within the review's end, and within the lookup: what each holds. */
+export const FINISH_EXPERT_NOTE = 'What happens to an answer you change later, and the list of suggestions for publishing. Neither is needed to save your decisions.';
+export const LOOKUP_EXPERT_NOTE = 'Another service, each place’s other names and spellings, the language of the names, filters, and the first queries exactly as they would be sent. None of it is needed to look your places up.';
+export const LOOKUP_SENT = 'The first queries, exactly as they would be sent:';
 /** Under a candidate's buttons in the review: what the two ways of saying no each do. */
 export const DECISION_HINT = '“Not this one” sets this suggestion aside and writes nothing to your data. “Different places” records, with your reason, that the two are known to be different places.';
 /** The label of the list that says what a "Same place" is recorded as (exact match, close match). */

@@ -4436,7 +4436,7 @@ def chora_seams_checks(pw, url, tmp):
                 if not detected_again(p, ['applied.json']): return False, {**got, way: 'not chosen again'}
                 until(p, "() => document.querySelector('#methodos-track li[data-step=\"place\"]')?.dataset.state === 'current'", 15)
                 p.click('#methodos-done')
-                until(p, "() => /is the dataset that went to Chora/.test(document.getElementById('methodos-message').textContent)", 15)
+                until(p, "() => /is the file that went to the map, as it was: nothing drawn there is in it/.test(document.getElementById('methodos-message').textContent)", 15)
                 g = {'refused': p.evaluate(JOIN_STATE), 'offered': p.is_visible('#methodos-as-is')}
                 if way == 'nothing to draw':
                     p.click('#methodos-as-is')
@@ -5841,7 +5841,7 @@ def myd_tracker_checks(pw, url, tmp):
             offered = use(page, 'places-with-id.json')
             t2 = track(page)
             ok = (before == ['places-with-id.csv'] and offered == 'Use places-with-id.json (made by the step “Prepare your places”)'
-                  and 'This step is yours: it waits for the regions to be found in the gazetteer' in t['message'] and 'press "Review the regions level by level" below' in t['message']
+                  and 'This step is yours: it waits for you to settle the regions your places are in, the widest first' in t['message'] and 'press “Review the regions level by level” below' in t['message']
                   and not re.search(r'step \d', t['message']) and t2['steps'].get('regions') == 'current' and t2['use'] is None)
             return ok, {'chosen at the step': before, 'offered': offered, 'said': t['message'], 'steps': t2['steps'], 'offered once used': t2['use']}
         finally: ctx.close()
@@ -5853,6 +5853,22 @@ def myd_tracker_checks(pw, url, tmp):
     # "More options (for experts)" is on every one of them, and opened (at the columns) it does show the Data Cube and
     # promotedFrom; the engine's own words for the temporary ids (which say --base) are in the report of the file written
     # for WHG, folded under the plain sentence that stands for them.
+    # The folds within the lookup and the review's end, read during the same walk (folds), and checked after it.
+    folds = {}
+    LOOKUP_FOLD = """() => { const f = document.getElementById('lookup-expert'), vis = (e) => !!e && !!e.offsetParent && e.checkVisibility() && !e.closest('details:not([open]) > :not(summary)'), el = (id) => document.getElementById(id);
+      const ids = ['lookup-all-names', 'lookup-variants', 'lookup-lang', 'lookup-countries', 'lookup-near', 'lookup-near-km', 'lookup-disagree-km'];
+      return { shown: vis(f), open: f.open, summary: f.querySelector('summary').textContent,
+        inside: ids.filter((id) => !!el(id).closest('#lookup-expert')), visible: ids.filter((id) => vis(el(id))),
+        service: vis(document.querySelector('input[name="lookup-service"][value="other"]')),
+        queries: [...f.querySelectorAll('.lookup-queries code')].filter(vis).map((c) => c.textContent), lead: f.querySelector('.lookup-sent')?.textContent ?? null,
+        outside: document.querySelectorAll('#lookup-preview .lookup-queries code').length,
+        left: ['whg-token', 'lookup-places', 'lookup-send'].filter((id) => vis(el(id)) && !el(id).closest('#lookup-expert')),
+        preview: el('lookup-preview').innerText.replace(/\\s+/g, ' ').trim() }; }"""
+    FINISH_FOLD = """() => { const f = document.getElementById('finish-expert'), vis = (e) => !!e && !!e.offsetParent && e.checkVisibility() && !e.closest('details:not([open]) > :not(summary)'), q = (s) => document.querySelector(s);
+      return { shown: vis(f), open: f.open, summary: f.querySelector('summary').textContent, legend: q('.finish > legend').textContent, button: q('#finish').textContent,
+        choices: [...document.querySelectorAll('input[name="review-output"]')].map((i) => [i.value, vis(i), i.closest('label').textContent.trim()]),
+        draft: [...document.querySelectorAll('input[name="draft-answers"]')].map((i) => [i.value, vis(i), !!i.closest('#finish-expert'), i.closest('label').textContent.trim()]),
+        candidates: [vis(q('#export-candidates')), !!q('#export-candidates').closest('#finish-expert')], cites: q('#finish-cites').textContent }; }"""
     def plain_screens():
         decided = lambda s: sum(1 for c in (s.get('work') or {}).get('candidates', []) if (c.get('decision') or {}).get('kind') == 'match')
         ctx, page = fresh()
@@ -5879,12 +5895,27 @@ def myd_tracker_checks(pw, url, tmp):
             page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
             until(page, "() => /^Send 4 queries to WHG$/.test(document.getElementById('lookup-send').textContent) && !document.getElementById('lookup-send').disabled", 60)
             at('lookup')
+            # The lookup's own fold: closed, with the expert's choices and the queries as sent in it; opened, they are there to be used (a language
+            # given changes what the preview says would be sent, and taken away again leaves it as it was).
+            folds['lookup closed'] = page.evaluate(LOOKUP_FOLD)
+            page.click('#lookup-expert > summary'); page.wait_for_timeout(200)
+            folds['lookup open'] = page.evaluate(LOOKUP_FOLD)
+            page.fill('#lookup-lang', 'la'); page.press('#lookup-lang', 'Tab')
+            try: page.wait_for_function("() => /sent as la,/.test(document.getElementById('lookup-preview').textContent)", timeout=T(15) * 1000); folds['language given'] = page.evaluate(LOOKUP_FOLD)
+            except Exception as e: folds['language given'] = {'error': str(e)[:200], **page.evaluate(LOOKUP_FOLD)}
+            page.fill('#lookup-lang', ''); page.press('#lookup-lang', 'Tab')
+            until(page, "() => !/sent as la,/.test(document.getElementById('lookup-preview').textContent) && /^Send 4 queries to WHG$/.test(document.getElementById('lookup-send').textContent) && !document.getElementById('lookup-send').disabled", 30)
+            page.click('#lookup-expert > summary')
             page.click('#lookup-send'); step_is(page, 'lookup', 'done', 90)
             until(page, "() => !document.getElementById('bulk-accept').disabled", 30); at('review')
             hint = page.eval_on_selector_all('#review-place .acts-hint', 'es => es.map((e) => e.textContent)')
             label = page.inner_text('label[for="identity-type"]')
             page.click('#bulk-accept'); wait_state(page, lambda s: decided(s) == 4, T(15), 'accepted')
             page.click('#methodos-done'); step_is(page, 'review', 'done', 15); at('apply')
+            folds['finish closed'] = page.evaluate(FINISH_FOLD); folds['finish said'] = track(page)['message']
+            page.click('#finish-expert > summary'); page.wait_for_timeout(200)
+            folds['finish open'] = page.evaluate(FINISH_FOLD)
+            page.click('#finish-expert > summary')
             page.check('input[name="review-output"][value="dataset"]')
             run(page, '#finish'); step_is(page, 'apply', 'done', 30)
             saved = page.inner_text('#summary')
@@ -5959,6 +5990,31 @@ def myd_tracker_checks(pw, url, tmp):
         finally: ctx.close()
     attempt('Map your data in plain words: from "Start", no screen of the eleven steps (nor of the two results) names the Data Cube, promotedFrom or --base, each has the closed fold "More options (for experts)" (which, opened, shows them), no headline names a tool and each row says the act before its tool; the review\'s label and hint and the decisions saved are in plain words; the spreadsheet is offered first and chosen, then the file for WHG, and each result says what came of it ("2 of 5 places would be accepted by WHG; 3 would be refused:", each reason, its examples and its remedy)', plain_screens)
 
+    def folds_ok():
+        lc, lo, lg, fc, fo = (folds.get(k) or {} for k in ('lookup closed', 'lookup open', 'language given', 'finish closed', 'finish open'))
+        IDS = ['lookup-all-names', 'lookup-variants', 'lookup-lang', 'lookup-countries', 'lookup-near', 'lookup-near-km', 'lookup-disagree-km']
+        return (
+            # Closed: none of the expert's choices is in sight, nor a query as sent; the token, which places and the button are, outside the fold.
+            lc.get('shown') is True and lc.get('open') is False and lc.get('summary') == 'More options (for experts)' and lc.get('inside') == IDS and lc.get('visible') == []
+            and lc.get('service') is False and lc.get('queries') == [] and lc.get('outside') == 0 and lc.get('left') == ['whg-token', 'lookup-places', 'lookup-send']
+            and lc.get('preview', '').startswith('Would look up 4 places in World Historical Gazetteer: 4 queries in 1 request.') and 'queries, as sent:' not in lc.get('preview', '') and '{"' not in lc.get('preview', '')
+            # Opened: every one of them is there to be used, with the four queries exactly as they would be sent, under their line.
+            and lo.get('open') is True and lo.get('visible') == IDS and lo.get('service') is True and len(lo.get('queries') or []) == 4 and all(q.startswith('{"') and '"query":"' in q for q in lo['queries'])
+            and lo.get('lead') == 'The first 4 queries, as sent:' and lo.get('left') == lc.get('left')
+            # Used there: the language given is in what the preview says, and in each query of the fold.
+            and 'error' not in lg and 'sent as la,' in lg.get('preview', '') and len(lg.get('queries') or []) == 4 and all('"la"' in q for q in lg['queries'])
+            # The review's end: the two choices in plain words, the changed decision's two ways and the candidate set in the fold, the button named as the step.
+            and fc.get('shown') is True and fc.get('open') is False and fc.get('legend') == 'Save your decisions' and fc.get('button') == 'Save your decisions'
+            and [c[:2] for c in fc.get('choices') or []] == [['dataset', True], ['attestations', True]] and fc['choices'][0][2].startswith('Add my decisions to my places (the usual choice).')
+            and fc['choices'][1][2] == 'Only my decisions, as a file of their own, to add to a dataset later'
+            and [d[:3] for d in fc.get('draft') or []] == [['withdraw', False, True], ['replace', False, True]] and fc.get('candidates') == [False, True]
+            and fc.get('cites', '').startswith('Each decision is saved with its source: World Historical Gazetteer') and 'attestation' not in fc.get('cites', '')
+            and folds.get('finish said') == 'Press “Save your decisions”, below the review.'
+            and fo.get('open') is True and [d[:3] for d in fo.get('draft') or []] == [['withdraw', True, True], ['replace', True, True]] and fo.get('candidates') == [True, True]
+            and fo['draft'][0][3] == 'Keep the earlier answer on record, marked as withdrawn (this keeps the history)' and fo['draft'][1][3] == 'Remove the earlier answer, and write the new one in its place')
+    check('Map your data in plain words: the lookup shows the token, which places and the button, with the service, the other names and spellings, the language, the filters and the queries exactly as sent in its own closed fold "More options (for experts)"; opened, each of those controls is there and works (a language given is in the preview and in the four queries as sent); the review\'s end is "Save your decisions", its two choices in plain words, with the changed decision\'s two ways and the candidate set in a fold of its own, each there when it is opened',
+          folds_ok(), folds)
+
     # ---- One walk to the end: the review after a reload, the comparison in one press, and what the format cannot hold
     # Opened outside any check, so a page that cannot be opened (--prove-it-fails: no storage on the page with no tools)
     # must not end the run: each check of the walk then fails for want of its page, as it should.
@@ -5987,8 +6043,8 @@ def myd_tracker_checks(pw, url, tmp):
         page.click('#methodos-done'); step_is(page, 'review', 'done', 15)
         t = track(page)
         r['reviewed'] = n == 4 and t['steps'].get('apply') == 'current'
-        return r['reviewed'] and t['message'] == 'Press Finish below.', {'decided': n, 'steps': t['steps'], 'said': t['message'], 'lookups': len(posts)}
-    attempt('Map your data (tracker): four places looked up in the stub of WHG and accepted, the review said done: the next step says "Press Finish below."', reviewed)
+        return r['reviewed'] and t['message'] == 'Press “Save your decisions”, below the review.', {'decided': n, 'steps': t['steps'], 'said': t['message'], 'lookups': len(posts)}
+    attempt('Map your data (tracker): four places looked up in the stub of WHG and accepted, the review said done: the next step says to press “Save your decisions”, below the review', reviewed)
 
     def reload_at_the_record():
         need('reviewed')
@@ -6007,7 +6063,7 @@ def myd_tracker_checks(pw, url, tmp):
         n = next(o['name'] for o in (done.get('outputs') or []) if o['name'].endswith('.krisis-dataset.json'))
         r['applied'] = download(page, n, out / n)
         made = len(re.findall(r'"identities"\s*:', r['applied'].read_text()))
-        return (offer.startswith('Open the review (') and 'the decisions you made are in it. Then press Finish, below the review.' in t['message'] and finish_before is False
+        return (offer.startswith('Open the review (') and 'the decisions you made are in it. Then press “Save your decisions”, below the review.' in t['message'] and finish_before is False
                 and decided(s) == 4 and total == 4 and made == 4 and track(page)['steps'].get('locate') == 'current'), \
             {'offered': offer, 'said': t['message'], 'Finish before': finish_before, 'decided': f'{decided(s)} of {total}', 'attestations written': made, 'steps': track(page)['steps']}
     attempt('Map your data (tracker): a reload after the review is said done offers "Open the review" (no Finish before it); it opens with 4 of 4 decided, and Finish writes 4 attestations as the step, the workflow then at the matched places\' locations', reload_at_the_record)

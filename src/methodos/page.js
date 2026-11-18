@@ -17,7 +17,7 @@ import { outputStore } from './outputs.js';
 import { stepAt, currentInput, startFiles, keptBy, keptFor, keptWords, distinct, projectWords, notKept } from './seams.js';
 import { regionsSettled, notReviewed, relateProblem, unexported, reviewDiffers, writesItself, columnsProblem } from '../engine/methodos/containment.js';
 import { stepMark, whereWords, lower } from './layout.js';
-import { lossyWords, toolTip, PLAIN_WAITS } from '../engine/plain.js';
+import { lossyWords, toolTip, PLAIN_WAITS, PLAIN_MAP, PLAIN_PUBLISH, plainPart, publishNext, PRESS_SAVE } from '../engine/plain.js';
 import { whyWords, shareLink, ENROL, WorkbenchError, WORDS, capWords } from '../engine/workbench.js';
 import { stateOf, fromSnapshot } from './whg.js';
 
@@ -36,7 +36,8 @@ const CHORA_STEPS = new Set(['place', 'trace', 'map.export']);
 // words, and is done by saying so (the dataset handed on as it is), or by a dataset saved on the map from it (placed).
 const VIEW = 'map.view';
 const onMap = (op) => CHORA_STEPS.has(op) || op === VIEW;
-const mapWords = (op) => (op === VIEW ? 'See your places on the map' : 'Open Chora');
+// (In a workflow in plain words, a recipe's `plain`, the map is named as the map: src/engine/plain.js, PLAIN_MAP.)
+const mapWords = (op, plain = false) => (op === VIEW ? 'See your places on the map' : plain ? PLAIN_MAP.open : 'Open Chora');
 /**
  * A step's tool and what it does, in a row of a list of steps: "Hermes: Match the columns to PLATO"; in a workflow in plain
  * words (a recipe's `plain`), the act first and the tool's own name after it, small, titled "Hermes: the tool that does this".
@@ -499,6 +500,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   const chain = (fn) => (queue = queue.then(fn).catch((e) => { say(e.message || String(e), true); render(false); }));
   const say = (words, warn = false) => { note = words ? { words, warn } : null; };
   const recipeOf = (r) => RECIPES[r.recipe?.key];
+  /** Whether the workflow followed is one said in plain words (a recipe's `plain`: Map your data). */
+  const plainWf = () => !!(wf && recipeOf(wf)?.plain);
   // The key of the files a workflow begins with, step 1's; undefined for a recipe that begins from none (Trace a historical map).
   const fileKey = (recipe) => Object.keys(recipe?.files || {}).find((k) => !recipe.files[k].late);
 
@@ -539,7 +542,10 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       // Agora's "Prepare" run on another part than the step's (its list, beside the button, left where it was): said, in
       // the list's own words, as a run on other files is; never dropped without a word.
       if (s && PARTS[s.op] && PARTS[run.op] && s.op !== run.op) {
-        say(`This run is not counted as the step “${s.title}”: it prepared another part, “${PARTS[run.op]}”. Choose “${PARTS[s.op]}” in the list beside “Prepare”, and press Prepare again.`, true); render(false); return;
+        // (In plain words the step's own message, which follows this one, says which entry to choose: it is not said twice.)
+        if (plainWf()) say(`This run is not counted as the step “${s.title}”: it prepared another part, “${plainPart(run.op)}”.`, true);
+        else say(`This run is not counted as the step “${s.title}”: it prepared another part, “${PARTS[run.op]}”. Choose “${PARTS[s.op]}” in the list beside “Prepare”, and press Prepare again.`, true);
+        render(false); return;
       }
       if (!s || runOf(s.op) !== run.op || OPERATIONS[s.op].kind !== 'automatic') return;
       let w = ['stopped', 'failed', 'cancelled'].includes(s.state) ? runner.invalidate(wf, s.id) : wf;
@@ -786,13 +792,13 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     if (s.op === 'place') {
       // By hand: the dataset saved in Chora, chosen in step 1 (as its save chooses it), or another.
       const files = page.files();
-      if (!files.length) throw new Error('Choose the dataset you saved in Chora in step 1 first.');
+      if (!files.length) throw new Error(plainWf() ? PLAIN_MAP.chooseSaved : 'Choose the dataset you saved in Chora in step 1 first.');
       // The very dataset that went to Chora (still chosen in step 1, as Chora shows it) is not taken as the step's result
       // unasked: nothing drawn there is in it. Two plain ways on: the file saved there, or "Nothing to draw".
       const went = currentInput(wf, s), refs = await refsOf(files, 'dataset');
       if (went && sameRefs(went, refs)) {
         asIs = s.id;
-        throw new Error(`${names(went)} is the dataset that went to Chora, as it was: nothing drawn there is in it. Save it in Chora once you have drawn, or choose the file you saved there in “Choose your data”; or, if there was nothing to draw, say so (“Nothing to draw: go on with this dataset”).`);
+        throw new Error(plainWf() ? PLAIN_MAP.unchanged(names(went)) : `${names(went)} is the dataset that went to Chora, as it was: nothing drawn there is in it. Save it in Chora once you have drawn, or choose the file you saved there in “Choose your data”; or, if there was nothing to draw, say so (“Nothing to draw: go on with this dataset”).`);
       }
       return { dataset: await refsHeld(files, 'dataset', { own: true }) };
     }
@@ -842,12 +848,12 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       const went = currentInput(wf, s);
       if (went && base && !sameRefs(went, await refsOf([...base], 'dataset'))) {
         const why = `It was saved from ${[...base].map((f) => f.name).join(', ')}, not from ${names(went)}, the dataset that went to the step “${s.title}”, so the step is not done with it.`;
-        say(`${why} Open ${names(went)} in Chora and save there, or choose a file saved from it and say the step is done.`, true); render(false);
+        say(`${why} ${plainWf() ? PLAIN_MAP.notFromIt(names(went)) : `Open ${names(went)} in Chora and save there, or choose a file saved from it and say the step is done.`}`, true); render(false);
         resolve(why); return;
       }
       try { await finishInteractive(s, { dataset: await refsHeld([...files], 'dataset') }); } catch (e) { say(e.message, true); render(false); resolve(null); return; }
       const next = atStep();
-      say(`${names(files)}, saved in Chora: the step “${s.title}” is done with it.`); render(false);
+      say(plainWf() ? PLAIN_MAP.saved(names(files), s.title) : `${names(files)}, saved in Chora: the step “${s.title}” is done with it.`); render(false);
       resolve(`The workflow's step “${s.title}” is done with it${next ? `, and the workflow goes on to “${next.title}”: leave the map to carry on` : ''}.`);
     }).then(() => resolve(null)));
   }
@@ -891,7 +897,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     const went = currentInput(wf, s);
     if (!went) return;
     await finishInteractive(s, { dataset: went });
-    say(`Nothing drawn in Chora: the workflow goes on with ${names(went)}, as it went there.`); render(false);
+    say(plainWf() ? PLAIN_MAP.nothingDrawn(names(went)) : `Nothing drawn in Chora: the workflow goes on with ${names(went)}, as it went there.`); render(false);
   }));
   doneB.addEventListener('click', () => chain(async () => {
     const s = atStep();
@@ -1165,7 +1171,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     if (all.length && !sameRefs(chosenRefs, made)) page.choose(all);
     await page.openReview?.(f, all);
     const records = RECORDS.has(atStep()?.op);
-    say(`${f.name} is open again${all.length ? `, on ${names(made)}` : ''}${records ? ', with the decisions you made: press Finish, below the review, to record them.' : ': decide on the candidates, and say when the step is done.'}`); render(false);
+    say(`${f.name} is open again${all.length ? `, on ${names(made)}` : ''}${records ? `, with the decisions you made: press ${plainWf() ? PRESS_SAVE : 'Finish, below the review'}, to record them.` : ': decide on the candidates, and say when the step is done.'}`); render(false);
   }));
   reopenB.addEventListener('click', () => {
     const s = atStep();
@@ -1302,8 +1308,11 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     else if (s && op.kind === 'interactive') next = `This step is yours: it waits for ${(plain && PLAIN_WAITS[s.op]) || op.waitsFor}.${s.op === 'map.export' ? ' Open Chora, frame the view, and make the map there (“Make a map”).' : ' Say when it is done.'}`;
     else if (ready) next = `Ready to download: ${names(main)} is already in the format this workflow writes, so it is not converted into itself. Download it, and the step is done.`;
     else if (toCompare && sameRefs(main, chosenRefs)) next = `Press “Compare with ${names(toCompare)}”: the workflow kept that file for you, so there is none to find.`;
-    else if (toReview && RECORDS.has(s.op)) next = `Press “Open the review (${toReview.name})”: the decisions you made are in it. Then press Finish, below the review.`;
+    else if (toReview && RECORDS.has(s.op)) next = `Press “Open the review (${toReview.name})”: the decisions you made are in it. Then press ${plain ? PRESS_SAVE : 'Finish, below the review'}.`;
     else if (s && !run && plain && WHG_STEPS.has(s.op)) next = 'Below, see what would be sent to the World Historical Gazetteer, then send it. The step is done when the answers are back.';
+    // In plain words: the publishing steps say which entry of the list to choose and what the step does; the step that saves the decisions names its button as the page does.
+    else if (s && !run && plain && PLAIN_PUBLISH[s.op]) next = publishNext(s.op);
+    else if (s && !run && plain && RECORDS.has(s.op)) next = `Press ${PRESS_SAVE}.`;
     else if (s && !run) next = PRESS[s.op] ? `Press ${PRESS[s.op]} below.` : `Run ${OPERATIONS[s.op].tool ? `${OPERATIONS[s.op].tool}'s` : 'its'} ${lower(OPERATIONS[s.op].title)}; the step is done when the run finishes.`;
     // Written out in a format that cannot hold all the review decided: said before the run, with what does (rich R1).
     // (src/engine/plain.js, lossyWords: Linked Places Format and the tables keep each match as a link; the flat table also who decided it.)
@@ -1321,7 +1330,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     leaveB.textContent = !shown ? 'Discard this workflow' : 'Leave the workflow';
     downloadB.hidden = !ready;
     choraB.hidden = !(s && onMap(s.op) && wf && !changed);
-    choraB.textContent = mapWords(s?.op);
+    choraB.textContent = mapWords(s?.op, plain);
     // The locate step's own controls: the box for sources with no licence stated (only where ticking it would use more), the one
     // press, a way on without, a way to count again after a failure; and, once done, a way to undo while it is the last step done.
     const atLoc = !!(s && s.op === 'locate' && wf && !changed && !viewing && s.state !== 'running' && loc), lc = atLoc ? locCounts() : null;
@@ -1363,8 +1372,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     if (s && !changed && !viewing) {
       const p = wf ? { title: recipeOf(wf)?.title } : plan(pending.key, pending.answers);
       // The locate step has no tool of its own in the centre: what it would do is said there too, as in the tracker.
-      onStep({ id: s.id, n: i, title, tool: PAGE_TOOL[s.op] ?? null, text: `${plain ? '' : 'Methodos, '}${p.title}.${op.kind === 'interactive' && op.waitsFor ? ` This step is yours: it waits for ${(plain && PLAIN_WAITS[s.op]) || op.waitsFor}.` : ''}${s.op === 'locate' && next ? ` ${next}` : ''}`,
-        link: onMap(s.op) ? { href: '#chora', words: mapWords(s.op) } : null });
+      onStep({ id: s.id, n: i, title, tool: PAGE_TOOL[s.op] ?? null, text: `${plain ? '' : 'Methodos, '}${p.title}.${op.kind === 'interactive' && op.waitsFor ? ` This step is yours: it waits for ${(plain && PLAIN_WAITS[s.op]) || op.waitsFor}.` : ''}${(s.op === 'locate' || (plain && PLAIN_PUBLISH[s.op] && !run)) && next ? ` ${next}` : ''}`,   // (and a publishing step in plain words: which entry of the list to choose is said where the list is, at any width)
+        link: onMap(s.op) ? { href: '#chora', words: mapWords(s.op, plain) } : null });
     } else onStep(null);
     // Ready to download as it is: Download is the one primary action, so Convert, beside it in the centre, is not marked as one (simple S12).
     if (ready) document.getElementById('convert')?.classList.remove('primary');
@@ -1466,7 +1475,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     const ready = main && main.every((x) => !!heldFor(x)) ? main.map(heldFor) : null;
     const chosenAgain = ready ? ` ${names(main)} is chosen again in “Choose your data”.` : '';
     const first = [opened, v.words].filter(Boolean).join(' ');
-    if (s?.op === 'place') say([first, `At Chora's step:${chosenAgain} Open Chora to draw: its save does this step with the dataset it writes. Or choose a dataset you saved in Chora before, and say the step is done.`].filter(Boolean).join(' '));
+    if (s?.op === 'place') say([first, plainWf() ? PLAIN_MAP.takenUp(chosenAgain) : `At Chora's step:${chosenAgain} Open Chora to draw: its save does this step with the dataset it writes. Or choose a dataset you saved in Chora before, and say the step is done.`].filter(Boolean).join(' '));
     else if (s?.op === 'trace') say([first, 'At Chora\'s step: open Chora to trace the map. What you have traced and not yet saved is kept there; its save does this step with the dataset it writes.'].filter(Boolean).join(' '));
     else if (s?.op === 'map.export') say([first, `At Chora's step:${chosenAgain} Open Chora, frame the view and make the map there (“Make a map”): its download does this step.`].filter(Boolean).join(' '));
     else if (ready) say([first, `Taken up where it was left, with ${names(main)}${fromWhere(wf, s, main)}, kept in this browser: it is chosen in step 1 for you.`].filter(Boolean).join(' '));
@@ -1683,7 +1692,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     // A hand-back from Chora's page of before (projects saved until 13 October 2026), at Chora's step: the
     // file it names is said, to be chosen by hand; nothing waits for it now.
     const atPlace = v.action === 'continue' && stepAt(v.state)?.op === 'place';
-    const hb = atPlace && read.handback ? ` Chora had saved ${names(read.handback.files)}: choose it in step 1, and say the step is done.` : '';
+    const hb = atPlace && read.handback ? (recipeOf(read.record)?.plain ? PLAIN_MAP.handback(names(read.handback.files)) : ` Chora had saved ${names(read.handback.files)}: choose it in step 1, and say the step is done.`) : '';
     if (v.action !== 'continue') {
       changed = { action: v.action, record: read.record, words: v.words };
       await store.save(read.record);
