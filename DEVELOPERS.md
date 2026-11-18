@@ -699,6 +699,20 @@ readers link to those headings, so keep them.
   and rows have no prototype, so a column called `__proto__` is kept. A CSV streams through Papa's
   chunk parser (`csvRecords`): the columns and guess read its header and first 50 rows, and the rows
   are read again, never kept. A FeatureCollection streams too, read twice (columns, then rows).
+- **A description, and names with their languages** (`columns.js`, `applyColumns`; #42). A column read as
+  `description` (headed `description` or `descriptions`, as WHG's LP-TSV template has one) is the one
+  exception to "never `properties`": each cell is a property of the row's attestation,
+  `{ property: DCT_DESCRIPTION, label: 'description', value }`, exactly as the LPF reader writes a
+  feature's `descriptions` (`DCT_DESCRIPTION` is exported by `src/formats/lpf.js`), so the LPF writers
+  put it back there, `tables.js` gives it a row of the properties sheet, and `flat.js` a column
+  `description` (through the same headings as the notes' columns; any other property is still
+  `flat-facet-not-carried`). The cell is one description, never split on `;`. An `alternativeNames`
+  value is passed through `nameAndLanguage` (`lpf.js`, the function the LPF writers use on a toponym):
+  `Livorno@it` is `{ toponym: 'Livorno', language: 'it' }`, a tail that is no language tag stays in the
+  name, and `Qanawat@` is `Qanawat`, reported as `lpf-name-at-no-language` (a warning in
+  `GENERIC_KINDS`, its example the row, the column and the value as written). A language read where it
+  was written is not reported. Names are told apart by toponym and language together; a variant equal
+  to the name is left out unless it gives a language the name has not.
 - **The regions a place lies in** (`within.js`, `columns.js`, `generic.js`; Methodos stage 1,
   `docs/plans/methodos.md` 5.3). A column read as `within` is a region the row's place lies in, at a
   level; levels are **positional per mapping**: the `within` columns are numbered widest first, 1 to

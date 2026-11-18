@@ -12,6 +12,8 @@ import { detect } from '../src/engine/input.js';
 import { Report, LOSS_TEXT } from '../src/engine/report.js';
 import { genericSource } from '../src/engine/hermes/generic.js';
 import { GENERIC_KINDS, FIELDS, guessColumns, applyColumns, matchAddress } from '../src/engine/hermes/columns.js';
+import { DCT_DESCRIPTION } from '../src/formats/lpf.js';
+import { FlatTable } from '../src/formats/flat.js';
 import { COLUMN_CHOICES } from '../src/engine/words.js';
 import { sameContributor } from '../src/engine/krisis/withdraw.js';
 import { file, textFile, go, outText } from './engine.js';
@@ -295,11 +297,142 @@ test('twelve rows of WHG\'s example lp7_100.tsv: twelve places, seven with links
   assert.deepEqual(fs.find((f) => f.properties.title === 'Emesa').types.map((t) => t.label), ['settlement']);
   assert.deepEqual(fs.find((f) => f.properties.title === 'Gebal').properties.ccodes, ['LB']);
   assert.deepEqual(fs.find((f) => f.properties.title === 'Emesa').names[0].citations, [{ label: 'LHOM' }]);
-  // Only the rows with a title_uri or a description still have notes for LPF to leave out: two of the twelve (Emesa and Ḥarrān), where it was all twelve.
+  // Only the rows with a title_uri still have notes for LPF to leave out: two of the twelve (Emesa and Ḥarrān), where it was all twelve.
   assert.equal(lossCount(r, 'dropped:attestation.notes'), 2);
+  // Those two rows' descriptions are descriptions, and the ten rows with none have none.
+  assert.deepEqual(fs.find((f) => f.properties.title === 'Emesa').descriptions, [{ value: 'a town, said here to be the modern Homs' }]);
+  assert.equal(fs.filter((f) => f.descriptions).length, 2);
+  // The variants: no "@" is left in a toponym (forty had one), and each language is the name's.
+  const names = fs.flatMap((f) => f.names);
+  assert.equal(names.filter((n) => n.lang).length, 33, 'present: the names are read, thirty-three with a language');
+  assert.deepEqual(names.filter((n) => n.toponym.includes('@')), []);
+  assert.deepEqual(fs.find((f) => f.properties.title === 'Livorno').names.map((n) => [n.toponym, n.lang]), [['Livorno', undefined], ['Livorno', 'it'], ['ليفورنو', 'ar'], ['Livorno', 'en'], ['Livourne', 'fr'], ['Livorno', 'de'], ['Livorno', 'tr']]);
+  assert.ok(names.some((n) => n.toponym === 'Al Mafraq' && n.lang === 'ar-Latn-x-ijmes') && names.some((n) => n.toponym === 'زوريخ' && n.lang === 'de-Arab-AR'));
+  // Seven names of one row were left with the "@" alone: said by the reader, each once; the writer has nothing left to mend.
+  assert.equal(lossCount(r, 'lpf-name-at-no-language'), 7);
+  assert.equal(lossCount(r, 'lpf-name-at-language'), 0);
   // And the same rows as the ten tables: seven identities.
   const t = await go([fx()], 'convert', 'tables', { base: BASE });
   const ids = Papa.parse(strFromU8(unzipSync(t.e.outs['whg-lp7-12-tables.zip'][0])['identities.csv']), { header: true, skipEmptyLines: true }).data;
   assert.equal(ids.length, 7);
   assert.ok(ids.every((i) => i.match_type === 'closeMatch' && /^https:\/\/sws\.geonames\.org\/\d+\/$/.test(i.same_as)));
+});
+
+// ---- description, and variants written name@language --------------------------------------------------
+// The template's description was kept as a note, which Linked Places Format leaves out, and its variants
+// (Livorno@it) were read whole as toponyms, "@" and all. The description is now the place's description
+// (as the LPF reader writes one), and a variant's language is the name's. Each test that asserts an
+// absence asserts a presence beside it, and the engine test ends with the same rows read the old way
+// (the column given as a note), so that its checks are seen to tell the two apart.
+const DESCRIBED = tsv([['id', 'title', 'title_source', 'variants', 'description'],
+  ['d1', 'Livorno', 'oape', 'Livorno@it; ليفورنو@ar; Leghorn@en; Livorno@it; Livorno', 'a port of Tuscany; said to be free'],
+  ['d2', 'Qanawat', 'oape', 'Qanawat@; Kanatha@grc-Latn-x-ijmes; Q@Q street; Canatha @ la; @la', ''],
+  ['d3', 'Zurich', '', 'Zürich|Zurich@', 'a town on a lake'],
+]);
+const WORDS = 'a port of Tuscany; said to be free';
+const LIVORNO = [['Livorno', undefined], ['Livorno', 'it'], ['ليفورنو', 'ar'], ['Leghorn', 'en']];
+const namesOf = (rec) => rec.attestations[0].names.map((n) => [n.toponym, n.language]);
+
+test('the guess reads description as the description and variants as other names; both have words on the page', () => {
+  const head = ['id', 'title', 'variants', 'description'];
+  const g = guessColumns(head, Papa.parse(tsv([head, ['d1', 'Livorno', 'Livorno@it', 'a port']]), { header: true, delimiter: '\t', skipEmptyLines: true }).data);
+  assert.deepEqual({ ...g.mapping }, { id: 'id', title: 'name', variants: 'alternativeNames', description: 'description' });
+  assert.match(g.reasons.description, /reads as a description of the place/);
+  assert.ok(FIELDS.description?.words && COLUMN_CHOICES.description, 'description is a field with words, and a name on the page');
+  assert.equal(GENERIC_KINDS['lpf-name-at-no-language'], 'warning');
+  assert.ok(LOSS_TEXT['lpf-name-at-no-language']);
+});
+
+test('a description is the place\'s description, as the LPF reader writes one, and no note; a cell with a semicolon is one description', async () => {
+  const r = await readAll(DESCRIBED);
+  assert.equal(r.records.length, 3, 'present: three places');
+  const [a] = r.rec('d1').attestations;
+  assert.deepEqual(a.properties, [{ property: DCT_DESCRIPTION, label: 'description', value: WORDS }]);
+  assert.equal(a.notes, undefined, 'nothing of the row is left in the notes');
+  assert.deepEqual(a.sources, [{ title: 'oape', authorityType: 'source' }], "on the row's own attestation, with the row's source");
+  assert.equal(r.rec('d2').attestations[0].properties, undefined, 'control: an empty cell makes no description');
+  assert.deepEqual(r.rec('d3').attestations[0].properties.map((p) => p.value), ['a town on a lake']);
+  // Columns given as descriptions are each a description; the same words twice are one.
+  const two = await readAll(tsv([['id', 'nm', 'about', 'remark', 'again'], ['x', 'Bath', 'a spa', 'a city', 'a spa']]), { base: BASE, columns: { id: 'id', nm: 'name', about: 'description', remark: 'description', again: 'description' } });
+  assert.deepEqual(two.rec('x').attestations[0].properties.map((p) => p.value), ['a spa', 'a city']);
+});
+
+test('a variant written name@language is the name and its language; a tail that is no language stays in the name; a dangling @ is taken off, and said', async () => {
+  const r = await readAll(DESCRIBED);
+  // Livorno@it twice is one name; the bare "Livorno" is the name itself and says nothing more; Livorno@it gives its language.
+  assert.deepEqual(namesOf(r.rec('d1')), LIVORNO);
+  // "Q@Q street": the tail is no language tag. "@la": there is no name before the @. Spaces about the @ do not count.
+  assert.deepEqual(namesOf(r.rec('d2')), [['Qanawat', undefined], ['Kanatha', 'grc-Latn-x-ijmes'], ['Q@Q street', undefined], ['Canatha', 'la'], ['@la', undefined]]);
+  assert.deepEqual(namesOf(r.rec('d3')), [['Zurich', undefined], ['Zürich', undefined]], 'Zurich@ is Zurich, the name itself');
+  const dangling = r.of('lpf-name-at-no-language');
+  assert.deepEqual([dangling.severity, dangling.count, dangling.examples], ['warning', 2, ['row 3, variants: Qanawat@', 'row 4, variants: Zurich@']]);
+  assert.equal(r.of('lpf-name-at-language'), undefined, 'a language read where it was written is no loss, and is not reported');
+  // A language column is the language of the name: a variant with that name and that language is not a second name, one in another language is.
+  const l = await readAll(tsv([['id', 'title', 'lang', 'variants'], ['z', 'Genf', 'de', 'Genf@de; Genf@DE; Genf@gsw; Geneva@en']]));
+  assert.deepEqual(namesOf(l.rec('z')), [['Genf', 'de'], ['Genf', 'gsw'], ['Geneva', 'en']]);
+  // A list of names in plain GeoJSON is read the same way (applyColumns on its own).
+  const a = applyColumns({ name: 'Livorno', alt: ['Livourne@fr', 'Leghorn'] }, { name: 'name', alt: 'alternativeNames' }, { where: 'feature 1' });
+  assert.deepEqual(a.attestation.names, [{ toponym: 'Livorno' }, { toponym: 'Livourne', language: 'fr' }, { toponym: 'Leghorn' }]);
+  // With no name column the label is the first variant, without its language.
+  assert.equal(applyColumns({ alt: 'Livourne@fr' }, { alt: 'alternativeNames' }).label, 'Livourne');
+});
+
+const flatRows = (r, name) => Papa.parse(outText(r.e, name).replace(/^﻿/, ''), { header: true, skipEmptyLines: true }).data;
+
+test('through the engine: the description and the languages arrive in PLATO JSON, both versions of Linked Places Format and the flat table; read the old way (as a note), they do not', async () => {
+  const to = (target, options = {}) => go([textFile(DESCRIBED, 'lp.tsv')], 'convert', target, { base: BASE, ...options });
+  // PLATO JSON: valid, and it reads back.
+  const j = await to('plato-json');
+  assert.equal(j.report.errors, 0, JSON.stringify(j.report.items.filter((i) => i.severity === 'error')));
+  const text = outText(j.e, 'lp.json');
+  const doc = JSON.parse(text);
+  const d1 = doc.spatialEntities.find((e) => e['@id'] === BASE + 'place/d1').attestations[0];
+  assert.deepEqual(d1.properties.map((p) => [p.property, p.value]), [[DCT_DESCRIPTION, WORDS]]);
+  assert.deepEqual(d1.names.map((n) => [n.toponym, n.language]), LIVORNO);
+  assert.ok(text.includes('"toponym":"Qanawat"') && !text.includes('@it') && !text.includes('Qanawat@'), 'no "@" of the variants is left in the PLATO record');
+  const back = await go([textFile(text, 'back.json')], 'check');
+  assert.equal(back.report.errors, 0, JSON.stringify(back.report.items.filter((i) => i.severity === 'error')));
+  // Linked Places Format, v1 and v2: descriptions, and lang apart from the toponym; no note and no property is left out.
+  for (const [target, read] of [['lpf-seq', (r) => features(r, 'lp.geojsonl')], ['lpf2', (r) => JSON.parse(outText(r.e, 'lp.lpf2.geojson')).features]]) {
+    const r = await to(target);
+    const fs = read(r);
+    assert.equal(fs.length, 3, target);
+    const f = fs.find((x) => x['@id'] === BASE + 'place/d1');
+    assert.deepEqual(f.descriptions, [{ value: WORDS }], target);
+    assert.deepEqual(f.names.map((n) => [n.toponym, n.lang]), LIVORNO, target);
+    assert.equal(fs.find((x) => x['@id'] === BASE + 'place/d2').descriptions, undefined, `${target}: control, no description, none written`);
+    assert.deepEqual(fs.flatMap((x) => x.names.map((n) => n.toponym)).filter((t) => /.@\s*$|.@\s*(it|ar|en|la|grc-Latn-x-ijmes)$/.test(t)), [], target);
+    const kinds = r.report.items.map((i) => i.kind);
+    assert.ok(!kinds.includes('dropped:attestation.notes') && !kinds.includes('property-value') && !kinds.includes('lpf-name-at-language'), `${target}: ${kinds}`);
+    assert.equal(lossCount(r, 'lpf-name-at-no-language'), 2, `${target}: the reader's two, and none more from the writer`);
+  }
+  // The flat table: the description under its own heading, and nothing of it reported as left out.
+  const t = await to('table-flat');
+  const rows = flatRows(t, 'lp.flat.csv');
+  assert.deepEqual(rows.map((x) => [x.place_id, x.description]), [['d1', WORDS], ['d2', ''], ['d3', 'a town on a lake']]);
+  assert.equal(rows[0].alternative_names, 'ليفورنو; Leghorn');
+  assert.ok(!t.report.items.some((i) => i.kind === 'flat-facet-not-carried'), 'a description is carried');
+  // The ten tables: a row of the properties sheet.
+  const x = await to('tables');
+  const props = Papa.parse(strFromU8(unzipSync(x.e.outs['lp-tables.zip'][0])['properties.csv']), { header: true, skipEmptyLines: true }).data;
+  assert.deepEqual(props.map((p) => [p.place_id, p.property_uri, p.value]), [['d1', DCT_DESCRIPTION, WORDS], ['d3', DCT_DESCRIPTION, 'a town on a lake']]);
+  // The same rows with the column read the old way, as a note: the description is in the notes, LPF has
+  // no descriptions and says a note was left out. So the checks above fail if the role is taken away.
+  const old = { id: 'id', title: 'name', title_source: 'source', variants: 'alternativeNames', description: 'note' };
+  const o = await to('lpf-seq', { columns: old });
+  assert.equal(features(o, 'lp.geojsonl').find((f) => f['@id'] === BASE + 'place/d1').descriptions, undefined);
+  assert.equal(lossCount(o, 'dropped:attestation.notes'), 2);
+  const oj = JSON.parse(outText((await to('plato-json', { columns: old })).e, 'lp.json')).spatialEntities.find((e) => e['@id'] === BASE + 'place/d1').attestations[0];
+  assert.deepEqual([oj.properties, oj.notes], [undefined, `description: ${WORDS}`]);
+});
+
+test('the flat table carries a description from any dataset, and still says what else it leaves out', () => {
+  const lost = [];
+  const table = new FlatTable({ loss: (l) => lost.push(`${l.kind} ${l.value}`) });
+  const described = { property: DCT_DESCRIPTION, label: 'description', value: 'a city on the Seine' };
+  table.record({ value: { '@id': BASE + 'place/p', label: 'Paris', attestations: [{ names: [{ toponym: 'Paris' }], properties: [described] }] } });
+  table.record({ value: { '@id': BASE + 'place/l', label: 'Lyon', attestations: [{ names: [{ toponym: 'Lyon' }], properties: [{ ...described, value: 'a city on the Rhône' }, { property: 'https://example.org/population', label: 'population', value: 500000 }] }] } });
+  const { header, rows } = table.table();
+  assert.deepEqual(rows.map((row) => row[header.indexOf('description')]), ['a city on the Seine', 'a city on the Rhône']);
+  assert.deepEqual(lost, [`flat-facet-not-carried ${BASE}place/l: properties`], 'the property that is no description is reported; the description alone is not');
 });

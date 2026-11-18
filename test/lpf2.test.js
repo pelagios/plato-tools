@@ -286,11 +286,13 @@ test("WHG's twelve example rows, converted to lpf2: all are accepted by its sche
   assert.ok(fc.features.every((f) => f.properties.fclasses === undefined));
   assert.equal(item(r, 'whg-no-kind'), undefined);
   assert.equal(item(r, 'whg-no-date'), undefined);
-  // No name is left ending "@" (seven were), and the names with a language have it apart (thirty-three).
+  // No name is left ending "@" (seven were), and the names with a language have it apart (thirty-three):
+  // the table's reader now reads both (hermes/columns.js), saying the seven, so the writer finds none to mend.
   const toponyms = fc.features.flatMap((f) => f.names.map((n) => n.toponym));
   assert.ok(toponyms.includes('Qalʿat al-Mafraq') && !toponyms.some((t) => t.includes('@')));
   assert.equal(item(r, 'lpf-name-at-no-language').count, 7);
-  assert.equal(item(r, 'lpf-name-at-language').count, 33);
+  assert.equal(item(r, 'lpf-name-at-language'), undefined);
+  assert.equal(fc.features.flatMap((f) => f.names).filter((n) => n.lang).length, 33);
   // The schema, asked here: all twelve accepted. A language tag with a private part (ar-Latn-x-ijmes), which is
   // well-formed BCP 47, was refused by WHG's pattern until its fix (WorldHistoricalGazetteer/place#351); the
   // vendored schema has the fix. The tag is not altered.

@@ -11,6 +11,7 @@
 import Papa from 'papaparse';
 import { list, isDenial, isComputed, isComputedFacet, currentAttestations, acceptedMatches, identityBundleLosses, datesTheEvidence, isContainedIn } from './shared.js';
 import { geojsonToWkt } from './tables.js';
+import { DCT_DESCRIPTION } from './lpf.js';
 import { reprPointOf } from '../engine/chora/geo.js';
 import { AUTHORITIES, authorityOf } from '../engine/hermes/addresses.js';
 
@@ -170,7 +171,11 @@ export class FlatTable {
       for (const t of types) kinds.push(text(t.label) || text(t.sourceLabel) || text(t.identifier));
       for (const g of geometries) places.push({ g, a });
       for (const r of list(a.relations)) if (isObject(r) && isContainedIn(r.relationType) && typeof r.relatesTo === 'string') this.regions.add(r.relatesTo);
-      for (const k of ['relations', 'properties']) if (list(a[k]).length) loss({ kind: 'flat-facet-not-carried', value: `${where}: ${k}` });
+      // A description (an LPF feature's, or a table's description column) is a column of the table,
+      // "description"; no other property, and no relation, has a column here.
+      const described = list(a.properties).filter((p) => isObject(p) && p.property === DCT_DESCRIPTION && text(p.value).trim()).map((p) => text(p.value).trim());
+      if (list(a.relations).length) loss({ kind: 'flat-facet-not-carried', value: `${where}: relations` });
+      if (list(a.properties).length > described.length) loss({ kind: 'flat-facet-not-carried', value: `${where}: properties` });
       // The place's own evidence: not a match, and not a location a person added (whose dates and
       // source are the location's, said in geometry_note).
       const added = a.contributor !== undefined && a.contributor !== null && geometries.length && !toponyms.length && !types.length;
@@ -180,11 +185,11 @@ export class FlatTable {
         else for (const t of facet('timespans')) spans.push(t);
         for (const s of [...list(a.sources), ...list(a.citations).map((c) => (isObject(c) ? c.source : null))]) sources.push(sourceWords(s));
       }
-      if (typeof a.notes !== 'string' || !a.notes.trim()) continue;
+      const noted = typeof a.notes === 'string' && a.notes.trim() ? a.notes : null;
       // The table's own notes are its columns; a reviewer's, or a tool's, stay as they were written.
-      const split = (a.contributor === undefined || a.contributor === null) && !bundled ? splitNotes(a.notes) : { columns: [], rest: a.notes.trim() };
+      const split = noted === null ? { columns: [], rest: '' } : (a.contributor === undefined || a.contributor === null) && !bundled ? splitNotes(noted) : { columns: [], rest: noted.trim() };
       if (split.rest) notes.push(split.rest);
-      for (const [h, v] of split.columns) {
+      for (const [h, v] of [...split.columns, ...described.map((d) => ['description', d])]) {
         if (!columns.has(h) && !this.headings.includes(h)) {
           if (this.headings.length >= NOTE_COLUMNS) { notes.push(`${h}: ${v}`); continue; }
           this.headings.push(h);

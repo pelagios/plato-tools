@@ -24,7 +24,9 @@ export const expandLpf = (v) => {
 };
 export const FCLASS = { A: 'Administrative entities', H: 'Water bodies', L: 'Regions, landscape areas', P: 'Populated places', R: 'Roads, routes, rail', S: 'Sites', T: 'Terrestrial landforms' };
 export const GN_CLASS = 'http://www.geonames.org/ontology#';
-const DCT_DESCRIPTION = 'http://purl.org/dc/terms/description', FOAF_DEPICTION = 'http://xmlns.com/foaf/0.1/depiction';
+/** The property a description of a place is written with (an LPF feature's `descriptions`; a table's description column, hermes/columns.js). */
+export const DCT_DESCRIPTION = 'http://purl.org/dc/terms/description';
+const FOAF_DEPICTION = 'http://xmlns.com/foaf/0.1/depiction';
 const LINK_PROPERTY = { primaryTopicOf: 'http://xmlns.com/foaf/0.1/isPrimaryTopicOf', subjectOf: 'http://purl.org/dc/terms/isReferencedBy', seeAlso: 'http://www.w3.org/2000/01/rdf-schema#seeAlso' };
 const PROPERTY_LINK = Object.fromEntries(Object.entries(LINK_PROPERTY).map(([k, v]) => [v, k]));
 

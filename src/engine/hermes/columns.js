@@ -19,7 +19,7 @@
 // do, a date column is the date as the source writes it, a start and end the earliest start and
 // latest end, a type column a type's label (and its identifier, when it is a web address).
 import { isAbsoluteIri } from '../../lib/context.js';
-import { expandLpf, LPF_PREFIXES, FCLASS, GN_CLASS } from '../../formats/lpf.js';
+import { expandLpf, LPF_PREFIXES, FCLASS, GN_CLASS, DCT_DESCRIPTION, nameAndLanguage } from '../../formats/lpf.js';
 import { placeAddress, addressNote, addressFromPattern, patternProblem, patternId, GAZETTEER_PATTERNS } from './addresses.js';
 import { withinNote } from './within.js';
 import { countryOf } from '../countries.js';
@@ -28,7 +28,7 @@ import { parseGridRef, gridRefToWgs84, looksLikeGridRef, isMissingMarker } from 
 /** What each field of the mapping means, and whether one column only may be mapped to it. */
 export const FIELDS = {
   name: { single: true, words: "the place's name: its label, and a name the file attests" },
-  alternativeNames: { single: false, words: 'other names for the place; several in one cell are separated by ; or |' },
+  alternativeNames: { single: false, words: 'other names for the place; several in one cell are separated by ; or |, and a name written with its language after an @ (Livorno@it) is read as the name and its language' },
   latitude: { single: true, words: 'latitude, in decimal degrees' },
   longitude: { single: true, words: 'longitude, in decimal degrees' },
   wkt: { single: true, words: 'a point or shape in Well-Known Text (WKT)' },
@@ -49,6 +49,7 @@ export const FIELDS = {
   aatType: { single: false, words: 'what kind of place it is, as an identifier of the Getty Art & Architecture Thesaurus (300008347, or aat:300008347); several in one cell are separated by ; or |, and each goes with the type beside it when the row has as many of each' },
   matches: { single: false, words: "the same place's web addresses in gazetteers, which the table itself gives (close matches): full addresses, or ids with a prefix of Linked Places Format (wd:Q90, gn:2988507, tgn:7008038); several in one cell are separated by ; or |" },
   countryCodes: { single: false, words: 'the modern countries the place lies in, as ISO 3166-1 alpha-2 codes (GB, FR); several in one cell are separated by ; or |' },
+  description: { single: false, words: 'a description of the place, in words: carried as its description (as Linked Places Format has one), not as a note' },
   // A table of figures (a census, a return; figures.js): the roles that make a column a coordinate or a
   // figure. Their entries carry what they need, and the table's own description goes beside the columns.
   period: { single: true, words: 'the period the figures are for, as the table gives it: a year, an ISO date, or two years (1851-1861)' },
@@ -107,6 +108,8 @@ export const GENERIC_KINDS = {
   'generic-match-no-place-address': 'loss',
   'generic-ccode-invalid': 'loss',
   'generic-ccodes-not-carried': 'loss',
+  // A variant written "Qanawat@" (WHG's delimited format, a name whose language was left empty): read without the "@" (the LPF writer's kind, lpf.js nameAndLanguage).
+  'lpf-name-at-no-language': 'warning',
   'generic-feature-key': 'loss',
   'generic-not-feature': 'loss',
   'generic-csv-extra-cells': 'loss',
@@ -179,6 +182,8 @@ const HEADINGS = {
   aatType: ['aattypes', 'aattype'],
   matches: ['matches'],
   countryCodes: ['ccodes', 'ccode', 'countrycode', 'countrycodes', 'iso2'],
+  // The template's description column: what the table says of the place, in words.
+  description: ['description', 'descriptions'],
   date: ['date', 'dates', 'period', 'when', 'datelabel', 'year'],
   start: ['start', 'from', 'startdate', 'begin', 'begindate', 'mindate', 'earliest', 'notbefore', 'datefrom', 'fromdate', 'yearfrom', 'fromyear', 'startyear'],
   end: ['end', 'to', 'enddate', 'maxdate', 'latest', 'notafter', 'dateto', 'todate', 'yearto', 'toyear', 'endyear', 'until'],
@@ -220,7 +225,7 @@ const FIELD_WORDS = {
   gridref: 'a grid reference',
   id: 'an identifier', address: "the place's web address", type: 'a type', language: 'a language', source: 'a source', date: 'a date', start: 'a start date', end: 'an end date',
   within: 'a region the place lies in', split: 'several regions in one cell',
-  featureClass: 'a class of feature', aatType: 'a type, as an identifier of the Getty Art & Architecture Thesaurus', matches: "the same place's web addresses in gazetteers", countryCodes: 'country codes',
+  featureClass: 'a class of feature', aatType: 'a type, as an identifier of the Getty Art & Architecture Thesaurus', matches: "the same place's web addresses in gazetteers", countryCodes: 'country codes', description: 'a description of the place',
   period: 'the period of the figures', dimension: 'a coordinate of the figures', value: 'a figure', figure: 'a figure',
 };
 
@@ -847,7 +852,7 @@ export function geometryToPlato(g, report = () => {}, where = '') {
 export function applyColumns(row, mapping, { where = '', report = () => {}, fileName = 'the file', geometry, idAsNote = false, patterns = {}, levels = {}, from = {}, withinNote: noteWithin = true } = {}) {
   let name, id, idCol, address, addressFrom, addressText, addressLost = false, language, languageCol, date, start, end, wkt, lat = '', lon = '', geomCell;
   const alternatives = [], types = [], sources = [], notes = [], skipped = [], within = [], countries = [];
-  const classes = [], aats = [], matches = [], ccodes = [], ccodeCells = [];
+  const classes = [], aats = [], matches = [], ccodes = [], ccodeCells = [], descriptions = [], variantsSeen = new Set();
   let gridCell;
   const note = (col, v) => notes.push(`${col}: ${v}`);
   for (const [col, field] of Object.entries(mapping)) {
@@ -856,7 +861,17 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
     if (v === '') continue;
     switch (field) {
       case 'name': name = v; break;
-      case 'alternativeNames': for (const x of cellList(raw)) if (!alternatives.includes(x)) alternatives.push(x); break;
+      // Another name; one written name@language, as WHG's delimited format writes it (Livorno@it), is
+      // the name and its language, and one left with the "@" alone (Qanawat@) the name, which is said
+      // (nameAndLanguage, lpf.js: what the LPF writers did on the way out, done here on the way in, so
+      // that no "@" is left in a toponym). A tail that is no language tag is part of the name.
+      case 'alternativeNames': for (const x of cellList(raw)) {
+        if (variantsSeen.has(x)) continue;
+        variantsSeen.add(x);
+        const { toponym, lang } = nameAndLanguage({ toponym: x }, (l) => { if (l.kind === 'lpf-name-at-no-language') report(l.kind, `${where}, ${col}: ${x}`); });
+        if (!alternatives.some((a) => a.toponym === toponym && a.language === lang)) alternatives.push(clean({ toponym, language: lang }));
+      } break;
+      case 'description': if (!descriptions.includes(v)) descriptions.push(v); break;
       case 'latitude': lat = v; break;
       case 'longitude': lon = v; break;
       case 'wkt': {
@@ -946,7 +961,8 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
     else if (language) report('generic-language-invalid', `${where}: ${language}`);
     names.push(n);
   } else if (language) note(languageCol, language);
-  for (const a of alternatives) if (a !== name) names.push({ toponym: a });
+  // Another name that is the name itself says nothing more, unless it gives a language the name has not.
+  for (const a of alternatives) if (a.toponym !== name || (a.language && a.language.toLowerCase() !== names[0]?.language?.toLowerCase())) names.push(a);
   // A row about an address keeps its id in the notes, since the place is not the file's to name.
   if (idAsNote && address && id !== undefined) note(idCol, id);
   // Country codes are a finding aid of a place of the dataset's own (PLATO's ccodes, on the record): a
@@ -972,7 +988,7 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
   const hintCodes = new Set(countries.map((c) => c.code));
   if (hintCodes.size > 1) report('generic-country-unresolved', `${where}: ${countries.map((c) => `${c.column}: ${c.name}`).join(', ')}`);
   const countryHint = hintCodes.size === 1 ? { code: countries[0].code, name: countries[0].name } : undefined;
-  if (within.length && noteWithin) notes.push(withinNote(within, name || alternatives[0]));
+  if (within.length && noteWithin) notes.push(withinNote(within, name || alternatives[0]?.toponym));
   if (address && addressFrom) notes.push(addressNote(addressFrom));
 
   const geometries = [];
@@ -1021,12 +1037,14 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
   const cited = sources.length ? sources.map((s) => ({ source: s })) : [{ source: { title: fileName, authorityType: 'source' }, locator: where }];
   const attestation = clean({
     names, geometries, types,
+    // A description, as the LPF reader writes one (lpf.js), so that the LPF writers put it back in `descriptions`.
+    properties: descriptions.map((value) => ({ property: DCT_DESCRIPTION, label: 'description', value })),
     timespans: date || start || end ? [clean({ sourceLabel: date, startEarliest: start, endLatest: end })] : undefined,
     sources: cited.map((c) => c.source),
     citations: cited.map((c) => clean({ ...c })),
     notes: notes.join('\n') || undefined,
   });
-  return { label: name || alternatives[0], name, id, address, addressText, addressLost, attestation, skipped, ...(within.length ? { within } : {}), ...(countryHint ? { countryHint } : {}),
+  return { label: name || alternatives[0]?.toponym, name, id, address, addressText, addressLost, attestation, skipped, ...(within.length ? { within } : {}), ...(countryHint ? { countryHint } : {}),
     ...(linksMatches && matches.length ? { matches: matches.map(({ iri, column }) => ({ iri, column })) } : {}), ...(carriesCcodes && ccodes.length ? { ccodes } : {}) };
 }
 
