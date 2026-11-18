@@ -55,7 +55,7 @@ const seen = (state) => runner.complete(state, 'see', { dataset: runner.inputsOf
 
 test('the recipe: the locations are taken from the dataset the decisions were recorded in and the review\'s work file, and every later step takes the dataset that step made', () => {
   assert.equal(checkRecipe(MAP), MAP);
-  assert.equal(MAP.version, 5);
+  assert.equal(MAP.version, 6);
   const by = Object.fromEntries(MAP.steps.map((s) => [s.id, s]));
   assert.deepEqual(by.locate.from, { dataset: 'relate.dataset ?? apply.dataset', work: 'wikidata.work ?? review.work' });
   // The review is taken, not only the dataset: the sources' licences are kept nowhere else.

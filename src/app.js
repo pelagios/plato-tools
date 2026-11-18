@@ -47,6 +47,7 @@ import { workflowStore } from './methodos/store.js';
 import { whgProjects } from './methodos/whg.js';
 import { workbench, sharedToken, isId } from './engine/workbench.js';
 import { chosenWords, wentOn, resultLabel } from './methodos/layout.js';
+import { outcome, targetList } from './engine/plain.js';
 const $ = (id) => document.getElementById(id);
 const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
@@ -140,11 +141,7 @@ function onDetected({ input: inp, targets: t }) {
   $('chosen-line').querySelector('.chosen-what').textContent = `${chosenWords(files)}: ${what}`;
   // Escaped: a workbook's sheet, named in it, is the file's own text.
   p.innerHTML = `This looks like <span class="detected">${escapeHtml(what)}</span>.`;
-  const sel = $('target'); sel.innerHTML = '';
-  for (const [k, v] of Object.entries(t)) {
-    if (k === INPUT_TO_TARGET[inp.format]) continue;
-    const o = document.createElement('option'); o.value = k; o.textContent = v.label; sel.appendChild(o);
-  }
+  fillTargets();
   if (tool) chooseTool(tool);   // a tool chosen first: narrowed again for this file (Arithmos: N-Triples, now that it is offered)
   methodos.detected();   // Methodos: a step writing the file in its own format offers it to download
   document.querySelector('[data-for="tables-input"]').hidden = inp.format !== 'tables';
@@ -348,7 +345,45 @@ function onDone({ report, outputs, work: found, incomplete }) {
     unsaved++; $('summary').insertAdjacentText('beforeend', ' ' + KRISIS_WITHDRAW.recorded);
   }
 }
-function renderReport(report) { $('report').innerHTML = reportHtml(report, state.action); }
+function renderReport(report) { $('report').innerHTML = reportHtml(report, state.action); renderOutcome(report); }
+/**
+ * What came of writing the result, in plain words above the report (src/engine/plain.js, outcome): for Linked Places
+ * Format v2, how many places WHG would accept, and for the rest each reason with its first examples and its remedy;
+ * for the flat table, what it is and how many places have no match recorded. Nothing for any other run.
+ */
+function renderOutcome(report) {
+  const o = state.action === 'convert' ? outcome(report) : null, box = $('outcome');
+  box.hidden = !o; box.dataset.kind = o?.kind || ''; box.dataset.tone = o?.tone || '';
+  if (!o) { box.innerHTML = ''; return; }
+  const examples = (list) => (list.length ? `<span class="outcome-examples">For example: ${list.slice(0, 3).map((e) => escapeHtml(e)).join('; ')}${list.length > 3 ? '; …' : ''}.</span>` : '');
+  box.innerHTML = `<p class="outcome-head ${o.tone}">${escapeHtml(o.head)}</p>`
+    + (o.reasons.length ? `<ul class="outcome-reasons">${o.reasons.map((r) => `<li><strong>${escapeHtml(r.words)}</strong> ${examples(r.examples)}${r.remedy ? ` <span class="outcome-remedy">${escapeHtml(r.remedy)}</span>` : ''}</li>`).join('')}</ul>` : '')
+    + o.notes.map((w) => `<p class="outcome-note">${escapeHtml(w)}</p>`).join('')
+    + (o.scope ? `<p class="outcome-scope">${escapeHtml(o.scope)}</p>` : '');
+}
+/**
+ * The list of formats beside Convert, for the file chosen (never its own format). At a workflow's step that writes the
+ * result, the formats its recipe offers come first, in its order and in plain words, and the one the workflow was begun
+ * for is chosen (src/methodos/page.js, targetAt); at a step that makes a named format, that one is chosen. The user may
+ * still choose another: the list is set as the step says when the step is come to, or its file is recognised, and not again.
+ */
+function fillTargets() {
+  if (!input?.format || !targets) return;
+  const at = methodos?.targetAt?.() || null, sel = $('target'), was = sel.value, own = INPUT_TO_TARGET[input.format] ?? null;
+  sel.innerHTML = '';
+  for (const [k, label] of targetList(targets, at?.choices || [], own)) {
+    const o = document.createElement('option'); o.value = k; o.textContent = label; sel.appendChild(o);
+  }
+  const has = (k) => !!k && [...sel.options].some((o) => o.value === k);
+  // The step's format; where that is the file's own (it is downloaded as it is, not converted), the format nearest it,
+  // which loses nothing, so that the list does not open on one that does; else the one chosen before, if it is still offered.
+  const want = has(at?.value) ? at.value : at?.value && at.value === own ? ['plato-jsonl', 'plato-json'].find(has) : has(was) ? was : null;
+  if (want) sel.value = want;
+  sel.dataset.step = at?.step || '';
+  // As if chosen by hand: the page's own listeners (the N-Triples options; the tracker's words on what the format cannot hold).
+  // Once this has returned: it may be called while the tracker is being drawn, which the tracker's listener would draw again.
+  if (sel.value !== was) queueMicrotask(() => sel.dispatchEvent(new Event('change')));
+}
 /** A report's findings, group by group, as the page shows them. */
 function reportHtml(report, action) {
   const out = [];
@@ -1399,6 +1434,8 @@ methodos = mountMethodos({
       const part = /^publish\.(.+)$/.exec(workflowStep.op)?.[1];
       if (part && [...$('part').options].some((o) => o.value === part)) $('part').value = part;
       if (LOOKUP_STEPS[workflowStep.op]) $('lookup').open = true;
+      // The format a converting step writes: the list beside Convert set as the step says (fillTargets), once.
+      if (workflowStep.op === 'convert') fillTargets();
     }
     // Back at the step a result was of (Back a step): it is that step's result again, shown, unlabelled.
     if (step && (lingering?.step === step.id || parked?.step === step.id)) { $('result').hidden = false; lingering = parked = null; resultOf(null); }

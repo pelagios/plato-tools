@@ -101,7 +101,7 @@ async function versions() {
 
 test('the recipe is well formed: the new version chosen at the start, the previous release chosen late at the revise step, revised, checked, compared, written out, and published as Publish a dataset publishes, against the previous release', () => {
   assert.equal(checkRecipe(R), R);
-  assert.equal(R.version, 1);
+  assert.equal(R.version, 2);
   assert.match(R.digest, /^[0-9a-f]{64}$/);
   assert.equal(digest(R), R.digest);
   assert.deepEqual(Object.keys(R.files), ['files', 'previous']);

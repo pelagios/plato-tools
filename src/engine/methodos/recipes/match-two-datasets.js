@@ -19,7 +19,7 @@ const ask = (k) => { const { default: dflt, ...q } = mapYourData.asks[k]; return
 export default {
   key: 'match-two-datasets',
   title: 'Match two datasets',
-  version: 2,
+  version: 3,   // 3 (18 November 2026): the result may be written as one flat table or as Linked Places Format v2 for WHG (Map your data's version 6)
   files: {
     files: { words: 'Your dataset (a table of places, CSV or GeoJSON, or a dataset in a PLATO format), the one the decisions are about', types: ['files'] },
     others: { words: 'The other dataset', types: ['files'], late: true },

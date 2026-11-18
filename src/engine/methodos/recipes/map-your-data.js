@@ -20,7 +20,7 @@ const result = 'see.dataset';
 export default {
   key: 'map-your-data',
   title: 'Map your data',
-  version: 5,   // 5 (18 November 2026): the matched places' locations taken in a step of their own (locate), and the places seen on a map before they are written out (see); 4 (13 November 2026): the dataset step's standInRegions and the mint step's base, for a table with regions and no base address
+  version: 6,   // 6 (18 November 2026): the result may be written as one flat table (table-flat) or as Linked Places Format v2 for WHG (lpf2), the two offered first; 5 (18 November 2026): the matched places' locations taken in a step of their own (locate), and the places seen on a map before they are written out (see); 4 (13 November 2026): the dataset step's standInRegions and the mint step's base, for a table with regions and no base address
   files: {
     files: { words: 'The table of place names (a spreadsheet: .xlsx or .csv)', types: ['files'] },
   },
@@ -37,7 +37,9 @@ export default {
     // (`standInRegions`, with the places), the relate step exports its candidates for that base, and the mint step, given the real base when
     // publishing (the base in Options then, or the host's), moves every temporary address to it; no part of publishing takes a temporary address.
     base: BASE,
-    target: { question: 'In what format do you want the result?', kind: 'choice', choices: ['plato-json', 'plato-jsonl', 'tables', 'ntriples', 'lpf', 'lpf-seq'] },
+    // The two a scholar asks for first, in that order (a spreadsheet back, or a file for WHG: src/engine/plain.js names them in
+    // plain words), then the formats there were before them. The page lists them in this order beside Convert at the step.
+    target: { question: 'In what format do you want the result?', kind: 'choice', choices: ['table-flat', 'lpf2', 'plato-json', 'plato-jsonl', 'tables', 'ntriples', 'lpf', 'lpf-seq', 'lpf2-seq'] },
     release: { question: 'What is this release called (for example 2026-10 or v1)?', kind: 'text', optional: true },
     repo: { question: 'Which GitHub repository will the site be published from (owner/name)?', kind: 'text', optional: true },
     maintainers: { question: 'Who maintains the permanent addresses on w3id.org (GitHub user names)?', kind: 'list', optional: true },

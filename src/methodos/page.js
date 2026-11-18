@@ -17,6 +17,7 @@ import { outputStore } from './outputs.js';
 import { stepAt, currentInput, startFiles, keptBy, keptFor, keptWords, distinct, projectWords, notKept } from './seams.js';
 import { regionsSettled, notReviewed, relateProblem, unexported, reviewDiffers, writesItself, columnsProblem } from '../engine/methodos/containment.js';
 import { stepMark, whereWords, lower } from './layout.js';
+import { lossyWords } from '../engine/plain.js';
 import { whyWords, shareLink, ENROL, WorkbenchError, WORDS, capWords } from '../engine/workbench.js';
 import { stateOf, fromSnapshot } from './whg.js';
 
@@ -49,8 +50,6 @@ const PRESS = { check: 'Check', 'check.cube': 'Check the Data Cube', convert: 'C
   match: 'Match with another dataset…', apply: 'Finish', 'relate.containment': 'Finish', 'publish.report': 'Prepare', 'publish.mint': 'Prepare', 'publish.site': 'Prepare', 'publish.w3id': 'Prepare' };
 // The steps that record a review's decisions: the review they take is offered again ("Open the review") when it is not open (robust R-08).
 const RECORDS = new Set(['apply', 'relate.containment']);
-// The formats that cannot hold all a review decided (rich R1), by the name each has in the list beside Convert.
-const LOSSY = { lpf: 'Linked Places Format', 'lpf-seq': 'Linked Places Format', tables: 'The spreadsheet tables' };
 /**
  * How many attestations of a PLATO JSON file say which places are the same (each has "identities"), read as a stream; or,
  * with `key` "geometries", how many give a location.
@@ -1291,9 +1290,9 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     else if (toReview && RECORDS.has(s.op)) next = `Press “Open the review (${toReview.name})”: the decisions you made are in it. Then press Finish, below the review.`;
     else if (s && !run) next = PRESS[s.op] ? `Press ${PRESS[s.op]} below.` : `Run ${OPERATIONS[s.op].tool ? `${OPERATIONS[s.op].tool}'s` : 'its'} ${lower(OPERATIONS[s.op].title)}; the step is done when the run finishes.`;
     // Written out in a format that cannot hold all the review decided: said before the run, with what does (rich R1).
-    const lossy = s && wf && !changed && !run && s.op === 'convert' && main?.every((r) => r.type === 'dataset') ? LOSSY[page.target?.()] : null;
-    const decided = lossy ? identitiesOf(main) : 0;
-    const lost = lossy && decided ? `${lossy}, the format chosen beside Convert, cannot hold everything in the ${decided} ${decided === 1 ? 'decision' : 'decisions'} this dataset records about which places are the same: each match is kept as a link, but not who decided it or from which candidate, and a place you said was not the same is left out. PLATO JSON keeps all of it.` : '';
+    // (src/engine/plain.js, lossyWords: Linked Places Format and the tables keep each match as a link; the flat table also who decided it.)
+    const lossy = s && wf && !changed && !run && s.op === 'convert' && main?.every((r) => r.type === 'dataset') && lossyWords(page.target?.(), 1) ? page.target() : null;
+    const lost = lossy ? lossyWords(lossy, identitiesOf(main)) : '';
     tracker.dataset.lossy = String(!!lost);
     const message = [note?.words, next, lost].filter(Boolean).join(' ');
     tMsg.textContent = message; tMsg.hidden = !message; tMsg.classList.toggle('warn', !!note?.warn);
@@ -2015,7 +2014,19 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
   q(sharedEl, '#methodos-shared-close').addEventListener('click', () => { viewing = null; say(null); render(false); if (tracker.hidden) backTo(); else show(q(tracker, 'h2')); });
 
   // step(): the step at hand, { id, op, answers }, or null: Chora reads it (its step "trace" is done there, from the map).
+  /**
+   * The format the step at hand writes, for the list beside Convert (src/app.js, fillTargets): { step, value, choices },
+   * or null where the step converts nothing. `value` is the format the step names, or the workflow's answer where the
+   * recipe leaves it to the question "In what format do you want the result?"; `choices` that question's, in its order
+   * (the formats listed first, in plain words), and none for a step whose format is fixed.
+   */
+  const targetAt = () => {
+    const s = wf && !changed && !viewing ? atStep() : null;
+    if (!s || s.op !== 'convert') return null;
+    const asked = recipeOf(wf)?.steps.find((x) => x.id === s.id)?.options?.target === '$target';
+    return { step: s.id, value: typeof s.options?.target === 'string' ? s.options.target : null, choices: asked ? recipeOf(wf).asks?.target?.choices || [] : [] };
+  };
   const stepNow = () => { const s = wf && !changed && !viewing ? atStep() : null; return s ? { id: s.id, op: s.op, answers: { ...wf.answers } } : null; };
-  return { open, chosen, placed, mapped, began, ended, dropped, keepChanged, detected, baseChanged, id: () => wf?.id || null, step: stepNow, following: () => !!(wf || pending || changed), takenUp: () => takenUp,
+  return { open, chosen, placed, mapped, began, ended, dropped, keepChanged, detected, baseChanged, targetAt, id: () => wf?.id || null, step: stepNow, following: () => !!(wf || pending || changed), takenUp: () => takenUp,
     scope: scopeNow, setScope, scoped: () => !!(wf || pending || changed), viewShared, openFromWhg, shareTokens: () => [...shareTokens], tokenGiven };
 }

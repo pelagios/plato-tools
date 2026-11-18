@@ -14,7 +14,7 @@ const result = 'apply.dataset ?? trace.dataset';
 export default {
   key: 'trace-a-map',
   title: 'Trace a historical map',
-  version: 2,
+  version: 3,   // 3 (18 November 2026): the result may be written as one flat table or as Linked Places Format v2 for WHG (Map your data's version 6)
   files: {},
   asks: {
     'will-identify': { question: 'Will you look the places up in the World Historical Gazetteer, to identify each with a record there?', kind: 'yes-no' },

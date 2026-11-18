@@ -42,7 +42,7 @@ test('Map your data asks nothing that must be answered: a list of names, places 
   assert.deepEqual(questionsFor(c).map((q) => [q.key, q.default]), [['has-regions', false], ['will-draw', false], ['will-publish', false], ['will-mint', false]]);
   assert.equal(answered(c, {}), true);
   const a = answersFor(c, {});
-  assert.deepEqual(a, { target: 'plato-json', 'has-regions': false, 'will-draw': false, 'will-publish': false, 'will-mint': false });
+  assert.deepEqual(a, { target: 'table-flat', 'has-regions': false, 'will-draw': false, 'will-publish': false, 'will-mint': false });
   assert.deepEqual(plan(c.recipe, a).steps.map((s) => s.id), ['columns', 'check', 'dataset', 'lookup', 'review', 'apply', 'locate', 'again', 'compare', 'see', 'out']);
   // The question about the map, in plain words: what happens to the places not found.
   assert.equal(questionsFor(c).find((q) => q.key === 'will-draw').question, 'Some places may not be found. Do you want to place them by hand on a map afterwards?');

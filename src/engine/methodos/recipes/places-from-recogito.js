@@ -9,7 +9,7 @@ import { ASKS, afterDataset } from './downstream.js';
 export default {
   key: 'places-from-recogito',
   title: 'Places from Recogito',
-  version: 2,   // 2 (18 November 2026): as Map your data's version 5, the matched places' locations taken in a step of their own, and the places seen on a map before they are written out
+  version: 3,   // 3 (18 November 2026): the result may be written as one flat table or as Linked Places Format v2 for WHG (Map your data's version 6); 2 (18 November 2026): as Map your data's version 5, the matched places' locations taken in a step of their own, and the places seen on a map before they are written out
   files: {
     files: { words: 'The Recogito export (W3C Web Annotations), with the IIIF georeferences of its maps, and their manifests, if it has regions drawn on maps', types: ['files'] },
   },

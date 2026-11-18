@@ -19,7 +19,7 @@ import { BASE } from './asks.js';
 export default {
   key: 'release-a-new-version',
   title: 'Release a new version',
-  version: 1,
+  version: 2,   // 2 (18 November 2026): the result may be written as one flat table or as Linked Places Format v2 for WHG (Map your data's version 6)
   files: {
     files: { words: 'The new version of your dataset (in a PLATO format: JSON, JSON Lines, RDF, or the spreadsheet tables)', types: ['files'] },
     previous: { words: 'The previous release, as published (the copy with addresses)', types: ['files'], late: true },

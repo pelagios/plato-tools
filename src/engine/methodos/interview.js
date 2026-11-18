@@ -50,7 +50,7 @@ const LISTED = 'Needed: each place of your list is given its address under it, a
 export const baseWhy = (asked) => asked?.why || REGIONS;
 const ROUTES = [
   // 'will-mint' (Issue #36: Wikidata items for the places no gazetteer knows) is asked last, and is no unless answered.
-  { have: 'table', want: 'map', recipe: 'map-your-data', set: { target: 'plato-json' }, ask: ['has-regions', 'will-draw', 'will-publish', 'will-mint'], base: { when: ['has-regions', 'will-publish'], needed: false, later: 'has-regions' } },
+  { have: 'table', want: 'map', recipe: 'map-your-data', set: { target: 'table-flat' }, ask: ['has-regions', 'will-draw', 'will-publish', 'will-mint'], base: { when: ['has-regions', 'will-publish'], needed: false, later: 'has-regions' } },
   { have: 'table', want: 'publish', recipe: 'map-your-data', set: { target: 'plato-json', 'will-publish': true }, ask: ['has-regions', 'will-draw', 'will-mint'], base: { when: ['has-regions', 'will-publish'], needed: false, later: 'has-regions' } },
   { have: 'plato', want: 'publish', recipe: 'publish-a-dataset', set: {}, ask: [], base: { needed: false } },
   // A new version of a published dataset (plan #34, item 10; 17 October 2026): revised against the previous release,

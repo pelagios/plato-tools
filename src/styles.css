@@ -926,3 +926,16 @@ section.chora .chora-mapwrap { container: chora-map / inline-size; }
 .scope-undated-choice { color: var(--muted); }
 .scope-buttons { display: flex; flex-wrap: wrap; gap: .5rem; }
 @media (width < 60rem) { .scope-map { height: 18rem; } }
+
+/* ---- What came of writing the result, in plain words (src/engine/plain.js, outcome; src/app.js, renderOutcome):
+   above the report, which keeps every item in full. The verdict is the one thing read first; its reasons, each
+   with its first examples and its remedy, follow; what the verdict is and is not is said last, smaller. */
+.outcome { margin: .9rem 0 1.1rem; padding: .9rem 1.1rem; border: 1px solid var(--line); border-left: .3rem solid var(--ok); border-radius: 8px; background: var(--card); }
+.outcome[data-tone="warn"] { border-left-color: var(--warn); }
+.outcome-head { margin: 0; font: 600 1.15rem/1.4 var(--font-text); }
+.outcome-reasons { margin: .55rem 0 0; padding-left: 1.2rem; }
+.outcome-reasons li { margin: .45rem 0; line-height: 1.5; }
+.outcome-examples, .outcome-remedy { display: block; }
+.outcome-examples { color: var(--muted); font-size: .92rem; overflow-wrap: anywhere; }
+.outcome-note { margin: .6rem 0 0; line-height: 1.5; }
+.outcome-scope { margin: .6rem 0 0; color: var(--muted); font-size: .88rem; line-height: 1.45; }
