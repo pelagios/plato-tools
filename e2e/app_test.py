@@ -3280,6 +3280,7 @@ def main():
             lookup_panel_case(page, tmp, url)
             # Map your data's door and lookup (13 November 2026), in a browser of its own, with a fake WHG of its own.
             myd_door_checks(pw, url, tmp)
+            review_progress_checks(pw, url, tmp)
             # Wikidata items for the places no gazetteer knows (Issue #36): a fake Wikidata (page.route), never the real one.
             krisis_wikidata_case(page, tmp, url)
             ctx.close()
@@ -8176,6 +8177,143 @@ def myd_door_checks(pw, url, tmp):
               and inside['offerTop'] >= 0 and inside['offerBottom'] <= inside['height'])
         return ok, {'outside a workflow': {k: outside[k] for k in ('offer', 'primary')}, 'at the regions step': {k: inside[k] for k in ('offer', 'primary', 'offerTop', 'offerBottom', 'height', 'current')}}
     attempt('Map your data, the regions: at the regions step, the dataset chosen, the offer of the region review is in view and "Review the regions level by level" is the primary button; outside a workflow it is offered, not as the primary one', regions_offered)
+
+    for ctx in made:
+        try: ctx.close()
+        except Exception: pass
+    try: browser.close()
+    except Exception: pass
+
+# ---- Krisis: a review's progress kept in this browser as it is made (src/lib/review-progress.js) ----
+# Two places decided, the page reloaded with nothing saved, the same work file opened: they are decided, and the line
+# under "Save the review" says they were put back. Each absence has its presence beside it: a browser that kept nothing
+# opens the same file with nothing decided (so the decisions came from the browser, not the file); cleared, the reload
+# brings nothing back; with "keep working data" off the progress is in the tab alone, and no database is made.
+REVIEW_KEPT = '''() => { const p = window.__plato || {}, l = document.getElementById('review-kept'), v = (e) => !!e && !e.hidden && !e.closest('[hidden]') && !!e.getClientRects().length;
+  return { phase: p.phase || null, reviewed: p.review ? p.review.reviewed : null, kept: p.reviewKept || null, line: v(l) ? document.getElementById('review-kept-text').textContent : null,
+    use: v(document.getElementById('review-kept-use')), clear: v(document.getElementById('review-kept-clear')),
+    decisions: Object.fromEntries(((p.work || {}).candidates || []).map((c) => [c.id, c.decision ? c.decision.kind : null])) }; }'''
+REVIEW_DBS = "async () => (await indexedDB.databases()).map((d) => d.name).filter((n) => /krisis/.test(n))"
+REVIEW_RECORDS = '''async () => { const db = await new Promise((res, rej) => { const q = indexedDB.open('plato-tools-krisis-progress', 1); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+  try { return await new Promise((res, rej) => { const g = db.transaction('reviews').objectStore('reviews').count(); g.onsuccess = () => res(g.result); g.onerror = () => rej(g.error); }); } finally { db.close(); } }'''
+
+def review_progress_checks(pw, url, tmp):
+    base = url.rstrip('/') + '/'
+    out = tmp / 'review-progress'; out.mkdir(exist_ok=True)
+    A, B = 'https://example.org/kept/a/', 'https://example.org/kept/b/'
+    cand = lambda i, a, b: {'id': f'c{i}', 'candidate_source': A + a, 'candidate_candidate': B + b, 'similarity_score': 0.9, 'distance_km': 1, 'candidate_status': 'suggested',
+                            'other': {'label': b.title(), 'names': [b.title()], 'point': None}, 'decision': None}
+    work = {'krisis': 3, 'generated_at': '2026-11-01T10:00:00Z', 'algorithm_version': 'krisis-names 7', 'match_parameters': {},
+            'subjects': {'title': 'Mine', 'files': [{'name': 'mine.json', 'size': 10, 'sha256': 'a' * 64}]},
+            'others': {'title': 'Theirs', 'files': [{'name': 'theirs.json', 'size': 20, 'sha256': 'b' * 64}]},
+            'places': {A + n: {'label': n.title(), 'names': [n.title()], 'point': None} for n in ('bath', 'bristol', 'wells')},
+            'regions': {}, 'lookups': [], 'candidates': [cand(1, 'bath', 'bathe'), cand(2, 'bristol', 'bristoll'), cand(3, 'wells', 'welles')], 'reviewer': None, 'cursor': 0}
+    file = out / 'kept.krisis.json'; file.write_text(json.dumps(work, indent=2) + '\n')
+    # The same review as a file that records later work than anything the browser keeps: Wells decided, far in the future.
+    later = json.loads(json.dumps(work))
+    later['candidates'][2].update({'candidate_status': 'confirmed', 'decision': {'kind': 'match', 'identityType': 'exactMatch', 'decided_at': '2099-01-01T00:00:00Z'}})
+    later_file = out / 'later.krisis.json'; later_file.write_text(json.dumps(later, indent=2) + '\n')
+    browser = pw.chromium.launch(headless=True)
+    made = []
+    def context():
+        ctx = browser.new_context(accept_downloads=True, viewport={'width': 1280, 'height': 900}, reduced_motion='reduce')
+        made.append(ctx)
+        ctx.add_init_script('window.__plato_forceDownload = true;')
+        return ctx
+    def ready(page):
+        page.goto(NOTOOLS if PROVE else base)
+        s = wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready')
+        if s.get('phase') != 'ready': raise RuntimeError(f'the page is not ready: {s.get("phase")}')
+    V = lambda page: page.evaluate(REVIEW_KEPT)
+    def open_review(page, f=file):
+        page.set_input_files('#workfile', [str(f)])
+        s = wait_state(page, lambda s: s.get('phase') == 'reviewing' and s.get('review'), T(30), 'the review opened')
+        if s.get('phase') != 'reviewing': raise RuntimeError(f'the review did not open: {s.get("phase")}')
+        page.wait_for_timeout(600)   # a keeping wrongly begun by the opening itself would have shown its line by now
+        return V(page)
+    def decide(page, keys, reviewed):
+        if page.is_visible('#review-name'): page.fill('#review-name', 'Kept Reviewer'); page.press('#review-name', 'Enter')
+        for k in keys: page.locator('#review-place').focus(); page.keyboard.press(k)
+        wait_state(page, lambda s: (s.get('reviewKept') or {}).get('kind') == 'kept' and (s.get('reviewKept') or {}).get('reviewed') == reviewed, T(15), 'the progress kept')
+        return V(page)
+    def reloaded(page):
+        page.reload()
+        s = wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'reloaded')
+        return {'phase': s.get('phase'), 'review on the page': bool(s.get('work'))}
+    r = {}
+
+    def kept_and_put_back():
+        page = context().new_page(); ready(page); r['page'] = page
+        opened = open_review(page)                                   # nothing decided in the file, nothing kept: no line
+        kept = decide(page, ['a', 'n'], 2)                           # Bath the same place, Bristol not this one; nothing saved
+        dbs = page.evaluate(REVIEW_DBS)
+        after = reloaded(page)                                       # the page holds no review now
+        back = open_review(page)
+        # The control: another browser, which kept nothing, opens the same file with nothing decided.
+        other = context().new_page(); ready(other)
+        elsewhere = open_review(other)
+        ok = (opened['reviewed'] == 0 and opened['line'] is None and opened['kept'] is None
+              and kept['reviewed'] == 2 and (kept['kept'] or {}).get('where') == 'browser' and 'kept in this browser as you go' in (kept['line'] or '') and 'sent nowhere' in (kept['line'] or '') and kept['clear'] and not kept['use']
+              and dbs == ['plato-tools-krisis-progress']
+              and after == {'phase': 'ready', 'review on the page': False}
+              and back['reviewed'] == 2 and back['decisions'] == {'c1': 'match', 'c2': 'not-this', 'c3': None} and (back['kept'] or {}).get('kind') == 'restored'
+              and 'has been put back: 2 places reviewed, where the file opened has 0' in (back['line'] or '') and back['clear']
+              and elsewhere['reviewed'] == 0 and elsewhere['decisions'] == {'c1': None, 'c2': None, 'c3': None} and elsewhere['line'] is None)
+        return ok, {'opened': opened, 'kept': kept, 'databases': dbs, 'after the reload': after, 'opened again': back, 'in another browser': elsewhere}
+    attempt('match review: two places decided and nothing saved, the page reloaded, the same work file opened again has both decided, and one line says they were kept in this browser and put back; a browser that kept nothing opens the same file with nothing decided', kept_and_put_back)
+
+    def offered_then_cleared():
+        page = r.get('page')
+        if not page: raise RuntimeError('no review was kept (the check before)')
+        def use(page):
+            page.click('#review-kept-use', timeout=T(10) * 1000)
+            wait_state(page, lambda s: (s.get('reviewKept') or {}).get('kind') == 'restored', T(15), 'what is kept used')
+            return V(page)
+        # The page reloaded (no review on it), a file of the same review that records later work is shown as it is, and
+        # what is kept is offered, not taken.
+        reloaded(page)
+        offered = open_review(page, later_file)
+        used = use(page)
+        # The review open on the page, its file chosen again (to go back to it as saved, say): the file is shown, and what
+        # is kept, though later than the file, is offered and not put back, where after a reload it was put back (above).
+        chosen = open_review(page)
+        used_again = use(page)
+        page.click('#review-kept-clear', timeout=T(10) * 1000)
+        wait_state(page, lambda s: (s.get('reviewKept') or {}).get('kind') == 'cleared', T(15), 'cleared')
+        cleared = V(page)
+        left = page.evaluate(REVIEW_RECORDS)
+        after = reloaded(page)
+        back = open_review(page)
+        ok = (offered['reviewed'] == 1 and offered['decisions'] == {'c1': None, 'c2': None, 'c3': 'match'} and (offered['kept'] or {}).get('kind') == 'offered' and offered['use'] and offered['clear']
+              and 'keeps other progress in this review' in (offered['line'] or '') and '2 places reviewed, where the file opened has 1' in (offered['line'] or '')
+              and used['reviewed'] == 2 and used['decisions'] == {'c1': 'match', 'c2': 'not-this', 'c3': None} and not used['use']
+              and chosen['reviewed'] == 0 and chosen['decisions'] == {'c1': None, 'c2': None, 'c3': None} and (chosen['kept'] or {}).get('kind') == 'offered' and chosen['use']
+              and '2 places reviewed, where the file opened has 0' in (chosen['line'] or '') and 'not put back unless you ask' in (chosen['line'] or '')
+              and used_again['reviewed'] == 2 and used_again['decisions'] == {'c1': 'match', 'c2': 'not-this', 'c3': None}
+              and cleared['reviewed'] == 2 and (cleared['line'] or '').startswith('Cleared: nothing of this review is kept') and not cleared['clear'] and left == 0
+              and after == {'phase': 'ready', 'review on the page': False}
+              and back['reviewed'] == 0 and back['decisions'] == {'c1': None, 'c2': None, 'c3': None} and back['line'] is None and back['kept'] is None)
+        return ok, {'a later file opened': offered, 'what is kept used': used, 'its file chosen with the review open': chosen, 'used again': used_again, 'cleared': cleared, 'records left': left, 'after the reload': after, 'opened again': back}
+    attempt('match review: a work file that records later work than the browser keeps, or chosen while its review is open on the page, is shown as it is, with what is kept offered and taken only when asked for; "Clear what is kept" leaves the page\'s decisions and keeps nothing, so that after a reload the file opens with nothing decided', offered_then_cleared)
+
+    def tab_only():
+        ctx = context(); page = ctx.new_page(); ready(page)
+        page.evaluate("() => { localStorage.setItem('plato-tools.keep-working-data', 'no'); }")
+        ready(page)
+        open_review(page)
+        kept = decide(page, ['a'], 1)
+        dbs = page.evaluate(REVIEW_DBS)
+        session = page.evaluate("() => Object.keys(sessionStorage).filter((k) => k.startsWith('plato-tools.krisis-progress.')).length")
+        after = reloaded(page)
+        back = open_review(page)                                     # the same tab, reloaded: put back
+        other = ctx.new_page(); ready(other)
+        elsewhere = open_review(other)                               # another tab of the same browser: nothing
+        ok = (kept['reviewed'] == 1 and (kept['kept'] or {}).get('where') == 'tab' and 'kept for this tab only (your working data is not kept between visits)' in (kept['line'] or '')
+              and dbs == [] and session == 1 and after == {'phase': 'ready', 'review on the page': False}
+              and back['reviewed'] == 1 and back['decisions'] == {'c1': 'match', 'c2': None, 'c3': None} and (back['kept'] or {}).get('kind') == 'restored' and 'kept for this tab on' in (back['line'] or '')
+              and elsewhere['reviewed'] == 0 and elsewhere['line'] is None)
+        return ok, {'kept': kept, 'databases': dbs, 'in the tab\'s storage': session, 'after the reload': after, 'opened again': back, 'in another tab': elsewhere}
+    attempt('match review: with "Keep my working data between visits" off, the progress is kept for the tab only and the line says so: no database is made, the same tab reloaded has the decision back, and another tab of the same browser has none', tab_only)
 
     for ctx in made:
         try: ctx.close()

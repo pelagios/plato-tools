@@ -1923,6 +1923,34 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   profile, PLATO's profile for attesting about places that exist already: each attestation names its
   place in `about`, and nothing of the places is copied. Each attestation is checked against the schema
   before it is written, and the tests run the checker on the file.
+- **A review's progress is kept in the browser as it is made** (`src/lib/review-progress.js`, used by
+  `src/app.js`), so that a reload or a closed tab before "Save the review" loses no decision. What is
+  kept is the review as "Save the review" would write it (`serialiseWork()`: the work file's format is
+  unchanged, and nothing of it is written to a dataset), under a key of the review itself
+  (`reviewKey()`: when its suggestions were made and the SHA-256 of the files they were made from, so
+  a review has the same key however far it has gone), with when it was last changed. It is kept a
+  moment after each change (every `render()` asks whether the review has changed; changes close
+  together are kept once, and a large review waits ten times as long as its last keeping took), and at
+  once when the page is hidden or going. Where: IndexedDB `plato-tools-krisis-progress`, store
+  `reviews`, the 20 reviews last changed; with "keep working data" off, sessionStorage for the tab
+  alone (`plato-tools.krisis-progress.<key>`), and what IndexedDB held is let go, as for a workflow's
+  record. Opening a work file (`resume()`: "Resume a review", a workflow's "Open the review", a
+  project) asks `onOpen()`: what is kept and was changed after everything the file records
+  (`latestIn()`: its decisions, lookups, batches and Finishes) is put back, and the line under "Save
+  the review" says so; where the file records something later, or the review is open on the page as
+  its file is chosen (the file chosen over the page's own state: to go back to it as saved, say), the
+  file is shown and what is kept is offered ("Use what is kept"), never taken unasked, and is
+  replaced at the next change; "Clear what is kept" lets it go (the page's review stays), and a
+  workflow's "Clear them" lets every review's go. A record read back is checked by `readWork()` and
+  must be of the review it is kept under (the origin is shared). Nothing is sent anywhere. Measured
+  in Node (18 November 2026, synthetic reviews of five candidates a place): serialising takes 6 to
+  9 ms for 1,000 places (2.8 MB of text), 78 to 89 ms for 10,000 (28.7 MB) and 446 to 497 ms for
+  50,000 (145 MB), on the page's own thread; the writing to IndexedDB was not measured. The tab's
+  storage has a limit of its own (commonly some 5 MB; not measured here), so with "keep working
+  data" off a review of a few thousand places may not be kept: the store then answers 'page', and the
+  line says so ("This browser would not keep your progress"). The
+  questions asked before leaving or reloading are unchanged: they are about decisions that no file and
+  no workflow holds, and a review begun by a match and never saved has no file to open again.
 
 ## Chora, the map
 
