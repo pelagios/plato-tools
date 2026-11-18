@@ -5543,7 +5543,7 @@ def tracker_review_checks(pw, url, tmp):
             guessed = page.evaluate(MAPPING)
             # Two of the guesses changed: the kind of place not carried over, the description read as another name.
             for column, label in (('type', "Don't carry over"), ('description', 'Alternative names')):
-                page.locator('#columns tbody tr', has_text=column).locator('select[data-column]').select_option(label=label)
+                page.locator('#columns tbody tr:has(th code:text-is("%s")) select[data-column]' % column).select_option(label=label)
             mine = page.evaluate(MAPPING)
             page.click('#methodos-done'); step_is(page, 'columns', 'done', 15)
             page.reload()
