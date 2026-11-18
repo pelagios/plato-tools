@@ -11,6 +11,8 @@ import { spellingsPanel } from './hermes-spellings.js';
 import { splitMatching } from './engine/hermes/cluster.js';
 import { review as W, POOL_BUSY, POOL_STUCK, PREVIEW_WORDS, CANCEL_RELEASING, CHORA_HANDOVER, NO_STORAGE, storageRefused, NOT_DOWNLOADED, downloadFailed, NO_ENGINE_STORAGE, engineStorageLacking, NO_ROOM, noRoom } from './engine/words.js';
 const REVIEW_WORDS = W;   // the review's words, where W names the words for the columns
+import { REVIEW_KEPT } from './engine/words.js';
+import { progressStore, recordOf as progressRecord, onOpen as progressOnOpen, reviewKey } from './lib/review-progress.js';
 import { readable } from './engine/input.js';
 import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions, flag, noteOn, setRowState, kindOfCandidate, acceptedFor } from './engine/krisis/work.js';
 import { QUALIFIER_LISTS } from './engine/krisis/qualifiers.js';
@@ -345,6 +347,7 @@ function onDone({ report, outputs, work: found, incomplete }) {
     Object.assign(work, { finished: found.finished, draft_answers: found.draft_answers });
     // Said with the result, not in the review's warning, which is for what is wrong with this Finish (a base address that differs).
     unsaved++; $('summary').insertAdjacentText('beforeend', ' ' + (isPlain() ? PLAIN_RECORDED : KRISIS_WITHDRAW.recorded));
+    progressChanged();
   }
 }
 function renderReport(report) { $('report').innerHTML = reportHtml(report, state.action); renderOutcome(report); }
@@ -1473,7 +1476,7 @@ methodos = mountMethodos({
     reviewShown: () => !!work && !$('review').hidden,
     openWork: (f) => resume(f),
     pickWork: () => $('workfile').click(),
-    forgetKept: () => kept.forget(),   // "Clear them" lets the kept file go too
+    forgetKept: () => { clearAllProgress(); return kept.forget(); },   // "Clear them" lets the kept file go too, and the reviews' progress kept (review-progress.js)
     letGo: (list) => keepChoice(list, { force: true }),   // a workflow let go hands its user's file over: one copy at a time
     ownTarget: () => (input && readable(input) ? INPUT_TO_TARGET[input.format] ?? null : null),
     base: () => $('base').value,
@@ -1693,7 +1696,7 @@ $('whg-shared-not-now').onclick = () => {
 permissions.onChange(() => { if (sharedHeld) openShared(); });
 // "Keep working data" turned off in the Permissions panel: Methodos's records go at once, not at its next save.
 let keptBefore = permissions.keepWorkingData();
-permissions.onChange(() => { const now = permissions.keepWorkingData(); if (now !== keptBefore) { keptBefore = now; methodos.keepChanged(now); if (!now) { kept.forget(); keptOffer(null); } } });
+permissions.onChange(() => { const now = permissions.keepWorkingData(); if (now !== keptBefore) { keptBefore = now; methodos.keepChanged(now); progressKeepChanged(); if (!now) { kept.forget(); keptOffer(null); } } });
 // The kept file, offered (keptAtStart, above).
 keptAtStart();
 
@@ -1706,6 +1709,67 @@ let saves = 0;     // how many times it has been saved (Krisis × Methodos: with
 // How many of `unsaved` a workflow already holds: the count as it stood when the workflow last went on from a step whose
 // result is the review (onStep, above). Decisions made since are in this page alone.
 let handedOver = 0;
+// The review's progress, kept in this browser as it is made (src/lib/review-progress.js), so that a reload or a
+// closed tab loses no decision: the review as "Save the review" would write it, kept a moment after each change
+// (changes close together are kept once), put back when the same review is opened here again (resume, below), and
+// said in one line under "Save the review", with a way to clear it. It is sent nowhere. The questions asked before
+// leaving or reloading (below) are as they were: they are about what no file and no workflow has.
+const keptProgress = progressStore({ keep: () => permissions.keepWorkingData() });
+// keptMark: the review as last kept (or as begun: nothing to keep yet). keptSaid: what the line says. offeredFile:
+// the file opened while other progress is kept, for "Use what is kept".
+let keptMark = null, keepTimer = 0, keepCost = 0, keptSaid = null, offeredFile = null;
+const progressSig = () => `${unsaved}|${saves}|${work.candidates.length}|${(work.lookups || []).length}`;
+const markProgress = () => { keptMark = work ? { work, sig: progressSig() } : null; };
+const keptWhere = () => (permissions.keepWorkingData() ? 'browser' : 'tab');
+function sayKept(said) {
+  keptSaid = said;
+  const K = REVIEW_KEPT;
+  $('review-kept').hidden = !said;
+  state.reviewKept = said ? { ...said } : null;   // for the tests: what the line says, and of what
+  if (!said) return;
+  $('review-kept-text').textContent = said.kind === 'restored' ? K.restored(said, said.where) : said.kind === 'offered' ? K.offered(said, said.where)
+    : said.kind === 'cleared' ? K.cleared : said.kind === 'not-kept' ? K.notKept : K.kept(said.where);
+  const use = $('review-kept-use'), clear = $('review-kept-clear');
+  use.textContent = K.use; use.hidden = said.kind !== 'offered';
+  clear.textContent = K.clear; clear.hidden = said.kind === 'cleared' || said.kind === 'not-kept';
+}
+/** Keep the review as it stands, now. */
+function keepProgress() {
+  clearTimeout(keepTimer); keepTimer = 0;
+  if (!work) return;
+  const w = work, t0 = performance.now();
+  let record;
+  try { record = progressRecord(w, { name: workName, cursor }); } catch { return; }
+  markProgress(); offeredFile = null;
+  const said = (where) => { keepCost = performance.now() - t0; if (work === w) sayKept(where === 'page' ? { kind: 'not-kept' } : { kind: 'kept', where, at: record.at, reviewed: record.reviewed, key: record.key }); };
+  keptProgress.put(record).then(said, () => said('page'));
+}
+/** The review may have changed (it is asked at every drawing of it): if it has since it was last kept, it is kept again in a moment, the longer the larger it is. */
+function progressChanged() {
+  if (!work || (keptMark?.work === work && keptMark.sig === progressSig())) return;
+  if (!keepTimer) keepTimer = setTimeout(keepProgress, Math.min(5000, Math.max(250, keepCost * 10)));
+}
+// The page going (a reload, a tab closed or put in the background): what was to be kept in a moment is kept now.
+const keepBeforeLeaving = () => { progressChanged(); if (keepTimer) keepProgress(); };
+window.addEventListener('pagehide', keepBeforeLeaving);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') keepBeforeLeaving(); });
+/** "Keep my working data" changed: turned off, what was kept between visits is cleared at once; the review open is kept again where it now may be. */
+function progressKeepChanged() {
+  if (!permissions.keepWorkingData()) keptProgress.forgetKept();
+  if (work && (keepTimer || ['kept', 'restored'].includes(keptSaid?.kind))) keepProgress();
+}
+/** What is kept of the review open is cleared ("Clear what is kept"); the page's own review stays, and is kept again from its next change. */
+async function clearProgress(all = false) {
+  clearTimeout(keepTimer); keepTimer = 0;
+  const w = work;
+  try { if (all) await keptProgress.forgetAll(); else if (w) await keptProgress.forget(reviewKey(w)); } catch { /* none kept */ }
+  if (work !== w) return;
+  markProgress(); offeredFile = null;
+  if (w && (!all || keptSaid)) sayKept({ kind: 'cleared' });
+}
+const clearAllProgress = () => clearProgress(true);
+$('review-kept-clear').onclick = async () => { await clearProgress(); $('save-review').focus(); };
+$('review-kept-use').onclick = () => { if (offeredFile && !busy && !looking) resume(offeredFile, { useKept: true }); };
 const REVIEW_HELD = new Set(['lookup', 'lookup.levels', 'review', 'wikidata.items', 'apply', 'relate.containment']);
 const REVIEWER_KEY = 'plato-tools.reviewer';
 /**
@@ -1760,13 +1824,30 @@ function refuse(message) {
   $('summary').innerHTML = `<span class="warn">${escapeHtml(message)}</span>`;
   Object.assign(state, { phase: 'error', error: message });
 }
-async function resume(file) {
+async function resume(file, { useKept = false } = {}) {
   let w;
   try { w = readWork(await file.text()); } catch (e) { refuse(e.message); return; }
+  // What this browser keeps of this review's progress (review-progress.js onOpen): changed after everything the file
+  // records, it is put back (the page reloaded, or come back to); not, the file is shown and what is kept is offered
+  // ("Use what is kept": useKept). So too when this review is the one on the page now: its file was chosen over it.
+  let found = { action: 'none', record: null };
+  if (keepTimer) keepProgress();   // the review open now may be this one: what is read of it is then its latest
+  const open = !!work && reviewKey(work) === reviewKey(w);
+  try { found = progressOnOpen(w, await keptProgress.get(reviewKey(w)), { use: useKept, open }); } catch { /* none kept */ }
+  const restored = found.action === 'restore';
+  if (restored) w = found.record.work;
   $('result').hidden = true;
   // The other dataset's title typed for an earlier match is not this review's: put away, it cannot be taken for this one's at finishing.
   $('others-title').value = '';
   beginReview(w, file.name);
+  // What was put back is in no file yet: it counts as not saved, as when it was decided.
+  if (restored) unsaved = Math.max(1, found.differing);
+  markProgress();
+  if (found.record) {
+    const r = found.record;
+    sayKept({ kind: restored ? 'restored' : found.action === 'offer' ? 'offered' : 'kept', where: keptWhere(), at: r.at, reviewed: r.reviewed, key: r.key, ...(found.action === 'none' ? {} : { fileReviewed: found.fileReviewed }) });
+    offeredFile = found.action === 'offer' ? file : null;
+  }
   // A review made from other files than those chosen now is still opened, with a warning; with none chosen, it says so.
   if (!files.length) { showWarning(W.noDatasetYet); return; }
   if (!readable(input)) { showWarning(W.notRecognisedYet); return; }
@@ -1775,6 +1856,7 @@ async function resume(file) {
   try { const differ = await filesDiffer(w.subjects, files); showWarning(differ.length ? W.differs(differ) : ''); } catch { showWarning(''); }
 }
 function beginReview(w, name, { focus = true } = {}) {
+  if (keepTimer) keepProgress();   // the review this one takes the place of, as it stood
   work = w; workName = name || workName; basisFor = null; findFor = null; allDone = false; unsaved = 0; handedOver = 0;
   exportedSet = null; earlierSets = []; candidatesStatus('');
   wikidata.reset();   // Krisis: Wikidata items (#36): a new review, nothing of the last one's kept
@@ -1791,6 +1873,7 @@ function beginReview(w, name, { focus = true } = {}) {
   reviewColumnsAsked = 0; reviewMapping = isTable(input) && columns ? mappingText(columnOptions()) : undefined;
   lockColumns();
   askName(!reviewer() && order.length > 0);
+  markProgress(); offeredFile = null; sayKept(null);   // nothing of it is kept yet: its first change is
   goTo(cursor, focus);
 }
 function showWarning(text) { $('review-warning').textContent = text; $('review-warning').hidden = !text; }
@@ -1835,6 +1918,7 @@ function render(focus) {
   $('review-prev').disabled = step(-1) === null; $('review-next').disabled = $('review-skip').disabled = step(1) === null;
   Object.assign(state, { phase: 'reviewing', work, review: { cursor, subject: order[cursor] || null, current, filter: $('review-filter').value, ...p } });
   $('finish-cites').textContent = (isPlain() ? plainCites : LW.cites)(citedSources());   // Krisis: gazetteer lookup, one attestation per source
+  progressChanged();   // kept in this browser, if it has changed (review-progress.js)
   drawBulk();   // Krisis × Methodos
   drawRegions();   // Krisis: region review
   wikidata.refresh();   // Krisis: Wikidata items (#36)
@@ -1963,6 +2047,7 @@ $('save-review').onclick = () => {
   saveBlob(new Blob([serialiseWork(work)], { type: 'application/json' }), workName);
   Object.assign(state, { reviewSaved: workName });
   unsaved = 0; handedOver = 0; saves++;
+  progressChanged();   // what is kept in this browser is the review as saved (the file may not have been: a save can be cancelled)
 };
 $('finish').onclick = () => {
   if (!work) return;
@@ -2090,7 +2175,7 @@ function rowStateHtml(place) {
 function keepNote(form) {
   const input = form.querySelector('input[name="note"]'), c = work.candidates.find((x) => x.id === form.dataset.id);
   if (!c || input.value.trim() === (c.note || '')) return;   // nothing new (a change and a focusout both bring it)
-  noteOn(work, c.id, input.value); unsaved++;
+  noteOn(work, c.id, input.value); unsaved++; progressChanged();
 }
 $('review-place').addEventListener('change', (e) => {
   if (!work) return;

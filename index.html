@@ -459,6 +459,8 @@
     <div class="review-end">
       <button id="save-review" type="button">Save the review</button>
       <small>Saves your decisions so far, to carry on later with <em>Resume a review</em>.</small>
+      <!-- Krisis: the review's progress kept in this browser as it is made (src/lib/review-progress.js; the words are words.js REVIEW_KEPT). -->
+      <p id="review-kept" class="review-kept" hidden><span id="review-kept-text" role="status"></span> <button id="review-kept-use" type="button" hidden></button> <button id="review-kept-clear" type="button" class="link" hidden></button></p>
       <div class="candidate-export">
         <button id="export-candidates" type="button">Export the suggestions as a candidate set</button>
         <button id="earlier-candidates" type="button">Earlier candidate sets…</button>

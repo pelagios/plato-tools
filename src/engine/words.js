@@ -435,6 +435,21 @@ export const review = {
   columnsLocked: 'Locked while a review is open: the review reads the dataset by the matching of columns it was made with.',
 };
 
+// Krisis: the review's progress kept in this browser as it is made (src/lib/review-progress.js): the one
+// line under "Save the review", and its buttons. `where`: 'browser' (between visits) or 'tab' (working
+// data is not kept between visits). `at`: when what is kept was last changed.
+const keptAt = (at) => new Date(at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+const keptWhere = (where) => (where === 'tab' ? 'for this tab only (your working data is not kept between visits)' : 'in this browser');
+export const REVIEW_KEPT = {
+  kept: (where) => `Your progress in this review is kept ${keptWhere(where)} as you go, and put back when you open the review here again. It is sent nowhere. Save the review to have it in a file.`,
+  restored: ({ at, reviewed, fileReviewed }, where) => `Your progress kept ${where === 'tab' ? 'for this tab' : 'in this browser'} on ${keptAt(at)} has been put back: ${count(reviewed, 'places')} reviewed, where the file opened has ${fileReviewed.toLocaleString('en-GB')}. It is kept ${keptWhere(where)} as you go, and sent nowhere.`,
+  offered: ({ at, reviewed, fileReviewed }, where) => `${where === 'tab' ? 'This tab' : 'This browser'} keeps other progress in this review, from ${keptAt(at)}: ${count(reviewed, 'places')} reviewed, where the file opened has ${fileReviewed.toLocaleString('en-GB')}. It is not put back unless you ask, and is replaced when you next decide.`,
+  cleared: 'Cleared: nothing of this review is kept in this browser now. What is on the page stays, and is kept again from your next decision; to see the file as it was saved, open it again.',
+  notKept: 'This browser would not keep your progress in this review: save the review to keep it.',
+  clear: 'Clear what is kept',
+  use: 'Use what is kept',
+};
+
 // Krisis: matching. What the match review (src/engine/krisis/) says, on the page and the command line.
 const KRISIS_PHASES = { matching: 'Comparing the names', applying: 'Making the attestations', checking: 'Checking the new dataset with the version check', revising: 'Revising against the previous release' };
 const KRISIS_DATASETS = { subjects: 'Places to match', others: 'Other dataset' };
