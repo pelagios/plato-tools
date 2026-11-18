@@ -44,6 +44,17 @@ export const notKept = (notes, refs, missed) => [...(notes || []).filter((m) => 
 export const madeBy = (state) => (state?.steps ? state.steps.flatMap((x) => [...Object.values(x.outputs || {}), ...Object.values(x.partial || {})].flat()) : []);
 /** Everything a workflow keeps in this browser: the user's own files it began with, and what its steps made. Let go together. */
 export const keptBy = (state) => [...startFiles(state), ...madeBy(state)];
+/**
+ * The files to choose in step 1 for what a step made (`refs`, each kept already: outputs.js put()): the copies kept
+ * for the workflow (`held(ref)`), not the run's own files (`made`), which are in the engine's outputs folder, cleared
+ * when the next run begins. Chosen from there, the dataset the locations were taken into was gone by the time Check
+ * read it ("A requested file or directory could not be found", 18 November 2026). The run's own only where a
+ * copy of each is not held.
+ */
+export function keptFor(refs, made, held) {
+  const kept = (refs || []).map((r) => held(r));
+  return kept.length && kept.every(Boolean) ? kept : made;
+}
 
 /**
  * What the tracker says is kept, from what the outputs folder holds (`files`, each { sha256, size })

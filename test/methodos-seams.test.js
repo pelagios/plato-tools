@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { RECIPES, runner } from '../src/engine/methodos/index.js';
-import { stepAt, currentInput, startFiles, madeBy, keptBy, keptWords } from '../src/methodos/seams.js';
+import { stepAt, currentInput, startFiles, madeBy, keptBy, keptFor, keptWords } from '../src/methodos/seams.js';
 import { outputStore } from '../src/methodos/outputs.js';
 import { fakeOpfs } from './opfs-fake.js';
 
@@ -195,4 +195,29 @@ test('a step\'s output the browser would not write is the tab\'s, and no empty f
   disk.dirs.get('methodos-outputs').set(m.sha256, new Uint8Array(0));
   assert.deepEqual(await outputStore({ root: disk.root, keep: () => true }).kept(), { count: 0, bytes: 0, files: [] });
   assert.equal(await outputStore({ root: disk.root, keep: () => true }).get(m), null);
+});
+
+test('what a step made is chosen in step 1 from the copy kept for the workflow, not from the engine\'s outputs folder, which the next run empties', async () => {
+  const disk = fakeOpfs(), root = await disk.root();
+  // The run's own file, in the engine's outputs folder, read as a browser reads a file of OPFS: from the folder, when it is read.
+  const outputs = await root.getDirectoryHandle('outputs', { create: true });
+  const h = await outputs.getFileHandle('bay.located.json', { create: true });
+  const w = (await h.createWritable()).getWriter();
+  await w.write(new TextEncoder().encode('{"located":1}')); await w.close();
+  const first = await h.getFile();
+  const made = { name: first.name, size: first.size, type: '', stream: () => first.stream(), text: async () => (await h.getFile()).text() };
+  const r = { type: 'dataset', name: made.name, size: made.size, sha256: await sha(first) };
+  const store = outputStore({ root: disk.root, keep: () => true });
+  await store.put(r, made);   // as the tracker keeps what the step made (page.js, refsHeld)
+  const [chosen] = keptFor([r], [made], store.held);
+  assert.notEqual(chosen, made, 'the kept copy, not the run\'s own file');
+  assert.equal(chosen.name, 'bay.located.json');
+  // The next run begins: the engine empties its outputs folder (worker.js, runEnv).
+  await outputs.removeEntry('bay.located.json');
+  await assert.rejects(() => made.text(), { name: 'NotFoundError' }, 'the run\'s own file is gone');
+  assert.equal(await chosen.text(), '{"located":1}', 'the copy kept for the workflow is still there to read');
+  // Where no copy is held (or one of several is not), the run's own files, as they were.
+  assert.deepEqual(keptFor([r], [made], () => undefined), [made]);
+  assert.deepEqual(keptFor([r, { ...r, sha256: 'c'.repeat(64) }], [made, made], store.held), [made, made]);
+  assert.deepEqual(keptFor([], [made], store.held), [made]);
 });

@@ -14,7 +14,7 @@ import { atBoundary, reconcile, restartRemaining, recordOf } from '../engine/met
 import { writeProject, readProject, projectName, ProjectError, blobSource, newerWords } from '../engine/methodos/project.js';
 import { fmtBytes, LOCATE_TEXT, locateWords } from '../engine/words.js';
 import { outputStore } from './outputs.js';
-import { stepAt, currentInput, startFiles, keptBy, keptWords, distinct, projectWords, notKept } from './seams.js';
+import { stepAt, currentInput, startFiles, keptBy, keptFor, keptWords, distinct, projectWords, notKept } from './seams.js';
 import { regionsSettled, notReviewed, relateProblem, unexported, reviewDiffers, writesItself, columnsProblem } from '../engine/methodos/containment.js';
 import { stepMark, whereWords, lower } from './layout.js';
 import { whyWords, shareLink, ENROL, WorkbenchError, WORDS, capWords } from '../engine/workbench.js';
@@ -978,12 +978,14 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       const problem = problemOf(r);
       if (problem) { wf = runner.stop(wf, s.id, problem); return; }
       const files = await Promise.all((r.outputs || []).map((o) => page.output(o.name)));
-      wf = runner.complete(wf, s.id, { dataset: files.length ? await refsHeld(files, 'dataset') : mine.refs });
+      const made = files.length ? await refsHeld(files, 'dataset') : mine.refs;
+      wf = runner.complete(wf, s.id, { dataset: made });
       const done = files.length ? LOCATE_TEXT.done(r.batch?.used?.length ?? counts.use, names(files), r.batch?.unknown || 0) : LOCATE_TEXT.nothing;
       say(done);
       // Chosen in step 1, so that the next step takes it and the map, opened, shows it; what the tracker says of the file
-      // chosen (chosen(), next in the queue) is said after what was done here, not in place of it.
-      if (files.length) { page.choose(files); chain(async () => { if (!wf) return; say(`${done}${note?.words && note.words !== done ? ` ${note.words}` : ''}`, !!note?.warn); render(false); }); }
+      // chosen (chosen(), next in the queue) is said after what was done here, not in place of it. The copy kept for the
+      // workflow is the one chosen, not the run's own file, which the next run (Check) removes before it reads it (keptFor).
+      if (files.length) { page.choose(keptFor(made, files, heldFor)); chain(async () => { if (!wf) return; say(`${done}${note?.words && note.words !== done ? ` ${note.words}` : ''}`, !!note?.warn); render(false); }); }
     }), (e) => end(async () => { wf = runner.fail(wf, s.id, e); }));
   }));
   /** The locate step, when it is the last step done and it added locations: it can be undone. Else null. */
@@ -999,9 +1001,15 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     const last = locateUndoable();
     if (!last) return;
     const made = last.outputs?.dataset || [];
+    let went = null;
+    try { went = runner.inputsOf(wf, last.id).dataset; } catch { went = null; }
     wf = runner.invalidate(wf, last.id); loc = null; asIs = null;
+    // Step 1 has the dataset with the locations chosen (the copy kept, which is let go here): the dataset as it was
+    // before them is chosen in its place, where it is held, so that no file whose bytes are gone is left chosen.
+    const before = keptFor(went, null, heldFor), words = LOCATE_TEXT.undone(last.title);
     await outs.drop(made);
-    say(LOCATE_TEXT.undone(last.title)); await keep(); render(false);
+    say(words); await keep(); render(false);
+    if (before) { page.choose(before); chain(async () => { if (!wf) return; say(`${words}${note?.words && note.words !== words ? ` ${note.words}` : ''}`, !!note?.warn); render(false); }); }
   }));
   const leaveB = q(tracker, '#methodos-leave'), keptEl = q(tracker, '#methodos-kept'), clearB = q(tracker, '#methodos-clear-kept');
   // Below 60rem the tracker is a strip, folded, and its buttons are inside it: the step's own buttons ("This step is done",

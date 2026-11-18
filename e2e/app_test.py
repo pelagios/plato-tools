@@ -3296,6 +3296,7 @@ def main():
             match_two_checks(pw, url, tmp)
             tracker_review_checks(pw, url, tmp)
             myd_tracker_checks(pw, url, tmp)
+            locate_checks(pw, url, tmp)
             release_workflow_checks(pw, url, tmp)
             project_checks(pw, url, tmp)
             whg_checks(pw, url, tmp)
@@ -4199,11 +4200,11 @@ def chora_seams_checks(pw, url, tmp):
         t = p.evaluate(JOIN_STATE)
         step_link_after = p.is_visible('#for-tool a[href="#chora"]')
         return (before and link == '#chora' and in_tracker and s['phase'] == 'loaded' and drawn > 0 and p.evaluate('() => window.__samePage === true')
-                and t['steps'].get('place') == 'current' and 'Step 7 of 10' in t['where'] and p.is_visible('#methodos-tracker') and not p.is_visible('#methodos-chora')
+                and t['steps'].get('place') == 'current' and 'Step 8 of 12' in t['where'] and p.is_visible('#methodos-tracker') and not p.is_visible('#methodos-chora')
                 and step_link and not step_link_after), {'step\'s link before': step_link, 'step\'s link while shown': step_link_after,
                     'chosen before': before, 'link': link, 'in the tracker': in_tracker, 'state': {k: s.get(k) for k in ('phase', 'places')}, 'drawn': drawn,
                     'tracker': {k: t.get(k) for k in ('steps', 'where')}, 'tracker\'s Open Chora after': p.is_visible('#methodos-chora')}
-    attempt('Chora\'s seams, in a workflow: "Open Chora", under the step\'s title and in the tracker, opens the workflow\'s dataset in the page at once, drawn on the map, with the tracker beside it at "Step 7 of 10" (its "Open Chora", and the step\'s under the title, gone while the map is shown)', workflow_open)
+    attempt('Chora\'s seams, in a workflow: "Open Chora", under the step\'s title and in the tracker, opens the workflow\'s dataset in the page at once, drawn on the map, with the tracker beside it at "Step 8 of 12" (its "Open Chora", and the step\'s under the title, gone while the map is shown)', workflow_open)
 
     def workflow_back_unsaved():
         p = r['wp']
@@ -4591,7 +4592,7 @@ def mydata_ends(doc):
 def mydata_complete(e):
     return (e.get('places') == 10 and e.get('regions') == 6 and e.get('contained') == 10 and e.get('stub') is True
             and e.get('region identities') == 6 and e.get('regions promoted') is True and e.get('places promoted') == 8
-            and e.get('geometries from the stub') == ['4'] and len(e.get('candidate sets') or []) == 1)
+            and e.get('geometries from the stub') == ['1', '2', '3', '4', '5', '6', '7', '8', '9'] and len(e.get('candidate sets') or []) == 1)
 
 def map_your_data_checks(pw, url, tmp):
     import re
@@ -4666,11 +4667,11 @@ def map_your_data_checks(pw, url, tmp):
         r['columns'] = (s.get('columns') or {}).get('levels')
         t = track(); r['begun'] = t
         ok = (r['canary'] == 'enforced' and r['policy'] and all(re.match(r'^https://([a-z]+\.)?whgazetteer\.org$', o) for o in r['policy']) and t['steps'].get('columns') == 'current'
-              and [k for k in t['steps']] == ['columns', 'check', 'dataset', 'regions', 'lookup', 'review', 'relate', 'place', 'again', 'compare', 'out']
+              and [k for k in t['steps']] == ['columns', 'check', 'dataset', 'regions', 'lookup', 'review', 'relate', 'locate', 'place', 'again', 'compare', 'see', 'out']
               and not any('not identified' in x or 'Not yet available' in x for x in planned) and r['columns'] == {'county': 1, 'parish': 2}
               and r['base shown'] == MYDATA_BASE)
         return ok, {'base shown': r['base shown'], 'levels': r['columns'], 'planned': planned[:12], 'policy': r['policy'], 'canary': r['canary'], 'steps': t['steps']}
-    attempt('Map your data: the interview (a table, places on a map, with regions, drawing, no publishing) gives the eleven steps, the regions step and the step recording them available, the base address shown from Options, with WHG alone in the page\'s policy', begin)
+    attempt('Map your data: the interview (a table, places on a map, with regions, drawing, no publishing) gives the thirteen steps, the regions step and the step recording them available, the base address shown from Options, with WHG alone in the page\'s policy', begin)
 
     def through_convert():
         need('begun')
@@ -4750,15 +4751,15 @@ def map_your_data_checks(pw, url, tmp):
         until(page, "() => !!window.__plato.candidates && !!window.__plato.candidates.setIri", 15)
         s = run('#finish'); step_is('relate', 'done', 30)
         r['related'] = saved(s, '.krisis-dataset.json')
-        e = mydata_ends(json.loads(r['related'].read_text()))
+        e = mydata_ends(json.loads(r['related'].read_text())); r['related identities'] = e['identities']
         return (unexported['steps'].get('relate') == 'current' and 'export the suggestions first' in unexported['message']
-                and e['contained'] == 10 and e['region identities'] == 6 and e['regions promoted'] and track()['steps'].get('place') == 'current'), \
+                and e['contained'] == 10 and e['region identities'] == 6 and e['regions promoted'] and e['geometries from the stub'] == [] and track()['steps'].get('locate') == 'current'), \
             {'before export': unexported['message'][:220], 'ends': e, 'steps': track()['steps']}
-    attempt('Map your data: Finish before the candidates are exported is not counted as recording the regions (said why); after, the dataset has each place ContainedIn its parish and each region\'s identity promotedFrom its candidate', relate)
+    attempt('Map your data: Finish before the candidates are exported is not counted as recording the regions (said why); after, the dataset has each place ContainedIn its parish and each region\'s identity promotedFrom its candidate, no place yet located, and the workflow waits at the matched places\' locations', relate)
 
     def adopt_in_chora():
-        need('related')
-        choose([r['related']])
+        need('located')
+        # The dataset with the locations was chosen in step 1 by the step that took them: nothing is chosen here.
         page.click('#for-tool a[href="#chora"]')
         # The dataset chosen in step 1 is shown in Chora at once, in the page.
         until(page, 'window.__chora && window.__chora.mapReadyCount >= 1 && ["loaded", "error", "unrecognised"].includes(window.__chora.phase)', 90)
@@ -4794,6 +4795,25 @@ def map_your_data_checks(pw, url, tmp):
             {'phase': s.get('phase'), 'warned': warned[:240], 'shown with the same address': quiet}
     attempt('Map your data: Finish with another base address in Options says it is not the review\'s saved address, and still writes (not blocked); with the same address, nothing is said', base_changed)
 
+    def locate():
+        need('related')
+        # What would be done is said first, in counts, and nothing is taken until the one press.
+        until(page, "() => !document.getElementById('methodos-locate-go').hidden", 60)
+        before = {'message': track()['message'], 'go': page.inner_text('#methodos-locate-go'), 'skip': page.inner_text('#methodos-locate-skip'),
+                  'box': page.is_visible('#methodos-locate-unknown'), 'step': track()['steps'].get('locate'), 'chosen': page.evaluate(SEAM_CHOSEN)}
+        page.click('#methodos-locate-go'); step_is('locate', 'done', 60)
+        until(page, "() => /\\.located\\.json$/.test((document.querySelector('#chosen .name') || {}).textContent || '') && window.__plato.phase === 'detected'", 60)
+        after = {'message': track()['message'], 'chosen': page.evaluate(SEAM_CHOSEN), 'undo': page.is_visible('#methodos-locate-undo'), 'steps': track()['steps']}
+        r['located'] = download(page, after['chosen'][0], out / after['chosen'][0])
+        e = mydata_ends(json.loads(r['located'].read_text())); r['located ends'] = e
+        return (before['step'] == 'current' and before['message'] == 'Use the locations of 8 of 8 matched places. Nothing is taken until you press the button.'
+                and before['go'] == 'Use the locations of 8 places' and before['skip'] == 'Go on without them' and before['box'] is False
+                and not any(n.endswith('.located.json') for n in before['chosen'])
+                and after['message'].startswith('The locations of 8 places were added, each with where it came from (') and after['undo'] is True
+                and e['geometries from the stub'] == ['1', '2', '3', '5', '6', '7', '8', '9'] and e['contained'] == 10 and e['identities'] == r['related identities']
+                and after['steps'].get('place') == 'current'), {'before': before, 'after': after, 'ends': e}
+    attempt('Map your data: the matched places\' locations: "Use the locations of 8 of 8 matched places" is said first and nothing taken; "Use the locations of 8 places" pressed, the step is done, the eight accepted places each have a location citing WHG (Kirk House and Wood Lane none), no identity added, the dataset written chosen in step 1, and the workflow waits at the drawing', locate)
+
     attempt('Map your data: in Chora, opened from the tracker, Kirk House\'s location and identity adopted from the stub\'s record, saved (the version check passed), and the place step done by the save with that file, chosen in step 1', adopt_in_chora)
 
     def to_the_end():
@@ -4802,6 +4822,11 @@ def map_your_data_checks(pw, url, tmp):
         page.set_input_files('#earlier', [str(r['converted'])])
         s = wait_state(page, lambda s: s.get('action') == 'compare' and s.get('phase') in ('done', 'error'), T(120), 'compare')
         step_is('compare', 'done')
+        # The places seen on the map: said with how many locations there are to see, and done by saying so (the dataset handed on as it is).
+        step_is('see', 'current', 15)
+        until(page, "() => /locations are on record/.test(document.getElementById('methodos-message').textContent)", 30)
+        seen = {'message': track()['message'], 'link': page.inner_text('#methodos-chora') if page.is_visible('#methodos-chora') else None}
+        page.click('#methodos-done'); step_is('see', 'done', 15)
         # The tracker narrows step 2 to the step's tool (Metaphrasis) once it comes to it.
         until(page, "() => { const t = document.getElementById('target'); return !!t && !!t.offsetParent; }", 30)
         # The dataset handed back is PLATO JSON already, the format the workflow writes: the step is ready to
@@ -4817,8 +4842,9 @@ def map_your_data_checks(pw, url, tmp):
         e = mydata_ends(r['doc']); r['ends'] = e
         same = r['final'].read_bytes() == r['drawn'].read_bytes()
         return (r['again'] == 'done' and 'plato-json' not in offered and bool(offered) and 'Ready to download' in ready['row'] and 'Ready to download' in ready['message'] and ready['button'] == f"Download {r['drawn'].name}"
-                and same and mydata_complete(e)), {'again': r['again'], 'offered': offered, 'ready': ready, 'same file': same, 'ends': e, 'steps': track()['steps']}
-    attempt('Map your data: checked again, compared with the dataset converted from the table, and, already PLATO JSON, ready to download and downloaded as it is (the step then done), with its ten places ContainedIn their parishes, its identities and adopted geometry citing the stub, and its identities naming their candidates', to_the_end)
+                and seen['link'] == 'See your places on the map' and seen['message'].startswith('Open the map (“See your places on the map”): 9 locations are on record. Say when you have looked, and the step is done.')
+                and same and mydata_complete(e)), {'again': r['again'], 'seen': seen, 'offered': offered, 'ready': ready, 'same file': same, 'ends': e, 'steps': track()['steps']}
+    attempt('Map your data: checked again, compared with the dataset converted from the table, seen on the map (nine locations on record, said; the step done by saying so), and, already PLATO JSON, ready to download and downloaded as it is (the step then done), with its ten places ContainedIn their parishes, its identities, the eight locations taken from the matches and the one adopted citing the stub, and its identities naming their candidates', to_the_end)
 
     def can_fail():
         need('final', 'doc')
@@ -5031,8 +5057,21 @@ def recipes_checks(pw, url, tmp):
             page.check('input[name="review-output"][value="dataset"]')
             s = run('#finish'); step_is('apply', 'done', 30)
             r['applied'] = saved(s, '.krisis-dataset.json')
-            return track()['steps'].get('again') == 'current', {'phase': s.get('phase'), 'steps': track()['steps']}
-        attempt(f'{title}: the decisions recorded in the dataset (Krisis\'s Finish, as the dataset) as the step that records them', record)
+            return track()['steps'].get('locate') == 'current', {'phase': s.get('phase'), 'steps': track()['steps']}
+        attempt(f'{title}: the decisions recorded in the dataset (Krisis\'s Finish, as the dataset) as the step that records them, and the workflow waits at the matched places\' locations', record)
+
+        def no_location():
+            need('applied')
+            # The stub's records accepted here have no point, so there is no location to take: said in counts, with no button to take any, and a way on.
+            until(page, "() => !document.getElementById('methodos-locate-skip').hidden", 60)
+            at = {'message': track()['message'], 'go': page.is_visible('#methodos-locate-go'), 'skip': page.inner_text('#methodos-locate-skip'), 'box': page.is_visible('#methodos-locate-unknown'),
+                  'done': page.is_visible('#methodos-done')}
+            page.click('#methodos-locate-skip'); step_is('locate', 'done', 15)
+            after = {'message': track()['message'], 'undo': page.is_visible('#methodos-locate-undo'), 'steps': track()['steps']}
+            return (at['message'] == expect['no location'] and at['go'] is False and at['skip'] == 'Go on' and at['box'] is False and at['done'] is False
+                    and after['message'].startswith('No location was taken from the matches: the workflow goes on with ') and after['undo'] is False
+                    and after['steps'].get('again') == 'current'), {'at the step': at, 'after': after}
+        attempt(f'{title}: at the matched places\' locations, none of the {expect["accepted"]} matched places has one that can be used (the stub\'s records have no point): said in counts, no button to take any, and "Go on" hands the dataset on as it was (nothing to undo)', no_location)
 
         def to_the_end():
             need('applied', 'converted')
@@ -5042,6 +5081,11 @@ def recipes_checks(pw, url, tmp):
             s = wait_state(page, lambda s: s.get('action') == 'compare' and s.get('phase') in ('done', 'error'), T(120), 'compare')
             r['compared'] = (s.get('report') or {}).get('errors')
             step_is('compare', 'done')
+            # The places seen on the map: said with how many locations are on record (or that there is none), and done by saying so.
+            step_is('see', 'current', 15)
+            until(page, "(w) => document.getElementById('methodos-message').textContent.startsWith(w)", 30, expect['seen'])
+            seen = {'message': track()['message'], 'link': page.inner_text('#methodos-chora') if page.is_visible('#methodos-chora') else None, 'download': page.is_visible('#methodos-download')}
+            page.click('#methodos-done'); step_is('see', 'done', 15)
             until(page, "() => !document.getElementById('methodos-download').hidden", 30)
             with page.expect_download(timeout=T(30) * 1000) as d: page.click('#methodos-download')
             r['final'] = out / ('final-' + d.value.suggested_filename); d.value.save_as(r['final'])
@@ -5051,9 +5095,10 @@ def recipes_checks(pw, url, tmp):
             r['doc'] = json.loads(r['final'].read_text())
             e = recipes_ends(r['doc']); r['ends'] = e
             same = r['final'].read_bytes() == r['applied'].read_bytes()
-            return (r['again'] == 'done' and r['compared'] == 0 and same and expect['complete'](e) and all(v.startswith('done') for v in track()['steps'].values())), \
-                {'again': r['again'], 'compare errors': r['compared'], 'same file': same, 'ends': {k: v for k, v in e.items() if k != 'addresses'}, 'steps': track()['steps']}
-        attempt(f'{title}: checked again, compared with the dataset read (nothing taken away), and downloaded as it is, every step done; {expect["holds"]}', to_the_end)
+            return (r['again'] == 'done' and r['compared'] == 0 and same and expect['complete'](e) and all(v.startswith('done') for v in track()['steps'].values())
+                    and seen['message'].startswith(expect['seen']) and seen['link'] == 'See your places on the map' and seen['download'] is False), \
+                {'again': r['again'], 'compare errors': r['compared'], 'seen': seen, 'same file': same, 'ends': {k: v for k, v in e.items() if k != 'addresses'}, 'steps': track()['steps']}
+        attempt(f'{title}: checked again, compared with the dataset read (nothing taken away), seen on the map ({expect["seen words"]}; the step done by saying so), and downloaded as it is, every step done; {expect["holds"]}', to_the_end)
 
         def can_fail():
             need('doc')
@@ -5074,10 +5119,12 @@ def recipes_checks(pw, url, tmp):
         try: ctx.close()
         except Exception: pass
 
-    tei_steps = ['check', 'dataset', 'lookup', 'review', 'apply', 'again', 'compare', 'out']
+    tei_steps = ['check', 'dataset', 'lookup', 'review', 'apply', 'locate', 'again', 'compare', 'see', 'out']
     walk('tei', 'tei', [RECIPES_TEI], tei_steps, {
         'title': 'Places from an edition (TEI)', 'recipe': 'places-from-tei', 'have words': 'an edition in TEI', 'cannot': 4, 'cannot first': 'A place name with no ref, or a ref it cannot follow',
         'places': 5, 'placed': 0, 'sent': ['Argos', 'Corinth', 'Kenchreai', 'Phlious', 'Sikyon'], 'accepted': 3, 'strip': ['identities'], 'said': 'Read 6 place names, 5 places',
+        'no location': 'None of the 3 matched places has a location that can be used; 3 have no location on record.',
+        'seen': 'None of your places has a location yet, so the map has nothing to show. Say the step is done to go on', 'seen words': 'no place has a location yet, said',
         'answers': {'Argos': [{'id': 'place:gn:9300001', 'name': 'Argos', 'score': 100, 'match': True, 'description': 'Country: US', 'ccodes': ['US'], 'repr_point': [-86.2453, 41.2373], 'namespace': 'gn', 'alt_names': [], 'has_geom': True, 'confidence': 100},
                               {'id': 'place:pl:570106', 'name': 'Argos', 'score': 90, 'match': True, 'description': 'Country: GR', 'ccodes': ['GR'], 'repr_point': [22.7278, 37.6331], 'namespace': 'pl', 'alt_names': [], 'has_geom': True, 'confidence': 100}]},
         'flagged': ['https://pleiades.stoa.org/places/570106'],
@@ -5088,6 +5135,8 @@ def recipes_checks(pw, url, tmp):
         'title': 'Places from Recogito', 'recipe': 'places-from-recogito', 'have words': 'annotations from Recogito, with the map\'s georeference', 'cannot': 4,
         'cannot first': 'A mention marked as a place but never linked', 'places': 13, 'placed': 7, 'said': '7 of 16 regions on images placed on a map',
         'sent': sorted(['120', '45', 'Boston', 'GULF OF MEXICO', 'LAKE ERIE', 'LAKE HURON', 'LAKE ONTARIO', 'Nantucket I.', 'St Georges Bank']), 'accepted': 9, 'strip': ['geometries'],
+        'no location': 'None of the 9 matched places has a location that can be used; 4 already have a location; 5 have no location on record.',
+        'seen': 'Open the map (“See your places on the map”): 7 locations are on record. Say when you have looked, and the step is done.', 'seen words': 'seven locations on record, said',
         'holds': 'its 13 places keep the Wikidata items Recogito linked them to, seven placed through the map\'s georeference and citing it, nine identified in the stub\'s records, citing WHG',
         'complete': lambda e: (e['places'] == 13 and all(a.startswith('http://www.wikidata.org/entity/Q') for a in e['addresses']) and e['placed'] == 7 and e['georef cited'] == 7
                                and e['stub'] == 9 and e['cites WHG'] is True)})
@@ -5839,12 +5888,23 @@ def myd_tracker_checks(pw, url, tmp):
         r['applied'] = download(page, n, out / n)
         made = len(re.findall(r'"identities"\s*:', r['applied'].read_text()))
         return (offer.startswith('Open the review (') and 'the decisions you made are in it. Then press Finish, below the review.' in t['message'] and finish_before is False
-                and decided(s) == 4 and total == 4 and made == 4 and track(page)['steps'].get('again') == 'current'), \
+                and decided(s) == 4 and total == 4 and made == 4 and track(page)['steps'].get('locate') == 'current'), \
             {'offered': offer, 'said': t['message'], 'Finish before': finish_before, 'decided': f'{decided(s)} of {total}', 'attestations written': made, 'steps': track(page)['steps']}
-    attempt('Map your data (tracker): a reload after the review is said done offers "Open the review" (no Finish before it); it opens with 4 of 4 decided, and Finish writes 4 attestations as the step', reload_at_the_record)
+    attempt('Map your data (tracker): a reload after the review is said done offers "Open the review" (no Finish before it); it opens with 4 of 4 decided, and Finish writes 4 attestations as the step, the workflow then at the matched places\' locations', reload_at_the_record)
+
+    def already_located():
+        need('applied')
+        # Each of the four places has the location its table gave: none is taken from its match, said in counts, with no button to take any.
+        until(page, f"() => !!({SHOWN})('methodos-locate-skip')", 60)
+        at = {'message': track(page)['message'], 'go': page.evaluate(SHOWN, 'methodos-locate-go'), 'skip': page.evaluate(SHOWN, 'methodos-locate-skip'), 'under the title': page.eval_on_selector_all('#methodos-here button', 'bs => bs.map((b) => b.textContent)')}
+        page.click('#methodos-locate-skip'); step_is(page, 'locate', 'done', 15)
+        t = track(page); r['located'] = True
+        return (at['message'] == 'None of the 4 matched places has a location that can be used; 4 already have a location.' and at['go'] is None and at['skip'] == 'Go on'
+                and 'Go on' in at['under the title'] and t['steps'].get('again') == 'current' and page.evaluate(SHOWN, 'methodos-locate-undo') is None), {'at the step': at, 'steps': t['steps'], 'said': t['message']}
+    attempt('Map your data (tracker): at the matched places\' locations, the four places have their table\'s own locations: "4 already have a location" is said, no button offers to take any, and "Go on" (under the step\'s title too) hands the dataset on as it was', already_located)
 
     def compare_in_one_press():
-        need('applied')
+        need('applied', 'located')
         use(page, r['applied'].name)
         said = track(page)['message']
         run(page, '#check'); step_is(page, 'again', 'done')
@@ -5865,13 +5925,19 @@ def myd_tracker_checks(pw, url, tmp):
         return (said.endswith(': the file this step takes. Press Check below.') and offer == 'Compare with 00-baseline-with-ids.json (made by the step “Make a PLATO dataset of it”)'
                 and 'Press “Compare with 00-baseline-with-ids.json”: the workflow kept that file for you' in t['message']
                 and other['steps'].get('compare') == 'current' and f'it compared with {r["applied"].name}, which is not 00-baseline-with-ids.json' in other['message']
-                and asked == [] and s.get('phase') == 'done' and (s.get('report') or {}).get('errors') == 0 and track(page)['steps'].get('out') == 'current'), \
+                and asked == [] and s.get('phase') == 'done' and (s.get('report') or {}).get('errors') == 0 and track(page)['steps'].get('see') == 'current'), \
             {'at the check': said, 'offered': offer, 'said': t['message'], 'with another file': other['steps'].get('compare'), 'said of it': other['message'][:260], 'file choosers': len(asked),
              'compare': s.get('phase'), 'errors': (s.get('report') or {}).get('errors'), 'steps': track(page)['steps']}
     attempt('Map your data (tracker): the compare step offers "Compare with 00-baseline-with-ids.json", the file the workflow kept, and one press does the step with no file chooser; a comparison with another file is not counted', compare_in_one_press)
 
     def write_it_out():
         need('compared')
+        # The places seen on the map first: the step says how many locations are on record, offers no download yet, and is done by saying so.
+        until(page, "() => /locations are on record/.test(document.getElementById('methodos-message').textContent)", 30)
+        seen = {'said': track(page)['message'], 'download': page.evaluate(SHOWN, 'methodos-download'), 'map': page.evaluate(SHOWN, 'methodos-chora')}
+        if not (seen['said'].startswith('Open the map (“See your places on the map”): 5 locations are on record. Say when you have looked, and the step is done.')
+                and seen['download'] is None and seen['map'] == 'See your places on the map'): return False, {'at the map': seen}
+        page.click('#methodos-done'); step_is(page, 'see', 'done', 15)
         until(page, "() => !document.getElementById('methodos-download').hidden", 30)
         LOSSY = "() => ({ said: document.getElementById('methodos-message').textContent, lossy: document.getElementById('methodos-tracker').dataset.lossy, convert: document.getElementById('convert').classList.contains('primary'), download: document.getElementById('methodos-download').classList.contains('primary') && !document.getElementById('methodos-download').hidden })"
         plain = page.evaluate(LOSSY)
@@ -5887,7 +5953,187 @@ def myd_tracker_checks(pw, url, tmp):
         return (sentence in lpf['said'] and 'PLATO JSON keeps all of it.' in lpf['said'] and 'cannot hold' not in plain['said'] and 'cannot hold' not in back['said']
                 and plain['said'].startswith('Ready to download: ') and back['said'].startswith('Ready to download: ')
                 and plain['download'] is True and plain['convert'] is False), {'as it came': plain, 'LPF chosen': lpf, 'PLATO JSON Lines chosen': back}
-    attempt('Map your data (tracker): at "Write it out" Download is the one primary button; with Linked Places Format chosen the tracker says what it cannot hold of the 4 decisions, and with PLATO JSON Lines chosen it says nothing of it', write_it_out)
+    attempt('Map your data (tracker): the places are seen on the map first (five locations on record, the table\'s own, said; no download offered there), and that step said done, at "Write it out" Download is the one primary button; with Linked Places Format chosen the tracker says what it cannot hold of the 4 decisions, and with PLATO JSON Lines chosen it says nothing of it', write_it_out)
+    try: ctx.close(); browser.close()
+    except Exception: pass
+
+# ---- Map your data: the matched places' locations (src/engine/chora/locate.js; the tracker's step, src/methodos/page.js) ----
+# A table of three names with no location of its own, looked up in a stub of WHG (never the real one) whose three records
+# are each of another kind: Alpha Ford's source (GeoNames) states its licence and the record has a point; Beta Mill's source
+# is named with no licence stated, and the record has a point; Gamma Cross's source states its licence and the record has no
+# point. All three accepted and the decisions recorded, the step that takes the matched places' locations says what it
+# would do before anything is done. The stubs of the other walks give no source without a licence, so this one is its own.
+# Every absence is read beside a presence in the same file (Beta Mill's and Gamma Cross's none, beside Alpha Ford's location).
+LOCATE_ATTRIBUTION = {'whg': LOOKUP_ATTRIBUTION['whg'], 'sources': {**LOOKUP_ATTRIBUTION['sources'], 'wd': {'name': 'A source with no licence stated'}}}
+LOCATE_ALPHA, LOCATE_BETA = [-1.2345, 52.1234], [-1.3456, 52.2345]
+LOCATE_ANSWERS = {'Alpha Ford': [mydata_answer('place:gn:7100001', 'Alpha Ford', LOCATE_ALPHA)], 'Beta Mill': [mydata_answer('place:wd:Q7100002', 'Beta Mill', LOCATE_BETA)],
+                  'Gamma Cross': [{k: v for k, v in mydata_answer('place:gn:7100003', 'Gamma Cross', None).items() if k != 'repr_point'}]}
+LOCATE_STATE = """() => { const el = (id) => document.getElementById(id), v = (id) => !!el(id) && !el(id).hidden && !el(id).closest('[hidden]'), t = (id) => (v(id) ? el(id).textContent : null);
+  return { message: el('methodos-message').textContent, go: t('methodos-locate-go'), skip: t('methodos-locate-skip'), undo: t('methodos-locate-undo'),
+    box: v('methodos-locate-unknown'), ticked: el('methodos-locate-unknown').checked, boxWords: v('methodos-locate-unknown') ? document.querySelector('p.methodos-locate-unknown').textContent.trim() : null,
+    step: document.querySelector('#methodos-track li[data-step="locate"]')?.dataset.state || null, next: document.querySelector('#methodos-track li[data-step="again"]')?.dataset.state || null,
+    chosen: [...document.querySelectorAll('#chosen .name')].map((e) => e.textContent) }; }"""
+def locate_ends(doc):
+    """Each place's locations in a PLATO JSON file, by its name: where, the licence its citation gives, who took it, and its note."""
+    out = {}
+    for e in doc.get('spatialEntities') or []:
+        name = next((n.get('toponym') for a in e.get('attestations') or [] for n in a.get('names') or []), e.get('label'))
+        out[name] = [{'at': (a['geometries'][0].get('geojson') or {}).get('coordinates'), 'licence': next((c['source'].get('licence') for c in a.get('citations') or [] if isinstance(c.get('source'), dict)), None),
+                      'who': (a.get('contributor') or {}).get('name'), 'note': a.get('notes') or ''} for a in e.get('attestations') or [] if a.get('geometries')]
+    return out
+
+def locate_checks(pw, url, tmp):
+    import re
+    base = url.rstrip('/') + '/'
+    out = tmp / 'locate'; out.mkdir(exist_ok=True)
+    table = out / 'fords.csv'; table.write_text('id,name\n1,Alpha Ford\n2,Beta Mill\n3,Gamma Cross\n')
+    browser = pw.chromium.launch(headless=True, args=GL)
+    cors = {'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS', 'Access-Control-Allow-Headers': 'authorization, content-type, accept, user-agent'}
+    posts, asked = [], []
+    def stub(route):
+        req = route.request
+        if req.method == 'OPTIONS': return route.fulfill(status=204, headers=cors)
+        reply = lambda body, status=200: route.fulfill(status=status, headers={**cors, 'Content-Type': 'application/json'}, body=json.dumps(body))
+        if req.method == 'GET': return reply({'detail': 'Not found'}, 404)
+        body = json.loads(req.post_data or '{}'); posts.append(body)
+        reply({'attribution': LOCATE_ATTRIBUTION, **{k: {'result': LOCATE_ANSWERS.get(q.get('query'), [])} for k, q in (body.get('queries') or {}).items()}})
+    ctx = browser.new_context(accept_downloads=True, viewport={'width': 1440, 'height': 900}, reduced_motion='reduce')
+    ctx.add_init_script('window.__plato_forceDownload = true;')
+    ctx.route(re.compile(r'^https?://([^/]*\.)?whgazetteer\.org/'), stub)
+    ctx.on('request', lambda q: asked.append(q.url))
+    page = ctx.new_page(); page.set_default_timeout(T(15) * 1000)
+    r = {}
+    track = lambda: page.evaluate(JOIN_STATE)
+    loc = lambda: page.evaluate(LOCATE_STATE)
+    def step_is(step, state, timeout=60):
+        until(page, f"() => document.querySelector('#methodos-track li[data-step=\"{step}\"]')?.dataset.state === '{state}'", timeout)
+    def run(button, timeout=180):
+        page.click(button)
+        return wait_state(page, lambda s: s.get('phase') in ('done', 'error'), T(timeout), 'run')
+    def need(*keys):
+        missing = [k for k in keys if not r.get(k)]
+        if missing: raise RuntimeError(f'an earlier step did not finish ({", ".join(missing)})')
+    def taken(n):
+        """The locations taken (the tracker says how many), and the dataset written with them, which the step chose in step 1: read."""
+        until(page, f"() => document.getElementById('methodos-message').textContent.startsWith('The locations of {n} place')", 60)
+        step_is('locate', 'done', 15)
+        until(page, "() => /\\.located\\.json$/.test((document.querySelector('#chosen .name') || {}).textContent || '') && window.__plato.phase === 'detected'", 60)
+        s = loc()
+        f = download(page, s['chosen'][0], out / f'{n}-{s["chosen"][0]}')
+        return s, f, locate_ends(json.loads(f.read_text()))
+    BY = 'https://spdx.org/licenses/CC-BY-4.0'
+
+    def to_the_step():
+        # WHG allowed and the reviewer named, as a visitor who has used the page before has them; then Map your data, no regions, no drawing.
+        page.goto(NOTOOLS if PROVE else base)
+        page.evaluate("() => { localStorage.setItem('plato-tools.permissions', JSON.stringify({ version: 1, grants: { 'gazetteer:whg': { state: 'allowed', at: '2026-11-18T10:00:00Z' } } })); localStorage.setItem('plato-tools.reviewer', JSON.stringify({ name: 'Locate Reviewer' })); }")
+        page.goto(NOTOOLS if PROVE else base)
+        if wait_state(page, lambda s: s.get('phase') == 'ready', T(30), 'ready').get('phase') != 'ready': raise RuntimeError('the main page did not start')
+        page.click('#methodos-ask'); until(page, "!document.getElementById('methodos').hidden", 5)
+        page.check('input[name="methodos-have"][value="table"]'); page.check('input[name="methodos-want"][value="map"]')
+        for k in ('has-regions', 'will-draw', 'will-publish'): page.check(f'input[name="methodos-ask-{k}"][value="no"]')
+        until(page, "() => !document.getElementById('methodos-start').hidden", 5)
+        page.click('#methodos-start'); until(page, "['pending', 'idle'].includes(document.getElementById('methodos-tracker').dataset.status)", 10)
+        page.set_input_files('#picker', [str(table)])
+        until(page, "() => window.__plato?.columns?.headers && document.getElementById('methodos-tracker').dataset.status === 'idle' && !document.getElementById('methodos-done').hidden", 30)
+        page.click('#methodos-done'); step_is('columns', 'done', 15)
+        run('#check'); step_is('check', 'done')
+        page.select_option('#target', 'plato-json')
+        run('#convert'); step_is('dataset', 'done')
+        page.click('#methodos-use')
+        wait_state(page, lambda s: s.get('phase') == 'detected' and s.get('format') == 'plato-json', T(60), 'the converted dataset chosen')
+        if not page.evaluate("() => document.getElementById('lookup').open"): page.click('#lookup > summary')
+        page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
+        until(page, "() => /^Send 3 queries to WHG$/.test(document.getElementById('lookup-send').textContent) && !document.getElementById('lookup-send').disabled", 60)
+        page.click('#lookup-send'); step_is('lookup', 'done', 90)
+        until(page, "() => !document.getElementById('bulk-accept').disabled", 30)
+        page.click('#bulk-accept')
+        decided = lambda s: sum(1 for c in (s.get('work') or {}).get('candidates', []) if (c.get('decision') or {}).get('kind') == 'match')
+        n = decided(wait_state(page, lambda s: decided(s) == 3, T(15), 'accepted'))
+        page.click('#methodos-done'); step_is('review', 'done', 15)
+        page.check('input[name="review-output"][value="dataset"]')
+        s = run('#finish'); step_is('apply', 'done', 30)
+        name = next(o['name'] for o in (s.get('outputs') or []) if o['name'].endswith('.krisis-dataset.json'))
+        r['applied'] = download(page, name, out / name)
+        step_is('locate', 'current', 15)
+        until(page, "() => !document.getElementById('methodos-locate-go').hidden", 60)
+        r['at first'] = loc()
+        return n, locate_ends(json.loads(r['applied'].read_text()))
+
+    def licensed():
+        n, recorded = to_the_step()
+        b = r['at first']
+        page.click('#methodos-locate-go')
+        s, f, e = taken(1)
+        r['once'] = e; r['after once'] = s
+        alpha = e.get('Alpha Ford') or [{}]
+        return (n == 3 and recorded == {'Alpha Ford': [], 'Beta Mill': [], 'Gamma Cross': []} and b['step'] == 'current' and b['go'] == 'Use the locations of 1 place' and b['skip'] == 'Go on without them'
+                and b['message'].startswith('Use the locations of 1 of 3 matched places;') and b['message'].endswith(' Nothing is taken until you press the button.')
+                and not any(c.endswith('.located.json') for c in b['chosen'])
+                and s['message'].startswith('The locations of 1 place were added, each with where it came from (') and 'licence is not stated' not in s['message'] and s['next'] == 'current'
+                and len(alpha) == 1 and alpha[0]['at'] == LOCATE_ALPHA and alpha[0]['licence'] == BY and alpha[0]['who'] == 'Locate Reviewer' and 'place:gn:7100001' in alpha[0]['note']
+                and e.get('Beta Mill') == [] and e.get('Gamma Cross') == []), \
+            {'accepted': n, 'as recorded': recorded, 'at the step': b, 'after': {k: s[k] for k in ('message', 'step', 'next', 'chosen', 'undo')}, 'locations': e}
+    attempt('Map your data (locations): three places matched and recorded, none yet located; the step says "Use the locations of 1 of 3 matched places" and takes nothing; "Use the locations of 1 place" pressed, the step is done, Alpha Ford has its record\'s point, citing WHG with the source\'s CC BY 4.0, in the reviewer\'s name, and Beta Mill (no licence stated) and Gamma Cross (no point) have none', licensed)
+
+    def unknown_licence():
+        need('once')
+        b = r['at first']
+        # Undone, while it is the last step done: the workflow is at the step again, with the dataset as it was, and the counts are said again.
+        page.click('#methodos-locate-undo')
+        step_is('locate', 'current', 15)
+        until(page, "() => !document.getElementById('methodos-locate-go').hidden", 60)
+        until(page, "(n) => (document.querySelector('#chosen .name') || {}).textContent === n && window.__plato.phase === 'detected'", 60, r['applied'].name)
+        undone = loc()
+        page.check('#methodos-locate-unknown')
+        until(page, "() => document.getElementById('methodos-locate-go').textContent === 'Use the locations of 2 places'", 15)
+        ticked = loc()
+        page.click('#methodos-locate-go')
+        s, f, e = taken(2)
+        r['twice'] = e
+        alpha, beta = e.get('Alpha Ford') or [{}], e.get('Beta Mill') or [{}]
+        chose = "The gazetteer does not state a licence for this record's source: Locate Reviewer chose to use it all the same, for this batch."
+        return (b['message'] == 'Use the locations of 1 of 3 matched places; 1 has no location on record; 1 left out because its licence is not stated. Nothing is taken until you press the button.'
+                and b['box'] is True and b['ticked'] is False and (b['boxWords'] or '').startswith('1 left out because its licence is not stated: use it anyway (recorded)')
+                and 'your name and this choice are written into the note of each of those locations' in (b['boxWords'] or '')
+                and r['once'].get('Beta Mill') == [] and len(r['once'].get('Alpha Ford') or []) == 1
+                and undone['step'] == 'current' and undone['ticked'] is False and undone['go'] == 'Use the locations of 1 place' and undone['undo'] is None
+                and r['after once']['undo'] == 'Undo: take those locations out again' and r['after once']['chosen'] == ['fords.krisis-dataset.located.json']
+                and undone['message'].startswith('The locations are taken out again: the workflow is back at “Use the locations of the places you matched”, with the dataset as it was before them.')
+                and undone['message'].endswith(b['message']) and undone['chosen'] == [r['applied'].name]
+                and ticked['message'].endswith(' Use the locations of 2 of 3 matched places; 1 has no location on record. Nothing is taken until you press the button.') and ticked['step'] == 'current'
+                and s['message'].startswith('The locations of 2 places were added, each with where it came from (') and '1 of them from a source whose licence is not stated, by your choice, which is recorded with each.' in s['message']
+                and len(alpha) == 1 and alpha[0]['at'] == LOCATE_ALPHA and alpha[0]['licence'] == BY and chose not in alpha[0]['note']
+                and len(beta) == 1 and beta[0]['at'] == LOCATE_BETA and beta[0]['licence'] is None and chose in beta[0]['note'] and beta[0]['who'] == 'Locate Reviewer'
+                and e.get('Gamma Cross') == []), \
+            {'at the step': {k: b[k] for k in ('message', 'box', 'ticked', 'boxWords', 'go')}, 'taken without the box': r['once'], 'undone': undone, 'ticked': {k: ticked[k] for k in ('message', 'go', 'step')},
+             'after': s['message'], 'locations': e}
+    attempt('Map your data (locations): a source with no licence stated: "1 left out because its licence is not stated" is said, with a box (not ticked) and its warning, and Beta Mill\'s location is not taken with the box unticked; undone, the workflow is at the step again with the dataset as it was chosen in step 1; with the box ticked the step says 2 of 3, and takes Beta Mill\'s too, its note saying the reviewer chose to use it (Alpha Ford\'s says no such thing; Gamma Cross still has none)', unknown_licence)
+
+    def written():
+        need('twice')
+        # Check reads the dataset the step chose in step 1: the copy the workflow keeps, not the run's own file, which this run removes
+        # (chosen from there, Check failed with "A requested file or directory could not be found", 18 November 2026).
+        checked = run('#check'); again = checked.get('phase')
+        if again != 'done': return False, {'again': again, 'error': checked.get('error'), 'tracker': track()['run'], 'chosen': loc()['chosen']}
+        step_is('again', 'done')
+        until(page, "() => !document.getElementById('methodos-compare').hidden", 30)
+        page.click('#methodos-compare'); step_is('compare', 'done', 120)
+        until(page, "() => /locations are on record/.test(document.getElementById('methodos-message').textContent)", 30)
+        seen = track()['message']
+        page.click('#methodos-done'); step_is('see', 'done', 15)
+        until(page, "() => { const t = document.getElementById('target'); return !!t && !!t.offsetParent && !t.disabled; }", 30)
+        page.select_option('#target', 'lpf')
+        s = run('#convert'); step_is('out', 'done', 30)
+        name = next(o['name'] for o in (s.get('outputs') or []))
+        lpf = json.loads(download(page, name, out / name).read_text())
+        where = {(f.get('properties') or {}).get('title'): (f.get('geometry') or {}).get('coordinates') if f.get('geometry') else None for f in lpf.get('features') or []}
+        other = sorted({re.match(r'^[a-z]+:(//[^/]*)?', u).group(0) for u in asked
+                        if not (u.startswith(base) or u.startswith('data:') or u.startswith('blob:') or re.match(r'^https://([^/]*\.)?whgazetteer\.org/', u))})
+        return (again == 'done' and seen.startswith('Open the map (“See your places on the map”): 2 locations are on record.') and s.get('phase') == 'done'
+                and where == {'Alpha Ford': LOCATE_ALPHA, 'Beta Mill': LOCATE_BETA, 'Gamma Cross': None} and all(v.startswith('done') for v in track()['steps'].values())
+                and len(posts) == 1 and not other), {'again': again, 'seen': seen, 'written': name, 'where': where, 'steps': track()['steps'], 'lookups': len(posts), 'other sites': other}
+    attempt('Map your data (locations): the dataset with the locations, chosen in step 1 by the step, is read by Check (the copy the workflow keeps), compared, seen on the map (2 locations on record) and written out: the Linked Places file has Alpha Ford and Beta Mill at their records\' coordinates and Gamma Cross with none, every step done, and nothing was asked of WHG after the one lookup, nor of any other site', written)
     try: ctx.close(); browser.close()
     except Exception: pass
 
@@ -6306,9 +6552,9 @@ def project_checks(pw, url, tmp):
         n = next(o['name'] for o in (s.get('outputs') or []) if o['name'].endswith('.krisis-dataset.json'))
         e = mydata_ends(json.loads(download(p2, n, out / n).read_text()))
         r['finished'] = True
-        return (e['contained'] == 10 and e['region identities'] == 6 and e['regions promoted'] and e['places promoted'] == 8 and track(p2)['steps'].get('place') == 'current'), \
+        return (e['contained'] == 10 and e['region identities'] == 6 and e['regions promoted'] and e['places promoted'] == 8 and track(p2)['steps'].get('locate') == 'current'), \
             {'ends': e, 'steps': track(p2)['steps']}
-    attempt('Project file: carried on in the fresh browser, the review done and the decisions recorded give every place ContainedIn its parish, the six regions\' identities and the eight places accepted before saving, and the workflow goes on to Chora\'s step', finish)
+    attempt('Project file: carried on in the fresh browser, the review done and the decisions recorded give every place ContainedIn its parish, the six regions\' identities and the eight places accepted before saving, and the workflow goes on to the matched places\' locations', finish)
 
     def replace_asked():
         need('finished')
@@ -6321,7 +6567,7 @@ def project_checks(pw, url, tmp):
         p2.click('#methodos-replace-no')
         until(p2, "() => document.getElementById('methodos-replace').hidden", 10)
         after = track(p2)
-        return ('is open. Open' in words and focus == 'methodos-replace-no' and after['steps'] == before and before.get('place') == 'current' and 'was not opened' in after['message']), \
+        return ('is open. Open' in words and focus == 'methodos-replace-no' and after['steps'] == before and before.get('locate') == 'current' and 'was not opened' in after['message']), \
             {'words': words[:200], 'focus': focus, 'steps after': after['steps'], 'message': after['message'][:160]}
     attempt('Project file: choosing a project while a workflow is open asks first (the safe answer focused); "Keep this workflow" leaves it exactly as it was', replace_asked)
 
@@ -7253,8 +7499,8 @@ def scope_checks(pw, url, tmp):
     def rail_layout():
         need('begun')
         lay = page.evaluate(SCOPE_RAIL)
-        return (lay['steps'] == 11 and lay['inView'] >= 8 and lay['done'] and lay['line'] and not lay['card']), lay
-    attempt('Scope: at 1440 x 900 the Scope is folded into the tracker (no card of its own in the rail): "This step is done" is in view, and at least 8 of the 11 steps listed', rail_layout)
+        return (lay['steps'] == 13 and lay['inView'] >= 8 and lay['done'] and lay['line'] and not lay['card']), lay
+    attempt('Scope: at 1440 x 900 the Scope is folded into the tracker (no card of its own in the rail): "This step is done" is in view, and at least 8 of the 13 steps listed', rail_layout)
 
     def editor_in_centre():
         need('begun')
@@ -7671,11 +7917,11 @@ def myd_door_checks(pw, url, tmp):
         # about publishing, with no plan until it is answered (the control that a plan can be withheld).
         page.check('input[name="methodos-have"][value="tei"]')
         tei = {'follow': page.is_visible('#methodos-start'), 'asked': page.eval_on_selector_all('#mq-more fieldset[data-ask]', "fs => fs.map((f) => [f.dataset.ask, f.querySelector('input:checked')?.value || null])")}
-        ok = (ask == 'Answer two questions' and not before['follow'] and follow and len(planned) == 9 and 'in 9 steps' in verdict
+        ok = (ask == 'Answer two questions' and not before['follow'] and follow and len(planned) == 11 and 'in 11 steps' in verdict
               and asked == [['has-regions', 'no'], ['will-draw', 'no'], ['will-publish', 'no'], ['will-mint', 'no']]
-              and 'place' in drawn and len(drawn) == 10 and not tei['follow'] and tei['asked'] == [['will-draw', 'yes'], ['will-publish', None]])
+              and 'place' in drawn and len(drawn) == 12 and not tei['follow'] and tei['asked'] == [['will-draw', 'yes'], ['will-publish', None]])
         return ok, {'link': ask, 'before': before, 'asked': asked, 'planned': planned, 'verdict': verdict, 'follow': follow, 'with drawing': drawn, 'an edition': tei}
-    attempt('Map your data, the door: after the first two questions, with no yes-or-no question touched, the plan has its 9 steps and "Follow" is shown, each question No until changed; a Yes still plans its step, and an edition still asks its own', two_answers)
+    attempt('Map your data, the door: after the first two questions, with no yes-or-no question touched, the plan has its 11 steps and "Follow" is shown, each question No until changed; a Yes still plans its step, and an edition still asks its own', two_answers)
 
     def start_at_once():
         page = fresh()
@@ -7685,10 +7931,10 @@ def myd_door_checks(pw, url, tmp):
         d1 = D(page)
         kept = page.evaluate("() => document.getElementById('methodos-message').textContent")
         ok = (d0['quick'] and 'Map your data' in (d0['banner'] or '') and d0['ask'] == 'Answer two questions' and not d0['tracker']
-              and d1['tracker'] and d1['status'] == 'pending' and d1['recipe'] == 'map-your-data' and len(d1['steps']) == 9 and 'place' not in d1['steps'] and 'mint' not in d1['steps']
+              and d1['tracker'] and d1['status'] == 'pending' and d1['recipe'] == 'map-your-data' and len(d1['steps']) == 11 and 'place' not in d1['steps'] and 'mint' not in d1['steps']
               and not d1['interview'] and not d1['quick'])
         return ok, {'before': {k: d0[k] for k in ('quick', 'banner', 'tracker')}, 'after': {k: d1[k] for k in ('tracker', 'status', 'recipe', 'steps', 'interview', 'quick', 'title')}, 'message': kept[:160]}
-    attempt('Map your data, the door: the opening names Map your data with a Start button; pressed, the tracker shows Map your data, not started, its nine steps planned with no question asked', start_at_once)
+    attempt('Map your data, the door: the opening names Map your data with a Start button; pressed, the tracker shows Map your data, not started, its eleven steps planned with no question asked', start_at_once)
 
     def no_ids_said():
         page = fresh(grant=True)
@@ -10878,7 +11124,7 @@ def methodos_page_checks(browser, url):
             c = st(page)
             last = page.evaluate("() => document.querySelector('#methodos-track li.track-step:last-child .track-end')?.textContent || null")
             ids = lambda x: [y['id'] for y in x]
-            want = ['columns', 'check', 'dataset', 'regions', 'lookup', 'review', 'relate', 'again', 'compare', 'out']
+            want = ['columns', 'check', 'dataset', 'regions', 'lookup', 'review', 'relate', 'locate', 'again', 'compare', 'see', 'out']
             ok = (ids(a['plan']) == want and all(x['state'] != 'unavailable' and not x['why'] for x in a['plan'])
                   and a['follow'] and a['blocked'] is None and f"in {len(want)} steps" in a['verdict']
                   and b['tracker'] and ids(b['track']) == want and all(x['state'] != 'unavailable' for x in b['track'])
