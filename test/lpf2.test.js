@@ -215,7 +215,7 @@ const CASES = [
   ['when-no-years', { ...good(), geometry: { type: 'Point', coordinates: [1, 2], when: { label: 'medieval' } } }, /date with no years in it/],
   ['date', { ...good(), when: { timespans: [{ start: { in: '12000' } }] } }, /a date WHG cannot read.*: "12000"$/],
   ['name-at', { ...good(), names: [{ toponym: 'Qanawat@' }] }, /ends with "@" and no language: "Qanawat@"$/],
-  ['name-language', { ...good(), names: [{ toponym: 'Karak@ar-Latn-x-ijmes' }] }, /whose language WHG does not read as one: "Karak@ar-Latn-x-ijmes"$/],
+  ['name-language', { ...good(), names: [{ toponym: 'Karak@ar_Latn' }] }, /whose language WHG does not read as one: "Karak@ar_Latn"$/],
   ['language', { ...good(), names: [{ toponym: 'Karak', lang: '' }] }, /a language WHG does not read as one.*: ""$/],
   ['link', { ...good(), links: [{ type: 'closeMatch', identifier: 'Q84' }] }, /has a link WHG cannot read.*: "Q84"$/],
   ['link', { ...good(), links: [{ type: 'sameAs', identifier: 'wd:Q84' }] }, /has a link WHG cannot read.*: "sameAs"$/],
@@ -275,7 +275,7 @@ test('the validator takes a collection, a list of features, or a GeoJSON sequenc
 
 // ---- WHG's own example table ------------------------------------------------------------------------
 const LP7 = 'test/fixtures/generic/whg-lp7-12.tsv';
-test("WHG's twelve example rows, converted to lpf2: eleven are accepted by its schema, and the one refused is named with why", async () => {
+test("WHG's twelve example rows, converted to lpf2: all are accepted by its schema, the private-use language tag included", async () => {
   const r = await go([file(LP7)], 'convert', 'lpf2');
   assert.deepEqual(errors(r), []);
   const fc = JSON.parse(outText(r.e, 'whg-lp7-12.lpf2.geojson'));
@@ -291,16 +291,17 @@ test("WHG's twelve example rows, converted to lpf2: eleven are accepted by its s
   assert.ok(toponyms.includes('Qalʿat al-Mafraq') && !toponyms.some((t) => t.includes('@')));
   assert.equal(item(r, 'lpf-name-at-no-language').count, 7);
   assert.equal(item(r, 'lpf-name-at-language').count, 33);
-  // The schema, asked here: one place refused, for a language tag with a private part (ar-Latn-x-ijmes),
-  // which is well-formed BCP 47 and which WHG's pattern for a language does not take. It is not altered.
+  // The schema, asked here: all twelve accepted. A language tag with a private part (ar-Latn-x-ijmes), which is
+  // well-formed BCP 47, was refused by WHG's pattern until its fix (WorldHistoricalGazetteer/place#351); the
+  // vendored schema has the fix. The tag is not altered.
   const AL_MAFRAQ = 'https://temporary.invalid/my-dataset/place/oape_201';
-  assert.deepEqual(refusedBySchema(fc.features), [AL_MAFRAQ]);
+  assert.deepEqual(refusedBySchema(fc.features), []);
   assert.ok(fc.features.find((f) => f['@id'] === AL_MAFRAQ).names.some((n) => n.lang === 'ar-Latn-x-ijmes'));
-  assert.deepEqual([item(r, 'whg-language').count, item(r, 'whg-language').examples], [1, [`Al Mafraq (${AL_MAFRAQ}): "ar-Latn-x-ijmes"`]]);
-  assert.match(item(r, 'whg-verdict').message, /^11 of 12 places would be accepted by WHG; 1 would be refused/);
+  assert.equal(item(r, 'whg-language'), undefined);
+  assert.match(item(r, 'whg-verdict').message, /^All 12 places would be accepted by WHG/);
   assert.equal(item(r, 'whg-temporary-ids').count, 12);
   const v = validateForWhg(fc);
-  assert.deepEqual([v.total, v.valid, v.invalid.map((x) => x.id)], [12, 11, [AL_MAFRAQ]]);
+  assert.deepEqual([v.total, v.valid, v.invalid.map((x) => x.id)], [12, 12, []]);
 });
 
 // ---- check --whg --------------------------------------------------------------------------------------
@@ -346,11 +347,10 @@ test('the command line: check says it applies PLATO\'s rules only, --whg adds WH
   assert.ok(!/would be accepted by WHG/.test(plain.out));
   const asked = cli('check', '--whg', '--brief', LP7);
   assert.equal(asked.code, 0);
-  assert.match(asked.out, /\n {2}11 of 12 places would be accepted by WHG; 1 would be refused/);
+  assert.match(asked.out, /\n {2}All 12 places would be accepted by WHG/);
   assert.match(asked.out, /\nChecked by PLATO's rules, and against the World Historical Gazetteer's schema for Linked Places Format v2 \(--whg\)\.\nChecked 1 input: 1 without problems, 0 with problems\.\n$/);
   const full = cli('check', '--whg', LP7);
-  assert.match(full.out, /× 1 {2}The World Historical Gazetteer \(WHG\) would not accept these places: each gives a language WHG does not read as one/);
-  assert.match(full.out, /Al Mafraq \(https:\/\/temporary\.invalid\/my-dataset\/place\/oape_201\): "ar-Latn-x-ijmes"/);
+  assert.ok(!/language WHG does not read/.test(full.out));
   // A conversion says nothing of rules, and --whg is not one of its options: lpf2 is the target that reports it.
   const dir = mkdtempSync(join(tmpdir(), 'lpf2-'));
   const refused = cli('convert', '--to', 'lpf', '--whg', '--out', dir, LP7);
@@ -358,14 +358,14 @@ test('the command line: check says it applies PLATO\'s rules only, --whg adds WH
   assert.match(refused.err, /--whg is for check; convert --to lpf2 says the same of the file it writes\./);
   const converted = cli('convert', '--to', 'lpf2', '--brief', '--out', dir, LP7);
   assert.equal(converted.code, 0);
-  assert.match(converted.out, /\n {2}11 of 12 places would be accepted by WHG/);
+  assert.match(converted.out, /\n {2}All 12 places would be accepted by WHG/);
   assert.ok(!/PLATO's rules/.test(converted.out));
   const written = JSON.parse(readFileSync(join(dir, 'whg-lp7-12.lpf2.geojson'), 'utf8'));
   assert.equal(written['@context'], LPF2_CONTEXT);
-  assert.equal(refusedBySchema(written.features).length, 1);
+  assert.equal(refusedBySchema(written.features).length, 0);
   // The file it wrote, given back with --whg, has the same verdict.
   const again = cli('check', '--whg', '--brief', join(dir, 'whg-lp7-12.lpf2.geojson'));
-  assert.match(again.out, /\n {2}11 of 12 places would be accepted by WHG/);
+  assert.match(again.out, /\n {2}All 12 places would be accepted by WHG/);
   writeFileSync(join(dir, 'x.json'), JSON.stringify(doc(WHOLE())));
   assert.match(cli('check', '--whg', '--brief', join(dir, 'x.json')).out, /\n {2}The one place would be accepted by WHG\./);
 });
