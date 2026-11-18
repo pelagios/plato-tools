@@ -3671,9 +3671,9 @@ def page_shell_checks(pw, url, tmp):
             finally: ctx and ctx.close()
             plain = lambda x: (not x['open'] and x['panel'] and x['summary'] == 'Look up in a gazetteer (online, optional)' and x['match'] and x['resume'] and x['heading'] == 'Match it with another dataset')
             step = lambda x: (x['open'] and x['panel'] and x['summary'] == 'Look up in a gazetteer' and not x['match'] and not x['resume'] and x['heading'] == 'Look its places up in a gazetteer'
-                              and 'look the places up' in (x['title'] or ''))
+                              and (x['title'] or '').endswith(': Find your places in WHG'))
             ok = (plain(outside) and at['steps'].get('lookup') == 'current' and (at['use'] or '').startswith('Use ') and step(there) and step(reloaded)
-                  and any(b.startswith('Save with-ids.jsonl') for b in made) and 'with-ids.jsonl' in kept_)
+                  and any(b.startswith('Save with-ids.json (') for b in made) and 'with-ids.json' in kept_ and 'with-ids.jsonl' not in kept_)
             return ok, {'outside a workflow': outside, 'steps': at['steps'], 'use': at['use'], 'save offered': made, 'outputs kept': kept_, 'at the step': there, 'after a reload': reloaded}
         attempt('Page shell: at a workflow\'s lookup step the lookup\'s panel is open, not called optional, the centre titled for it and the buttons that match with another dataset hidden, and so again after a reload, and the output of the conversion before is still there to save; outside a workflow the panel is folded and optional, under those buttons', lookup_step)
 
@@ -4829,22 +4829,30 @@ def map_your_data_checks(pw, url, tmp):
         page.click('#methodos-done'); step_is('see', 'done', 15)
         # The tracker narrows step 2 to the step's tool (Metaphrasis) once it comes to it.
         until(page, "() => { const t = document.getElementById('target'); return !!t && !!t.offsetParent; }", 30)
-        # The dataset handed back is PLATO JSON already, the format the workflow writes: the step is ready to
-        # download it as it is (the page offers no conversion of a format into itself), and is done once downloaded.
-        until(page, "() => !document.getElementById('methodos-download').hidden", 30)
+        # The result is written as the spreadsheet (one row for each place), the format a list of names put on a map is begun
+        # for, chosen in the list, where the file for WHG comes next: the dataset is converted, never offered to download as
+        # it is (PLATO JSON, its own format, is not in the list), and the step is done by the conversion.
+        until(page, "() => document.getElementById('target').dataset.step === 'out' && /^Press Convert below\\./.test(document.getElementById('methodos-message').textContent)", 30)
         offered = page.eval_on_selector_all('#target option', 'os => os.map((o) => o.value)')
-        ready = {'row': page.inner_text('#methodos-track li[data-step="out"]'), 'message': track()['message'], 'button': page.inner_text('#methodos-download')}
-        with page.expect_download(timeout=T(30) * 1000) as d: page.click('#methodos-download')
-        r['final'] = out / ('final-' + d.value.suggested_filename); d.value.save_as(r['final'])
-        step_is('out', 'done', 15)
+        ready = {'chosen': page.input_value('#target'), 'message': track()['message'], 'download': page.is_visible('#methodos-download'), 'file': page.eval_on_selector_all('#chosen .name', 'es => es.map((e) => e.textContent)')}
+        s = run('#convert'); step_is('out', 'done', 60)
         until(page, "document.getElementById('methodos-tracker').dataset.status === 'completed' || !document.querySelector('#methodos-track li.is-current')", 15)
+        name = next((o['name'] for o in (s.get('outputs') or []) if o['name'].endswith('.flat.csv')), None)
+        if not name: return False, {'outputs': [o['name'] for o in s.get('outputs') or []], 'offered': offered, 'ready': ready}
+        flat = list(csv.DictReader(download(page, name, out / name).open(encoding='utf-8-sig')))
+        # The dataset the spreadsheet was written from, the one chosen in step 1 (saved in Chora): what the checks below read.
+        r['final'] = r['drawn']
         r['doc'] = json.loads(r['final'].read_text())
         e = mydata_ends(r['doc']); r['ends'] = e
-        same = r['final'].read_bytes() == r['drawn'].read_bytes()
-        return (r['again'] == 'done' and 'plato-json' not in offered and bool(offered) and 'Ready to download' in ready['row'] and 'Ready to download' in ready['message'] and ready['button'] == f"Download {r['drawn'].name}"
+        matched = sum(1 for x in r['doc']['spatialEntities'] if any(a.get('identities') for a in x.get('attestations') or []))
+        rows = {'rows': len(flat), 'places': len(r['doc']['spatialEntities']), 'with a match': sum(1 for x in flat if x.get('match_status') and x['match_status'] != 'no match recorded'), 'matched in the dataset': matched,
+                'located': sum(1 for x in flat if x.get('lat') and x.get('lon'))}
+        return (r['again'] == 'done' and 'plato-json' not in offered and offered[:2] == ['table-flat', 'lpf2'] and ready['chosen'] == 'table-flat' and ready['download'] is False and ready['file'] == [r['drawn'].name]
+                and ready['message'].startswith('Press Convert below. The spreadsheet, chosen beside Convert, is a summary of the ')
                 and seen['link'] == 'See your places on the map' and seen['message'].startswith('Open the map (“See your places on the map”): 9 locations are on record. Say when you have looked, and the step is done.')
-                and same and mydata_complete(e)), {'again': r['again'], 'seen': seen, 'offered': offered, 'ready': ready, 'same file': same, 'ends': e, 'steps': track()['steps']}
-    attempt('Map your data: checked again, compared with the dataset converted from the table, seen on the map (nine locations on record, said; the step done by saying so), and, already PLATO JSON, ready to download and downloaded as it is (the step then done), with its ten places ContainedIn their parishes, its identities, the eight locations taken from the matches and the one adopted citing the stub, and its identities naming their candidates', to_the_end)
+                and rows['rows'] == rows['places'] > 0 and rows['with a match'] == rows['matched in the dataset'] > 0 and rows['located'] == 9
+                and mydata_complete(e)), {'again': r['again'], 'seen': seen, 'offered': offered, 'at the step': ready, 'the spreadsheet': rows, 'ends': e, 'steps': track()['steps']}
+    attempt('Map your data: checked again, compared with the dataset converted from the table, seen on the map (nine locations on record, said; the step done by saying so), and written as the spreadsheet, chosen in the list before the file for WHG (PLATO JSON, the dataset\'s own format, not offered), with a row for each place, a match in each row the dataset matched and nine rows located; the dataset it was written from has its ten places ContainedIn their parishes, its identities, the eight locations taken from the matches and the one adopted citing the stub, and its identities naming their candidates', to_the_end)
 
     def can_fail():
         need('final', 'doc')
@@ -5832,12 +5840,124 @@ def myd_tracker_checks(pw, url, tmp):
             t = track(page); before = page.evaluate(CHOSEN)
             offered = use(page, 'places-with-id.json')
             t2 = track(page)
-            ok = (before == ['places-with-id.csv'] and offered == 'Use places-with-id.json (made by the step “Make a PLATO dataset of it”)'
+            ok = (before == ['places-with-id.csv'] and offered == 'Use places-with-id.json (made by the step “Prepare your places”)'
                   and 'This step is yours: it waits for the regions to be found in the gazetteer' in t['message'] and 'press "Review the regions level by level" below' in t['message']
                   and not re.search(r'step \d', t['message']) and t2['steps'].get('regions') == 'current' and t2['use'] is None)
             return ok, {'chosen at the step': before, 'offered': offered, 'said': t['message'], 'steps': t2['steps'], 'offered once used': t2['use']}
         finally: ctx.close()
     attempt('Map your data (tracker): at the regions step the dataset the step before made is offered by name and chosen in one press, and the step\'s words name the button to press, with no "step 5"', regions_step)
+
+    # ---- Map your data in plain words (18 November 2026): the default plan, from "Start", every screen of it
+    # Every step's screen is read as the scholar reads it (the page's visible words): none names the Data Cube, promotedFrom
+    # or --base, and no step's headline names a tool. Each absence is read beside a presence in the same screens: the fold
+    # "More options (for experts)" is on every one of them, and opened (at the columns) it does show the Data Cube and
+    # promotedFrom; the engine's own words for the temporary ids (which say --base) are in the report of the file written
+    # for WHG, folded under the plain sentence that stands for them.
+    def plain_screens():
+        decided = lambda s: sum(1 for c in (s.get('work') or {}).get('candidates', []) if (c.get('decision') or {}).get('kind') == 'match')
+        ctx, page = fresh()
+        try:
+            SCREEN = """() => ({ words: document.body.innerText, title: document.getElementById('workflow-title').textContent,
+              fold: (() => { const d = document.getElementById('expert'); return d && !d.hidden && !d.closest('[hidden]') ? { open: d.open, summary: d.querySelector('summary').textContent, parts: d.querySelector('#expert-body').children.length } : null; })(),
+              rows: [...document.querySelectorAll('#methodos-track li.track-step')].map((li) => [...li.querySelectorAll('.track-act, .track-tool')].map((e) => e.className + ':' + e.textContent)),
+              heading: !!document.getElementById('action-h').offsetParent })"""
+            seen = {}
+            def at(step): seen[step] = page.evaluate(SCREEN)
+            page.click('#methodos-quick'); until(page, "['pending', 'idle'].includes(document.getElementById('methodos-tracker').dataset.status)", 10)
+            choose(page, [MYD_BASELINE])
+            until(page, "() => window.__plato?.columns?.headers && document.getElementById('methodos-tracker').dataset.status === 'idle' && !document.getElementById('methodos-done').hidden", 30)
+            at('columns')
+            page.click('#expert > summary'); page.wait_for_timeout(200)
+            opened = page.evaluate(SCREEN)
+            page.click('#expert > summary')
+            page.click('#methodos-done'); step_is(page, 'columns', 'done', 15); at('check')
+            run(page, '#check'); step_is(page, 'check', 'done'); at('dataset')
+            # The step that makes the dataset has its own format chosen in the list: Convert is pressed as it stands.
+            preset = page.input_value('#target')
+            run(page, '#convert'); step_is(page, 'dataset', 'done')
+            use(page, '00-baseline-with-ids.json')
+            page.fill('#whg-token', LOOKUP_TOKEN); page.press('#whg-token', 'Tab')
+            until(page, "() => /^Send 4 queries to WHG$/.test(document.getElementById('lookup-send').textContent) && !document.getElementById('lookup-send').disabled", 60)
+            at('lookup')
+            page.click('#lookup-send'); step_is(page, 'lookup', 'done', 90)
+            until(page, "() => !document.getElementById('bulk-accept').disabled", 30); at('review')
+            hint = page.eval_on_selector_all('#review-place .acts-hint', 'es => es.map((e) => e.textContent)')
+            label = page.inner_text('label[for="identity-type"]')
+            page.click('#bulk-accept'); wait_state(page, lambda s: decided(s) == 4, T(15), 'accepted')
+            page.click('#methodos-done'); step_is(page, 'review', 'done', 15); at('apply')
+            page.check('input[name="review-output"][value="dataset"]')
+            run(page, '#finish'); step_is(page, 'apply', 'done', 30)
+            saved = page.inner_text('#summary')
+            until(page, f"() => !!({SHOWN})('methodos-locate-skip')", 60); at('locate')
+            page.click('#methodos-locate-skip'); step_is(page, 'locate', 'done', 15)
+            use(page, '00-baseline-with-ids.krisis-dataset.json')
+            at('again')
+            run(page, '#check'); step_is(page, 'again', 'done')
+            until(page, f"() => !!({SHOWN})('methodos-compare')", 30); at('compare')
+            page.click('#methodos-compare'); step_is(page, 'compare', 'done', 120)
+            until(page, "() => /on record/.test(document.getElementById('methodos-message').textContent)", 30); at('see')
+            page.click('#methodos-done'); step_is(page, 'see', 'done', 15)
+            until(page, "() => document.getElementById('target').dataset.step === 'out' && /^Press Convert below\\./.test(document.getElementById('methodos-message').textContent)", 30)
+            at('out')
+            target = page.evaluate("() => { const t = document.getElementById('target'); return { value: t.value, first: [...t.options].slice(0, 2).map((o) => [o.value, o.textContent]), all: [...t.options].map((o) => o.value) }; }")
+            said = track(page)['message']
+            flat = run(page, '#convert'); step_is(page, 'out', 'done', 60)
+            seen['the spreadsheet written'] = page.evaluate(SCREEN)
+            flat_out = page.evaluate("() => { const o = document.getElementById('outcome'); return { kind: o.dataset.kind, shown: !o.hidden, head: o.querySelector('.outcome-head')?.textContent, notes: [...o.querySelectorAll('.outcome-note')].map((e) => e.textContent) }; }")
+            # Every step done: Convert is still there, for the file WHG reads.
+            page.select_option('#target', 'lpf2')
+            whg = run(page, '#convert')
+            seen['the file for WHG written'] = page.evaluate(SCREEN)
+            whg_out = page.evaluate("""() => { const o = document.getElementById('outcome'), r = document.getElementById('report');
+              return { kind: o.dataset.kind, tone: o.dataset.tone, shown: !o.hidden, head: o.querySelector('.outcome-head')?.textContent,
+                reasons: [...o.querySelectorAll('.outcome-reasons li strong')].map((e) => e.textContent), examples: [...o.querySelectorAll('.outcome-examples')].map((e) => e.textContent),
+                remedies: [...o.querySelectorAll('.outcome-remedy')].map((e) => e.textContent), notes: [...o.querySelectorAll('.outcome-note')].map((e) => e.textContent),
+                scope: o.querySelector('.outcome-scope')?.textContent, summary: document.getElementById('summary').textContent,
+                folded: r.textContent.includes('--base') && !r.innerText.includes('--base'), kinds: [...r.querySelectorAll('details.item')].map((d) => d.dataset.kind) }; }""")
+            verdict = next((i for i in (whg.get('report') or {}).get('items', []) if i.get('kind') == 'whg-verdict'), {})
+            EXPERT = ('Data Cube', 'promotedFrom', '--base')
+            GREEK = ('Methodos', 'Hermes', 'Elenchos', 'Metaphrasis', 'Arithmos', 'Krisis', 'Chora', 'Agora', 'Mneme')
+            steps = ['columns', 'check', 'dataset', 'lookup', 'review', 'apply', 'locate', 'again', 'compare', 'see', 'out']
+            found = {k: [w for w in EXPERT if w in v['words']] for k, v in seen.items()}
+            titles = [seen[k]['title'] for k in steps]
+            # A row of the tracker: what the step does first, then its tool's own name, small.
+            rows = seen['columns']['rows']
+            ok = (list(seen) == steps + ['the spreadsheet written', 'the file for WHG written'] and all(v == [] for v in found.values())
+                  # The presences: the fold on every screen, closed; opened, it holds what the screens do not show.
+                  and all(v['fold'] and v['fold']['open'] is False and v['fold']['summary'] == 'More options (for experts)' and v['fold']['parts'] >= 5 and 'More options (for experts)' in v['words'] for v in seen.values())
+                  and opened['fold']['open'] is True and 'Data Cube' in opened['words'] and 'promotedFrom' in opened['words'] and 'Revise against the earlier version' in opened['words']
+                  and whg_out['folded'] is True and 'whg-temporary-ids' in whg_out['kinds']
+                  # The headlines: the step by what the scholar does, no tool's name; step 2's own heading only where the step narrows to a tool.
+                  and titles == ['Step 1 of 11: Check your columns', 'Step 2 of 11: Check the table', 'Step 3 of 11: Prepare your places', 'Step 4 of 11: Find your places in WHG',
+                                 'Step 5 of 11: Decide which matches are right', 'Step 6 of 11: Save your decisions', 'Step 7 of 11: Use the locations of the matches', 'Step 8 of 11: Check the result',
+                                 'Step 9 of 11: Compare the result with what you began with', 'Step 10 of 11: See your places on a map', 'Step 11 of 11: Download your results']
+                  and not any(g in t for t in titles for g in GREEK)
+                  and len(rows) == 11 and rows[0] == ['track-act:Check your columns', 'track-tool:Hermes'] and rows[3] == ['track-act:Find your places in WHG', 'track-tool:Krisis']
+                  and rows[10] == ['track-act:Download your results', 'track-tool:Metaphrasis'] and all(len(r) == 2 and r[0].startswith('track-act:') for r in rows)
+                  and seen['columns']['heading'] is False and seen['locate']['heading'] is False and seen['check']['heading'] is True and seen['out']['heading'] is True
+                  # The plain words of the review and of the decisions saved.
+                  and label == 'Record “Same place” as' and len(hint) == 1 and hint[0].startswith('“Not this one” sets this suggestion aside and writes nothing to your data.')
+                  and saved.startswith('Your decisions were saved with your places. Recorded 4 decisions: 4 matches accepted, 0 places said to be different.') and 'attestation' not in saved
+                  # The result: the spreadsheet first and chosen, then the file for WHG; each says what came of it.
+                  and preset == 'plato-json' and target['value'] == 'table-flat'
+                  and target['first'] == [['table-flat', 'A spreadsheet: one row per place (CSV)'], ['lpf2', 'A file for the World Historical Gazetteer (Linked Places Format v2)']]
+                  and 'lpf' in target['all'] and 'ntriples' in target['all'] and 'plato-json' not in target['all']
+                  and said.startswith('Press Convert below. The spreadsheet, chosen beside Convert, is a summary of the 4 decisions this dataset records about which places are the same: each match is kept with its kind, the gazetteer it is in and who decided it')
+                  and flat.get('phase') == 'done' and any(o['name'].endswith('.flat.csv') for o in flat.get('outputs') or [])
+                  and flat_out['shown'] and flat_out['kind'] == 'flat' and flat_out['head'] == 'Your spreadsheet has one row for each of the 5 places, with its match and its location.'
+                  and any(n.startswith('1 place of 5 has “no match recorded”') for n in flat_out['notes'])
+                  and whg.get('phase') == 'done' and any(o['name'].endswith('.lpf2.geojson') for o in whg.get('outputs') or [])
+                  and whg_out['shown'] and whg_out['kind'] == 'whg' and whg_out['tone'] == 'warn' and (verdict.get('message') or '').startswith('2 of 5 places would be accepted by WHG; 3 would be refused')
+                  and whg_out['head'] == '2 of 5 places would be accepted by WHG; 3 would be refused:'
+                  and whg_out['reasons'] == ['3 places: each has no date; WHG needs one (a year or a span of years, for the place or for one of its names, types, locations or relations).', '1 place has no id (@id).']
+                  and whg_out['examples'] == ['For example: Deva Victrix (https://temporary.invalid/my-dataset/place/chester); Lindum Colonia (https://temporary.invalid/my-dataset/place/lincoln); Isca (feature 5).', 'For example: Isca (feature 5).'] and whg_out['remedies'] == ['To have them accepted, give each a date (in a table, a column of start years, and of end years where there are any), and convert again.']
+                  and any(n.startswith('Your places have working ids for now (4 places). WHG would keep those ids as they are') for n in whg_out['notes'])
+                  and (whg_out['scope'] or '').startswith("This is WHG's schema for Linked Places Format v2") and whg_out['summary'].startswith("The file was written, and by PLATO's rules nothing is wrong with it."))
+            return ok, {'expert words on a screen': found, 'the fold opened': {'Data Cube': 'Data Cube' in opened['words'], 'promotedFrom': 'promotedFrom' in opened['words']}, 'folds': {k: v['fold'] for k, v in seen.items()},
+                        'titles': titles, 'rows': rows[:4], 'step 2\'s heading': {k: v['heading'] for k, v in seen.items()}, 'label': label, 'hint': hint, 'saved': saved[:200],
+                        'the dataset step\'s format': preset, 'the list at the end': target, 'said': said[:240], 'the spreadsheet': flat_out, 'for WHG': whg_out, 'the verdict in the report': verdict.get('message')}
+        finally: ctx.close()
+    attempt('Map your data in plain words: from "Start", no screen of the eleven steps (nor of the two results) names the Data Cube, promotedFrom or --base, each has the closed fold "More options (for experts)" (which, opened, shows them), no headline names a tool and each row says the act before its tool; the review\'s label and hint and the decisions saved are in plain words; the spreadsheet is offered first and chosen, then the file for WHG, and each result says what came of it ("2 of 5 places would be accepted by WHG; 3 would be refused:", each reason, its examples and its remedy)', plain_screens)
 
     # ---- One walk to the end: the review after a reload, the comparison in one press, and what the format cannot hold
     # Opened outside any check, so a page that cannot be opened (--prove-it-fails: no storage on the page with no tools)
@@ -5922,7 +6042,7 @@ def myd_tracker_checks(pw, url, tmp):
         step_is(page, 'compare', 'done', 120)
         s = wait_state(page, lambda s: s.get('action') == 'compare' and s.get('phase') in ('done', 'error'), T(60), 'the comparison')
         r['compared'] = True
-        return (said.endswith(': the file this step takes. Press Check below.') and offer == 'Compare with 00-baseline-with-ids.json (made by the step “Make a PLATO dataset of it”)'
+        return (said.endswith(': the file this step takes. Press Check below.') and offer == 'Compare with 00-baseline-with-ids.json (made by the step “Prepare your places”)'
                 and 'Press “Compare with 00-baseline-with-ids.json”: the workflow kept that file for you' in t['message']
                 and other['steps'].get('compare') == 'current' and f'it compared with {r["applied"].name}, which is not 00-baseline-with-ids.json' in other['message']
                 and asked == [] and s.get('phase') == 'done' and (s.get('report') or {}).get('errors') == 0 and track(page)['steps'].get('see') == 'current'), \
@@ -5938,11 +6058,11 @@ def myd_tracker_checks(pw, url, tmp):
         if not (seen['said'].startswith('Open the map (“See your places on the map”): 5 locations are on record. Say when you have looked, and the step is done.')
                 and seen['download'] is None and seen['map'] == 'See your places on the map'): return False, {'at the map': seen}
         page.click('#methodos-done'); step_is(page, 'see', 'done', 15)
-        until(page, "() => !document.getElementById('methodos-download').hidden", 30)
-        LOSSY = "() => ({ said: document.getElementById('methodos-message').textContent, lossy: document.getElementById('methodos-tracker').dataset.lossy, convert: document.getElementById('convert').classList.contains('primary'), download: document.getElementById('methodos-download').classList.contains('primary') && !document.getElementById('methodos-download').hidden })"
+        until(page, "() => document.getElementById('target').dataset.step === 'out' && /^Press Convert below\\./.test(document.getElementById('methodos-message').textContent) && document.getElementById('methodos-tracker').dataset.lossy === 'true'", 30)
+        LOSSY = "() => ({ said: document.getElementById('methodos-message').textContent, lossy: document.getElementById('methodos-tracker').dataset.lossy, convert: document.getElementById('convert').classList.contains('primary'), download: !document.getElementById('methodos-download').hidden })"
         plain = page.evaluate(LOSSY)
         target = page.evaluate("() => { const t = document.getElementById('target'); return { options: [...t.options].map((o) => o.value), shown: !!t.offsetParent, disabled: t.disabled, value: t.value }; }")
-        if not (target['shown'] and not target['disabled'] and 'lpf' in target['options']): return False, {'the list of formats': target, 'said': plain}
+        if not (target['shown'] and not target['disabled'] and 'lpf' in target['options'] and target['value'] == 'table-flat' and target['options'][:2] == ['table-flat', 'lpf2']): return False, {'the list of formats': target, 'said': plain}
         page.select_option('#target', 'lpf')
         until(page, "() => document.getElementById('methodos-tracker').dataset.lossy === 'true'", 30)
         lpf = page.evaluate(LOSSY)
@@ -5950,10 +6070,12 @@ def myd_tracker_checks(pw, url, tmp):
         until(page, "() => document.getElementById('methodos-tracker').dataset.lossy === 'false'", 15)
         back = page.evaluate(LOSSY)
         sentence = 'Linked Places Format, the format chosen beside Convert, cannot hold everything in the 4 decisions this dataset records about which places are the same'
-        return (sentence in lpf['said'] and 'PLATO JSON keeps all of it.' in lpf['said'] and 'cannot hold' not in plain['said'] and 'cannot hold' not in back['said']
-                and plain['said'].startswith('Ready to download: ') and back['said'].startswith('Ready to download: ')
-                and plain['download'] is True and plain['convert'] is False), {'as it came': plain, 'LPF chosen': lpf, 'PLATO JSON Lines chosen': back}
-    attempt('Map your data (tracker): the places are seen on the map first (five locations on record, the table\'s own, said; no download offered there), and that step said done, at "Write it out" Download is the one primary button; with Linked Places Format chosen the tracker says what it cannot hold of the 4 decisions, and with PLATO JSON Lines chosen it says nothing of it', write_it_out)
+        flat = 'The spreadsheet, chosen beside Convert, is a summary of the 4 decisions this dataset records about which places are the same: each match is kept with its kind, the gazetteer it is in and who decided it, but not the candidate it answered'
+        return (sentence in lpf['said'] and 'PLATO JSON keeps all of it.' in lpf['said'] and flat not in lpf['said'] and lpf['said'].startswith('Press Convert below. ')
+                and plain['said'].startswith('Press Convert below. ' + flat) and 'cannot hold' not in plain['said'] and plain['lossy'] == 'true'
+                and back['said'] == 'Press Convert below.' and back['lossy'] == 'false'
+                and plain['download'] is False and plain['convert'] is True), {'as it came': plain, 'LPF chosen': lpf, 'PLATO JSON Lines chosen': back}
+    attempt('Map your data (tracker): the places are seen on the map first (five locations on record, the table\'s own, said; no download offered there), and that step said done, at "Download your results" the spreadsheet is chosen in the list (first, before the file for WHG) and Convert is the one primary button, the tracker saying what the spreadsheet keeps of the 4 decisions and what it does not; with Linked Places Format chosen it says what that cannot hold, and with PLATO JSON Lines chosen it says nothing of it', write_it_out)
     try: ctx.close(); browser.close()
     except Exception: pass
 
@@ -6099,7 +6221,7 @@ def locate_checks(pw, url, tmp):
                 and r['once'].get('Beta Mill') == [] and len(r['once'].get('Alpha Ford') or []) == 1
                 and undone['step'] == 'current' and undone['ticked'] is False and undone['go'] == 'Use the locations of 1 place' and undone['undo'] is None
                 and r['after once']['undo'] == 'Undo: take those locations out again' and r['after once']['chosen'] == ['fords.krisis-dataset.located.json']
-                and undone['message'].startswith('The locations are taken out again: the workflow is back at “Use the locations of the places you matched”, with the dataset as it was before them.')
+                and undone['message'].startswith('The locations are taken out again: the workflow is back at “Use the locations of the matches”, with the dataset as it was before them.')
                 and undone['message'].endswith(b['message']) and undone['chosen'] == [r['applied'].name]
                 and ticked['message'].endswith(' Use the locations of 2 of 3 matched places; 1 has no location on record. Each location is the one point the gazetteer gives for the record (its representative point), not the record\'s full shape. Nothing is taken until you press the button.') and ticked['step'] == 'current'
                 and s['message'].startswith('The locations of 2 places were added, each with where it came from (') and '1 of them from a source whose licence is not stated, by your choice, which is recorded with each.' in s['message']
@@ -8543,7 +8665,7 @@ def front_page_checks(browser, url):
                              'current': page.eval_on_selector_all('#toolbox [aria-current]', 'es => es.map((e) => e.getAttribute("href"))'),
                              'note': page.inner_text('#for-tool'), 'target': page.input_value('#target'), 'cube': page.is_checked('#cube')}
                 seen[key]['ok'] = seen[key]['shown'] == shown and seen[key]['hash'] == f'#tool={key}' and seen[key]['current'] == [f'#tool={key}']
-            fig = seen['figures']; fig['ok'] = fig['ok'] and fig['target'] == 'ntriples' and fig['cube'] and 'Arithmos' in fig['note']
+            fig = seen['figures']; fig['ok'] = fig['ok'] and fig['target'] == 'ntriples' and fig['cube'] and fig['note'].startswith('For Count and compare') and 'arithmos' in fig['note'].lower()
             # Leaving Arithmos undoes its preset: the format chosen before it, and no Data Cube option.
             left = seen['versions']; left['ok'] = left['ok'] and left['target'] == seen['convert']['target'] != 'ntriples' and not left['cube']
             # And so does "Show every action", straight from Arithmos.
@@ -8692,10 +8814,13 @@ def front_page_checks(browser, url):
             page.click('#toolbox ul[aria-labelledby="tg-check"] .tool-link[data-tool="check"]')
             chose = {'hash': page.evaluate('() => location.hash'), 'tool': page.evaluate('() => window.__plato.tool ?? null'),
                      'current': page.eval_on_selector_all('#toolbox [aria-current]', 'es => es.map((e) => e.dataset.tool)')}
-            want = [('Guided workflows', ['Methodos']), ('Bring your data in', ['Hermes']), ('Check and convert', ['Elenchos', 'Metaphrasis', 'Arithmos']),
-                    ('Identify and locate', ['Krisis', 'Chora']), ('Publish and keep', ['Agora', 'Mneme']), ('Explore', ['Peripleo'])]
+            # Each card by its plain name (18 November 2026); its own name is the small label under it, read below.
+            want = [('Guided workflows', ['Guided steps']), ('Bring your data in', ['Read my table']), ('Check and convert', ['Check', 'Convert', 'Count and compare']),
+                    ('Identify and locate', ['Find in gazetteers', 'Map']), ('Publish and keep', ['Publish', 'Compare versions']), ('Explore', ['Peripleo'])]
+            own = page.eval_on_selector_all('#toolbox .tool .label .greek-name', 'es => es.map((e) => e.textContent.trim())')
             return ([(g['heading'], g['cards']) for g in got] == want and all(g['visible'] and g['list'] for g in got) and every == 10
-                    and first == {'name': 'Methodos', 'coming': False, 'link': True}
+                    and first == {'name': 'Guided steps', 'coming': False, 'link': True}
+                    and own == ['Methodos', 'Hermes', 'Elenchos', 'Metaphrasis', 'Arithmos', 'Krisis', 'Chora', 'Agora', 'Mneme']
                     and chose == {'hash': '#tool=check', 'tool': 'check', 'current': ['check']}
                     and vw == 1200 and rows.get('start') == rows.get('in') and rows.get('publish') == rows.get('explore')
                     and rows['in'] < rows['check'] < rows['locate'] < rows['publish'] and one_column), {'groups': got, 'first card': first, 'cards': every, 'Elenchos chosen': chose, 'heading tops at 1200 px': rows, 'width': vw, 'the rail at 1280 px (top, left)': rail}
@@ -8764,10 +8889,10 @@ def front_page_checks(browser, url):
             again = page.evaluate(STATE)[0]
             guide = 'https://plato.pelagios.org/guide/'
             by = {c['name']: c for c in opened}
-            chora, krisis, peripleo, methodos = by.get('Chora', {}), by.get('Krisis', {}), by.get('Peripleo', {}), by.get('Methodos', {})
+            chora, krisis, peripleo, methodos = by.get('Map', {}), by.get('Find in gazetteers', {}), by.get('Peripleo', {}), by.get('Guided steps', {})
             ok = (len(closed) == 10 and all(c['has'] and not c['open'] and c['said'] == 'More' and c['body'] == 0 and c['named'] and not c['insideLink'] for c in closed)
                   and all(c['open'] and c['said'] == 'Less' and c['body'] > 60 for c in opened) and kept
-                  and all(c['links'] and c['links'][-1].startswith(guide) for c in opened if c['name'] not in ('Peripleo', 'Methodos')) and peripleo.get('links') == []
+                  and all(c['links'] and c['links'][-1].startswith(guide) for c in opened if c['name'] not in ('Peripleo', 'Guided steps')) and peripleo.get('links') == []
                   and methodos.get('links') == ['https://github.com/pelagios/plato-tools/issues']
                   and chora.get('coming') == [] and 'and trace places from it by hand or with assistance from its ink: what you trace cites the map' in chora.get('rest', '')
                   and krisis.get('coming') == [] and KRISIS_NOW in krisis.get('rest', '')
@@ -10968,9 +11093,9 @@ def card_chosen_checks(browser, url, pw):
             page.click('#toolbox .tool-link[data-tool="check"]'); page.wait_for_timeout(300)
             moved = cards(page)
             ok = (chosen['current'] == ['read'] and gold(chosen['hermes']) and chosen['hermes'] != chosen['plain'] and chosen['focus'] == 'picker' and chosen['hash'] == ''
-                  and (chosen['note'] or '').startswith('For Hermes, the readers: your file is read when you drop it') and 'Then choose what to do with it.' in chosen['note']
+                  and (chosen['note'] or '').startswith('For Read my table Hermes, the readers: your file is read when you drop it') and 'Then choose what to do with it.' in chosen['note']
                   and all(vis.values()) and still['current'] == ['read']
-                  and moved['current'] == ['check'] and gold(moved['elenchos']) and moved['hermes'] == moved['plain'] and 'Elenchos' in (moved['note'] or '') and 'Hermes' not in moved['note']
+                  and moved['current'] == ['check'] and gold(moved['elenchos']) and moved['hermes'] == moved['plain'] and (moved['note'] or '').startswith('For Check Elenchos, the check.') and 'Hermes' not in moved['note']
                   and moved['hash'] == '#tool=check')
             return ok, {'Hermes chosen': chosen, 'step 2 with a file': vis, 'after the file': still, 'Elenchos then': moved}
         finally: ctx.close()
@@ -11016,7 +11141,7 @@ def card_chosen_checks(browser, url, pw):
             shot = lambda sel: base64.b64encode(page.locator(sel).screenshot()).decode()
             # The card's name (its words, not its icon, which is drawn in the band's blue): from 78rem the tools are a
             # rail whose cards show their name and label only, with "More" beside the label (Issue #33).
-            card = page.evaluate(count, shot('#toolbox .tool-link[data-tool="check"] h4 .why'))
+            card = page.evaluate(count, shot('#toolbox .tool-link[data-tool="check"] h4 .plain-name'))
             plain = page.evaluate(count, shot('#e2e-visited'))
             return plain['blue'] > 20 and card['ink'] > 20 and card['blue'] == 0, {'the card\'s text': card, 'a link blue only when visited': plain}
         finally: ctx.close(); ff.close()
@@ -11087,11 +11212,11 @@ def methodos_page_checks(browser, url):
             first_ok = (a['tracker'] and not a['interview'] and not a['banner'] and order and a['trackerRecipe'] == p['recipe'] and ids == p['steps']
                         and a['track'][0]['state'] == 'current' and a['track'][0]['current'] == 'step' and a['track'][0]['words'] == 'Now'
                         and all(x['state'] == 'todo' and x['current'] is None for x in a['track'][1:])
-                        and a['hash'] == '' and a['tool'] is None and a['note'] and (a['title'] or '').startswith(f"Step 1 of {len(ids)}: Hermes") and 'step 1 of' not in a['note'].lower()
+                        and a['hash'] == '' and a['tool'] is None and a['note'] and a['title'] == f"Step 1 of {len(ids)}: Check your columns" and 'step 1 of' not in a['note'].lower() and 'Methodos' not in a['note'] and a['note'].startswith('Map your data.')
                         and a['where'].startswith(f"Step 1 of {len(ids)}") and '%' not in a['where'] + a['note'] and a['focus'] == 'methodos-tracker-h'
                         and a['done shown'] is False and 'Choose your table to begin' in a['message'])
             second_ok = (b['track'][0]['state'] == 'done' and b['track'][0]['words'] == 'Done' and b['track'][1]['state'] == 'current'
-                         and b['hash'] == '#tool=check' and b['tool'] == 'check' and 'Elenchos' in (b['note'] or '') and (b['title'] or '').startswith(f"Step 2 of {len(ids)}: Elenchos") and 'step 2 of' not in (b['note'] or '').lower())
+                         and b['hash'] == '#tool=check' and b['tool'] == 'check' and 'Check · Elenchos' in (b['note'] or '') and b['title'] == f"Step 2 of {len(ids)}: Check the table" and 'step 2 of' not in (b['note'] or '').lower())
             back_ok = c['track'][0]['state'] == 'current' and c['hash'] == '' and c['tool'] is None
             left_ok = not d['tracker'] and d['banner'] and d['hash'] == '' and d['tool'] is None and d['note'] is None and d['files']
             return first_ok and second_ok and back_ok and left_ok, {'started': a, 'above step 1': order, 'one done': b, 'back': c, 'left': d}
@@ -11308,7 +11433,7 @@ def layout_checks(browser, url):
           bool(c.get('done')) and c['done']['bottom'] <= c['h'] and c['done']['top'] >= 0 and c.get('listOverflows') is True and c.get('railScrolled') == 0,
           {x: c.get(x) for x in ('done', 'h', 'listOverflows', 'railScrolled')} | err(r))
     check('layout: a check run in the workflow does its step, the title goes on to step 3, and the result stays in view labelled "Result of step 2"; acted on, step 3 puts it away into step 2\'s row, from which it is shown again',
-          (k3.get('title') or '').startswith('Step 3 of ') and bool(k3.get('result')) and (k3.get('resultOf') or '').startswith('Result of step 2: Elenchos')
+          (k3.get('title') or '').startswith('Step 3 of ') and bool(k3.get('result')) and k3.get('resultOf') == 'Result of step 2: Check the table'
           and not pk.get('result') and 'Show its result' in (pk.get('parked') or '') and bool(ro.get('result')) and (ro.get('resultOf') or '').startswith('Result of step 2: '),
           {'checked': {x: k3.get(x) for x in ('title', 'result', 'resultOf')}, 'acted on': {x: pk.get(x) for x in ('result', 'parked')}, 'shown again': {x: ro.get(x) for x in ('result', 'resultOf')}} | err(r))
     dr, fo = r.get('dropped') or {}, r.get('followed') or {}
@@ -11330,14 +11455,14 @@ def layout_checks(browser, url):
           beside(c) and beside(d) and inview(d, d.get('actionH')) and bool(a.get('toolbox')) and bool(a.get('files')) and a['toolbox']['right'] <= a['files']['left'],
           {k: {x: (r.get(k) or {}).get(x) for x in ('tracker', 'action', 'toolbox', 'files', 'h')} for k in ('landing', 'chosen', 'step2')} | err(r))
     check('layout: once the file is chosen and recognised, step 2\'s action is brought into view (the page scrolled) and takes the focus, and step 1 folds to its one line',
-          not p.get('action') and inview(c, c.get('actionH')) and c.get('scrollY', 0) > 0 and c.get('focus') == 'action-h'
+          not p.get('action') and c.get('actionH') is None and inview(c, c.get('action')) and c.get('scrollY', 0) > 0 and c.get('focus') == 'workflow-title'
           and bool(c.get('line')) and not c.get('drop') and bool(p.get('drop')) and not p.get('line'),
-          {'before': {x: p.get(x) for x in ('action', 'drop', 'line')}, 'after': {x: c.get(x) for x in ('actionH', 'scrollY', 'focus', 'line', 'drop')}} | err(r))
+          {'before': {x: p.get(x) for x in ('action', 'drop', 'line')}, 'after': {x: c.get(x) for x in ('actionH', 'action', 'scrollY', 'focus', 'line', 'drop')}} | err(r))
     check('layout: the workflow going on to step 2 brings its action into view again, with the focus',
           inview(d, d.get('actionH')) and d.get('focus') == 'action-h' and (d.get('title') or '').startswith('Step 2 of '), {x: d.get(x) for x in ('actionH', 'focus', 'title')} | err(r))
     check('layout in a workflow: the page\'s own section numbers are hidden (shown before it), and the centre is titled with the tracker\'s current step',
           a.get('numbersShown', 0) >= 1 and d.get('numbersAll', 0) >= 2 and d.get('numbersShown') == 0 and d.get('workflow') == 'map-your-data' and not a.get('workflow')
-          and bool(d.get('title')) and d['title'] + '.' == d.get('where') and d['title'].startswith('Step 2 of ') and 'Elenchos' in d['title']
+          and bool(d.get('title')) and d['title'] + '.' == d.get('where') and d['title'].startswith('Step 2 of ') and d['title'].endswith(': Check the table')
           and bool(p.get('title')) and p['title'] + '.' == p.get('where') and p['title'].startswith('Step 1 of '),
           {'numbers before': a.get('numbersShown'), 'numbers in the workflow': [d.get('numbersShown'), d.get('numbersAll')], 'title': [p.get('title'), d.get('title')], 'where': [p.get('where'), d.get('where')]} | err(r))
     def boxes_match(x):

@@ -65,7 +65,7 @@ test('the WHG verdict in plain words: how many would be accepted, and for the re
   const o = outcome(whgReport(12, [['no-kind', 1, ['Nowhere Known (https://example.org/place/6)']]]));
   assert.equal(o.kind, 'whg'); assert.equal(o.tone, 'warn');
   assert.equal(o.head, '11 of 12 places would be accepted by WHG; 1 would be refused:');
-  assert.deepEqual(o.reasons, [{ words: '1 place: each has no kind of place; WHG needs one (a type, or a feature class).',
+  assert.deepEqual(o.reasons, [{ words: '1 place has no kind of place; WHG needs one (a type, or a feature class).',
     remedy: 'To have them accepted, give each a kind of place (in a table, a column of types, in words or as Getty AAT identifiers, or of GeoNames feature classes), and convert again.',
     examples: ['Nowhere Known (https://example.org/place/6)'] }]);
   assert.equal(o.scope, "This is WHG's schema for Linked Places Format v2, as copied into these tools on 18 November 2026; WHG also tests the shape of each location, which is not done here.");
@@ -93,6 +93,7 @@ test('every reason WHG can refuse a place for is said in plain words from the re
     const o = outcome(whgReport(3, [[code, 2, ['X (x)']]]));
     assert.equal(o.reasons.length, 1, code);
     assert.equal(o.reasons[0].words, `2 places: each ${WHG_PROBLEMS[code].each}.`, code);
+    assert.equal(outcome(whgReport(3, [[code, 1, ['X (x)']]])).reasons[0].words, `1 place ${WHG_PROBLEMS[code].each}.`, code);
     assert.doesNotMatch(o.reasons[0].remedy, /^Nothing is made up/, code);
   }
 });

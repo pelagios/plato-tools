@@ -74,7 +74,7 @@ export function outcome(report) {
   if (verdict) {
     const reasons = (report.items || []).filter((i) => /^whg-/.test(i.kind) && refusal(i.message)).map((i) => {
       const r = refusal(i.message);
-      return { words: `${places(i.count)}: each ${r.reason}.`, remedy: r.remedy, examples: (i.examples || []).map(String) };
+      return { words: i.count === 1 ? `1 place ${r.reason}.` : `${places(i.count)}: each ${r.reason}.`, remedy: r.remedy, examples: (i.examples || []).map(String) };
     });
     const total = report.counts?.places || 0, refused = verdict.severity === 'warning' && total ? Math.min(verdict.count, total) : 0;
     const [said, ...rest] = verdict.message.split(/(?<=\.) (?=This is WHG's schema)/);

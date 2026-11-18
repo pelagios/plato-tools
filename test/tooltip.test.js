@@ -48,12 +48,11 @@ test('the pages give no element a title attribute, and their tooltips are there 
   const index = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   // Only the document's own <title>.
   assert.deepEqual(titles(index).map((m) => m[0]), ['<title>']);
-  assert.equal(tipsIn(index).length, 12);   // the ten tools' names, Methodos's and Peripleo's (planned) included, and the two headings that name a tool beside its plain name (Find your workflow, Map)
+  assert.equal(tipsIn(index).length, 10);   // the ten tools' names, Methodos's and Peripleo's (planned) included
   // A tool's own name, small beside its plain one, says first what it is, then why it is called that.
   assert.ok(tipsIn(index).some((t) => t.startsWith('Methodos: the tool that does this. μέθοδος')));
   assert.ok(tipsIn(index).some((t) => t.startsWith('περιπλέω')));
   assert.ok(tipsIn(index).some((t) => t.startsWith('Elenchos: the tool that does this. ἔλεγχος')));
-  assert.deepEqual(tipsIn(index).filter((t) => /^[A-Z][a-z]+: the tool that does this$/.test(t)), ['Methodos: the tool that does this', 'Chora: the tool that does this']);
   // Chora's own controls are in what it puts into its root, in its module (src/chora/app.js).
   assert.deepEqual(tipsIn(readFileSync(new URL('../src/chora/app.js', import.meta.url), 'utf8')).slice(0, 1), ['Draw a point']);
   assert.match(index, /<a class="dev-badge" href="https:\/\/github.com\/pelagios\/plato-tools\/issues" data-tip-template="dev-tip">Experimental<\/a>/);
