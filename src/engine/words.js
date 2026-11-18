@@ -1195,7 +1195,7 @@ export const LOOKUP_WORDS = {
   },
   /** The places a lookup takes, as the options name them. */
   choices: {
-    unmatched: 'places without candidates from the other dataset', all: 'all places',
+    unmatched: 'places with no candidates yet', all: 'all places',
     pending: 'places not yet looked up, or not answered', unlinked: 'places not yet linked to the gazetteer',
     nolink: 'places without a gazetteer link',
   },
