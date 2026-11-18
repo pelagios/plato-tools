@@ -493,6 +493,7 @@ export async function* genericSource(given, rep, options = {}, defaultBase = 'ht
     return { events, contained };
   };
   let standIn = false;
+  const idAt = new Map();   // an address -> the id and row that first gave it, to say when ids are merged
   const mint = (id) => { if (!options.base && !standIn) { standIn = true; report('generic-stand-in-base', base); } return minted.place(id); };
   // Each id met, with the number of its row (a number, not the row, so that a large file's ids are
   // all that is kept).
@@ -518,6 +519,12 @@ export async function* genericSource(given, rep, options = {}, defaultBase = 'ht
     // The groups are keyed on the source's own headings, so they read the row as given.
     const looked = spell?.apply(r.row, a.attestation, nameColumn);
     if (byAddress && a.address) {
+      // Rows with different ids that share an address are read as one place: said, with the example.
+      if (a.id !== undefined) {
+        const first = idAt.get(a.address);
+        if (first === undefined) idAt.set(a.address, { id: a.id, where: r.where });
+        else if (first.id !== a.id) report('generic-address-merges-ids', `${r.where} (id ${a.id}) and ${first.where} (id ${first.id}) both give ${a.address}`);
+      }
       out++;
       const { events, contained } = regionsOf(a);
       yield* events;

@@ -93,6 +93,7 @@ export const GENERIC_KINDS = {
   'address-not-a-place': 'loss',
   'generic-id-shape': 'loss',
   'generic-same-id-empty': 'loss',
+  'generic-address-merges-ids': 'warning',
   'generic-feature-key': 'loss',
   'generic-not-feature': 'loss',
   'generic-csv-extra-cells': 'loss',
@@ -288,6 +289,10 @@ export function guessColumns(headers, sampleRows = [], headerText = {}, { ownGeo
   const norm = (h) => normaliseHeader(Object.hasOwn(headerText, h) ? headerText[h] : h);
   // The column whose heading says outright that it holds the name, if there is one.
   const named = headers.find((h) => h !== FEATURE_ID && BY_HEADING.get(norm(h)) === 'name');
+  // A table with a column of ids names its places already: a heading that only ENDS in uri/url/iri
+  // (title_uri, source_url: WHG's LP-TSV gives where the NAME was found there, one value for many
+  // places) is then not the place's address, which would make every row sharing it one place.
+  const hasIdColumn = headers.some((h) => h === FEATURE_ID || BY_HEADING.get(norm(h)) === 'id');
   for (const h of headers) {
     const n = norm(h);
     let field = h === FEATURE_ID ? 'id' : BY_HEADING.get(n);
@@ -297,6 +302,7 @@ export function guessColumns(headers, sampleRows = [], headerText = {}, { ownGeo
       if (named !== undefined) { field = 'note'; reason = `the heading "${h}" could be the place's name, but the column "${named}" is read as the name, so it is kept in the notes`; }
       else if (wordy(values(h))) { field = 'name'; reason = `the heading "${h}" reads as ${FIELD_WORDS.name}`; }
     }
+    if (!field && ADDRESS_SUFFIX.test(n) && !GAZETTEER_PREFIX.test(n) && hasIdColumn) { field = 'note'; reason = `the heading "${h}" ends like a web address, but the table has a column of ids, so it is kept in the notes (it is probably where something was found, not the place's own address; to read it as the address, name the column "uri" or "url")`; }
     if (!field && (GAZETTEER_PREFIX.test(n) || ADDRESS_SUFFIX.test(n))) { field = 'address'; reason = `the heading "${h}" reads as a web address`; }
     const vs = values(h);
     const kind = !field && h !== FEATURE_ID ? regionKind(n) : undefined;

@@ -16,6 +16,10 @@ the commit of PLATO the tools are checked against is pinned in `package.json`.
 
 ## [Unreleased]
 
+### Fixed
+
+- A table with a column of ids no longer reads a heading that only ends like an address (`title_uri`, `source_url`) as the place's web address. WHG's own LP-TSV template gave 100 rows as 79 places, because 22 rows share the URL of the source where the name was found. Such a column is kept in the notes; a column named exactly `uri` or `url`, or after a gazetteer, is still the address. Rows with different ids that do share a real address are now reported as merged, naming both rows (#42).
+
 ### Changed
 
 - **Links to PLATO's guide and specification name https://plato.pelagios.org/**, in the page, the README and
