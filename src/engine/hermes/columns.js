@@ -22,6 +22,7 @@ import { isAbsoluteIri } from '../../lib/context.js';
 import { expandLpf, LPF_PREFIXES, FCLASS, GN_CLASS } from '../../formats/lpf.js';
 import { placeAddress, addressNote, addressFromPattern, patternProblem, patternId, GAZETTEER_PATTERNS } from './addresses.js';
 import { withinNote } from './within.js';
+import { countryOf } from '../countries.js';
 import { parseGridRef, gridRefToWgs84, looksLikeGridRef, isMissingMarker } from './gridref.js';
 
 /** What each field of the mapping means, and whether one column only may be mapped to it. */
@@ -122,6 +123,7 @@ export const GENERIC_KINDS = {
   'generic-mapping': 'error',
   'generic-within-same-level': 'warning',
   'generic-within-no-base': 'warning',
+  'generic-country-unresolved': 'warning',
   'generic-split-extra-parts': 'loss',
   'generic-nothing-converted': 'error',
   'generic-features-not-list': 'error',
@@ -227,8 +229,12 @@ const FIELD_WORDS = {
 // (whg3's reconciliation.js, ADMIN_RANK: country 0, region 10, county 20, district 30, hundred 40,
 // diocese 42, deanery 43, parish 45), so that a district sits above a hundred. The rank only orders
 // the guess: the levels are positional (within.js), the "within" columns numbered 1 (the widest) to n.
-// A country column is the widest region; it stays a "within" level here (a gazetteer lookup may send
-// it as a country filter; that is Krisis's to decide, not the reader's).
+// A country column is the widest region; it stays a "within" level here. Its value is ALSO read as a
+// country hint for a gazetteer lookup (applyColumns, `countryHint`; Stephen, 18 November 2026): where it
+// names one present-day country (countries.js), that country's code rides on the reader's event beside
+// `within`, for Krisis to rank a lookup's candidates by. It is a hint and not an attested fact: it is
+// never written as the place's `ccodes` (a "Country" column often gives the present-day country of a
+// historical place, and `ccodes` is the role of a column of codes), and Krisis never sends it as a filter.
 const REGION_KINDS = [
   { rank: 0, words: 'a country', test: /^(country|nation)(name|label)?$/ },
   { rank: 10, words: 'a region, state or province', test: /^(region|state|province|land)(name|label)?$/ },
@@ -244,6 +250,12 @@ const REGION_KINDS = [
 // GeoNames' and gazetteers' administrative levels (admin1, adm2): level 0 is the country, each next
 // level one narrower, on the same ranks (adm1 a region, adm2 a county, adm3 a district, adm4 a hundred).
 const ADMIN_LEVEL = /^adm(?:in)?([0-4])(name|label)?$/;
+/**
+ * Whether a heading names a country by its name, unambiguously: country, nation, country_name, Country
+ * label. Not adm0 (a code as often as a name), nor a heading that only may hold one (state, land): only
+ * such a column's values are read as a lookup's country hint.
+ */
+export const isCountryHeading = (h) => REGION_KINDS[0].test.test(normaliseHeader(h));
 /** The kind of region a normalised heading names, as { rank, words }, or undefined. */
 function regionKind(n) {
   const a = ADMIN_LEVEL.exec(n);
@@ -822,6 +834,9 @@ export function geometryToPlato(g, report = () => {}, where = '') {
  * that had a value; `matches` ([{ iri, column }]) the web addresses a "matches" column gives for the
  * same place, for the caller to write as identities of the place once it has its address (a row with
  * neither an address nor an id keeps them in its notes, and that is reported), and
+ * `countryHint` ({ code, name }: the one present-day country its country column names, `name` as the
+ * table writes it; a lookup's hint, never written into PLATO; a value that names no one country is
+ * reported and gives none), and
  * `ccodes` its country codes, for the place's record (kept in the notes instead, and reported, for
  * a row about an address: `idAsNote`). `where` says which row, for the report; `fileName` is the file, cited as the
  * source when no source column gives one; `geometry` is a GeoJSON feature's own geometry.
@@ -831,7 +846,7 @@ export function geometryToPlato(g, report = () => {}, where = '') {
  */
 export function applyColumns(row, mapping, { where = '', report = () => {}, fileName = 'the file', geometry, idAsNote = false, patterns = {}, levels = {}, from = {}, withinNote: noteWithin = true } = {}) {
   let name, id, idCol, address, addressFrom, addressText, addressLost = false, language, languageCol, date, start, end, wkt, lat = '', lon = '', geomCell;
-  const alternatives = [], types = [], sources = [], notes = [], skipped = [], within = [];
+  const alternatives = [], types = [], sources = [], notes = [], skipped = [], within = [], countries = [];
   const classes = [], aats = [], matches = [], ccodes = [], ccodeCells = [];
   let gridCell;
   const note = (col, v) => notes.push(`${col}: ${v}`);
@@ -910,7 +925,15 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
       case 'end': if (ISO_OR_YEAR.test(pad(v))) end = pad(v); else report('generic-date-invalid', `${where}, ${col}: ${v}`); break;
       case 'skip': skipped.push(col); break;
       // A region the place lies in, at its level (a split column's part names the column it came from).
-      case 'within': if (Object.hasOwn(levels, col)) { within.push({ level: levels[col], value: v, column: Object.hasOwn(from, col) ? from[col] : col }); break; } note(col, v); break;
+      case 'within':
+        if (!Object.hasOwn(levels, col)) { note(col, v); break; }
+        within.push({ level: levels[col], value: v, column: Object.hasOwn(from, col) ? from[col] : col });
+        // A country column's value, as a lookup's country hint (not a part of a split cell: its heading names no country).
+        if (!Object.hasOwn(from, col) && isCountryHeading(col)) {
+          const c = countryOf(v);
+          if (c) countries.push({ code: c.code, name: v, column: col }); else report('generic-country-unresolved', `${where}, ${col}: ${v}`);
+        }
+        break;
       default: note(col, v);
     }
   }
@@ -945,6 +968,10 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
   // place for them yet; the reader's event carries them, within.js).
   // `withinNote` false: the reader writes them as ContainedIn attestations instead (generic.js).
   within.sort((a, b) => a.level - b.level);
+  // The country hint: the one country the row's country columns name. Two that name different countries give none.
+  const hintCodes = new Set(countries.map((c) => c.code));
+  if (hintCodes.size > 1) report('generic-country-unresolved', `${where}: ${countries.map((c) => `${c.column}: ${c.name}`).join(', ')}`);
+  const countryHint = hintCodes.size === 1 ? { code: countries[0].code, name: countries[0].name } : undefined;
   if (within.length && noteWithin) notes.push(withinNote(within, name || alternatives[0]));
   if (address && addressFrom) notes.push(addressNote(addressFrom));
 
@@ -999,7 +1026,7 @@ export function applyColumns(row, mapping, { where = '', report = () => {}, file
     citations: cited.map((c) => clean({ ...c })),
     notes: notes.join('\n') || undefined,
   });
-  return { label: name || alternatives[0], name, id, address, addressText, addressLost, attestation, skipped, ...(within.length ? { within } : {}),
+  return { label: name || alternatives[0], name, id, address, addressText, addressLost, attestation, skipped, ...(within.length ? { within } : {}), ...(countryHint ? { countryHint } : {}),
     ...(linksMatches && matches.length ? { matches: matches.map(({ iri, column }) => ({ iri, column })) } : {}), ...(carriesCcodes && ccodes.length ? { ccodes } : {}) };
 }
 

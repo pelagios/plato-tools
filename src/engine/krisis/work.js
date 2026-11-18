@@ -10,7 +10,9 @@
 //     subjects: { title, uri?, titleFrom?, uriFrom?, files: [{ name, size, sha256 }] } (uriFrom 'base':
 //     the uri is the base address its candidates were exported for, the dataset having none of its own), others: { title, uri?, titleFrom?, files },
 //     (titleFrom: 'gazetteer', 'given' by the person matching, or 'file-name' when neither gave one)
-//     places: { <subject place IRI>: { label, names, point: [lon, lat] | null, ccodes?, types? } },
+//     places: { <subject place IRI>: { label, names, point: [lon, lat] | null, ccodes?, countryHint?, types? } },
+//       (countryHint { code, name }: the country a table's country column names, by which a lookup orders
+//       its candidates when the place has no ccodes; never published, never sent: lookup.js hintOf)
 //     candidates: [{ id, candidate_source, candidate_candidate, similarity_score, distance_km: number | null,
 //       candidate_status: 'suggested' | 'confirmed' | 'rejected', generated_at?, algorithm_version?, match_parameters?,
 //       rule?: 'qualifier', qualifier?: 'Chipping' (only the qualifier rule suggested it, and by which qualifiers; from krisis-names 7),

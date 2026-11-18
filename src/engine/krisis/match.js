@@ -190,6 +190,12 @@ function reader(side, rep, word, standIns = new Set()) {
     // Hermes), else what its PLATO says (its ContainedIn, read back once the regions are known). A record
     // whose entityIdentifier is a containerKey may be a region itself: it is one if a place lies in it.
     if (!side.chains.has(iri) && Array.isArray(ev?.within) && ev.within.length) side.chains.set(iri, ev.within.map((c) => ({ level: c.level, value: c.value })));
+    // The country a table's country column names for the place (hermes/columns.js, countryHint): a lookup's
+    // hint (lookup.js rankGazetteer), not the place's `ccodes`. Rows of one place that name two countries give none.
+    if (typeof ev?.countryHint?.code === 'string') {
+      const had = side.hints.get(iri), h = ev.countryHint;
+      side.hints.set(iri, had === undefined || (had && had.code === h.code) ? (had || { code: h.code, name: typeof h.name === 'string' ? h.name : h.code }) : null);
+    }
     const up = containedIn(rec);
     if (up !== undefined && !side.containedIn.has(iri)) side.containedIn.set(iri, up);
     if (asContainerKey(rec.entityIdentifier)) side.maybeRegions.set(iri, lightRegion(rec, up));
@@ -297,7 +303,7 @@ export function regionsOf(places, chains, minted = new Map()) {
 
 async function readSide(input, word, options, env, rep, progress, tap) {
   const side = { title: input.files[0]?.name || 'Untitled dataset', titleFrom: 'file-name', uri: undefined, places: new Map(), links: [], withdrawals: new Map(), unaddressed: 0,
-    regions: new Map(), chains: new Map(), containedIn: new Map(), maybeRegions: new Map() };
+    regions: new Map(), chains: new Map(), hints: new Map(), containedIn: new Map(), maybeRegions: new Map() };
   // A table of places (CSV, plain GeoJSON) is read by the mapping of its columns chosen for it (Hermes),
   // given for the subjects, the dataset chosen first; the other dataset's columns are guessed.
   const columns = word === 'subjects' ? options.columns : undefined;
@@ -464,8 +470,10 @@ async function matching({ subjects, others, options }, env) {
  * match() reads them. options: base (spreadsheet tables), columns (the mapping of a table of places'
  * columns, as match() takes it). Returns { report, subjects, places,
  * incomplete? }: `subjects` the dataset as a work file records it ({ title, uri?, files }), `places`
- * [{ iri, label, names, point, ccodes?, types?, identities: { linked: [IRI], denied: [IRI] } }] in the
+ * [{ iri, label, names, point, ccodes?, countryHint?, types?, identities: { linked: [IRI], denied: [IRI] } }] in the
  * dataset's order, `identities` what the dataset currently says of the place (identities.js).
+ * `countryHint` ({ code, name }) is the one country a table's country column names for the place: a lookup's
+ * hint for ranking (lookup.js), never the place's `ccodes`, and never sent as a filter.
  * Krisis: region review. A place in regions also has `chain` ([{ level, value }], widest first),
  * `within` (its narrowest region's key) and `level`; `regions` is regionsOf()'s list. The regions
  * generic.js mints (a table with a base address), and the records of a PLATO dataset that places lie
@@ -491,6 +499,7 @@ async function gathering({ subjects, options }, env) {
   // Krisis: region review. Each place's chain and narrowest region; the regions, level by level.
   const { regions, placeWithin } = regionsOf(side.places, side.chains, side.regions);
   const places = [...side.places].map(([iri, p]) => ({ iri, ...p, ...(side.chains.has(iri) ? { chain: side.chains.get(iri), ...placeWithin.get(iri) } : {}),
+    ...(side.hints.get(iri) ? { countryHint: side.hints.get(iri) } : {}),
     identities: { linked: [...(known.get(iri)?.linked || [])], denied: [...(known.get(iri)?.denied || [])] } }));
   rep.counts = { subjects: places.length, unaddressed: side.unaddressed, ...(regions.length ? { regions: regions.length } : {}) };
   progress({ phase: 'done', places: places.length, elapsedMs: Date.now() - t0 });

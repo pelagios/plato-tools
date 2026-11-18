@@ -12,6 +12,11 @@
 //
 //   event.within = [{ level, value, column }, …]   widest first (ascending level); empty cells
 //                                                   skipped; values trimmed; no key when empty.
+//
+// Beside it, `event.countryHint = { code, name }` when a column headed as a country (columns.js,
+// isCountryHeading) names one present-day country in the row: its ISO 3166-1 alpha-2 code and the name
+// as the table writes it. A gazetteer lookup orders its candidates by it (krisis/lookup.js); it is not a
+// statement of the dataset, so it too rides on the event only and is never a key of PLATO JSON.
 
 /** PLATO's relation type for a place lying within another (plato:ContainedIn, aligned with gvp:broaderPartitive). */
 export const CONTAINED_IN = 'https://w3id.org/plato#ContainedIn';

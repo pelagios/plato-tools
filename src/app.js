@@ -34,7 +34,7 @@ import { runLookup, planLookup, gazetteerPermission, permittedFetch, serviceOf, 
 import { mountWikidata } from './krisis/wikidata-panel.js';
 import { candidateSource } from './engine/krisis/identity.js';
 // Krisis: region review (Methodos #28, stages 3 and 4), run on this thread as the lookup is, through the same shared WHG lookup.
-import { runLevel, runPlaces } from './engine/krisis/lookup.js';
+import { runLevel, runPlaces, countryCheck } from './engine/krisis/lookup.js';
 import { seedRegions, decideRegion, settleRegion, undo as undoRegion, selectLevel, matchesOf, lastQueryOf } from './engine/krisis/regions.js';
 import { REGION_PAGE as RP, REGION_WORDS } from './engine/words.js';
 import { levelNames, levelLabel, navigator as levelNavigator, firstOpen, chainOf, placeChain, constraintLine, notesOf, relaxOptions, costOf, levelRegions, unsettledOf, placesToLook, lockedPlaces, wouldClear, priorOf, restorePrior, nameOf, regionDomId, certaintyChoices, CERTAINTY_DEFAULT, regionMatchOptions } from './krisis/region-page.js';
@@ -2415,6 +2415,11 @@ function kindHtml(c) {
   return `<p class="kind" data-kind="${types.length ? 'known' : 'unknown'}" data-fit="${fit.fit}">${escapeHtml(LW.kindLabel)} `
     + (items.length ? items.join(', ') : `<span class="kind-unknown">${escapeHtml(LW.kindUnknown)}</span>`) + '</p>' + why;
 }
+/** Whether the candidate is in the country the place's table gives (lookup.js countryCheck); nothing when the table gives none. */
+function countryHtml(c) {
+  const k = countryCheck(work.places[c.candidate_source], c);
+  return k ? `<p class="gazetteer country-hint${k.agrees === false ? ' warn' : ''}" data-agrees="${k.agrees === null ? 'unknown' : k.agrees}">${escapeHtml(LW.country(k))}</p>` : '';
+}
 function gazetteerHtml(c) {
   const l = lookupOf(c.lookup), g = c.gazetteer || {}, service = l ? shortName(l.service) : LW.whg;
   const km = l?.parameters?.maxDistanceKm ?? 50;
@@ -2422,6 +2427,7 @@ function gazetteerHtml(c) {
   return kindHtml(c) + (c.far ? `<p class="far">${escapeHtml(LW.far(km))}</p>` : '')
     + (LW.figures(g, service) ? `<p class="gazetteer">${escapeHtml(LW.figures(g, service))}</p>` : '')
     + (g.description ? `<p class="gazetteer">${escapeHtml(LW.described(service, g.description))}</p>` : '')
+    + countryHtml(c)
     + `<p class="licence${LW.licenceWarns(lic) ? ' warn' : ''}">${escapeHtml(LW.licence(lic))}</p>`;
 }
 /** The sources the attestations would cite, one per source (identity.js candidateSource, as Finish uses). */

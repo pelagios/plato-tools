@@ -527,7 +527,8 @@ export async function* genericSource(given, rep, options = {}, defaultBase = 'ht
     const a = applyColumns(row, expanded.mapping, { where: r.where, report, fileName: file.name, geometry: r.geometry, idAsNote: byAddress, patterns, levels: expanded.levels, from: expanded.from, withinNote: !containment });
     for (const c of a.skipped) skipped.add(c);
     // The regions the row's place lies in, widest first, on the event and never in its value (within.js).
-    const w = a.within ? { within: a.within } : {};
+    // With them, the country a country column names (columns.js, countryHint): a lookup's hint, never PLATO.
+    const w = { ...(a.within ? { within: a.within } : {}), ...(a.countryHint ? { countryHint: a.countryHint } : {}) };
     // The groups are keyed on the source's own headings, so they read the row as given.
     const looked = spell?.apply(r.row, a.attestation, nameColumn);
     if (byAddress && a.address) {

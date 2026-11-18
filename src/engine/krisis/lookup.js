@@ -14,6 +14,11 @@
 //   and a wrong value silently drops the right place (WHG's country codes are patchy), so none is sent
 //   unless asked for: `countries` sends the place's own country codes, `nearKm` a box of that many
 //   kilometres about its point (which sends its coordinates).
+// - The country a table's country column names for a place (its `countryHint`, hermes/columns.js) is NEVER
+//   sent: WHG's reconcile API has no boost, only filters, and a filter drops the right place when a
+//   record's country is missing or the table gives a present-day country for a historical place. It is
+//   used here alone, to order what came back (rankGazetteer), and it drops nothing. `countries` (the
+//   filter, asked for by its own checkbox) sends the place's own `ccodes` only, never the hint.
 // - To WHG only: each name's language (whg.js A13), from the name's own tag, else the dataset's language
 //   (`lang`), else none, never "und"; and, for the regions of a region review, `area_only` (A12), so that
 //   a region is matched only to a record with an outline, which can scope a lookup within it.
@@ -21,7 +26,9 @@
 //   to the best in its own answer (the top is always about 100, however bad), and its confidence
 //   measures the name only. So the order is by distance (a candidate further than maxDistanceKm kept and
 //   marked `far`, not dropped), a candidate of a kind that conflicts with the place's (kinds.js) after the
-//   rest of its group, then whether the countries agree, then Krisis's own name similarity (names.js, the
+//   rest of its group, then whether the countries agree (the place's own `ccodes`; for a place with none,
+//   the country its table gives, which only promotes a candidate whose name matches about as well as the
+//   best: HINT_SIMILARITY_BAND), then Krisis's own name similarity (names.js, the
 //   similarity_score of every candidate), then the service's order; the place's own kind breaks the tie
 //   between records of one place (within 2 km of each other). The service's own figures are kept apart, under
 //   `gazetteer`.
@@ -66,6 +73,13 @@ export const LOOKUP_ALGORITHM = 'krisis-lookup 1';
 // disagreeKm: a place whose own address is a gazetteer's (a TEI ref, a Recogito link) is flagged for the reviewer when
 // WHG's best candidate is further than this from the record that address names (Stephen, 12 October 2026: 25 km).
 export const LOOKUP_DEFAULTS = { limit: 10, maxDistanceKm: 50, allNames: false, countries: false, nearKm: null, variants: false, lang: null, areaOnly: false, scope: null, disagreeKm: 25 };
+/**
+ * How far below the best name similarity among a place's candidates one in the country its table gives
+ * may be, and still be put before the candidates that are not: "comparable". A country hint is weaker
+ * than a place's own country codes (the table's maker wrote a name, perhaps of a present-day country),
+ * so it breaks near-ties between names and never lifts a poor name match over a good one.
+ */
+export const HINT_SIMILARITY_BAND = 0.2;
 /** Which places a lookup takes (selectPlaces). */
 export const PLACE_CHOICES = ['unmatched', 'all', 'pending', 'unlinked', 'nolink'];
 /** How many queries the preview shows exactly as they would be sent. */
@@ -283,6 +297,8 @@ function namesToSend(place, allNames, variants = false) {
  * `chunks` the places in groups whose queries fill one batch (a place's queries are never split
  * across groups, so a place is answered all at once); `preview` { places, queries, requests,
  * allNames, filters: ['countries'|'near'], sendsCoordinates, nearKm, withoutCountries, withoutPoint,
+ * countryHints (only when some: the places looked up with a country from their table and no country codes
+ * of their own, whose candidates are ordered by it; it is in no query),
  * withoutName (places with no name to send, which are left out: `places` does not count them),
  * withoutLanguage (WHG's queries sent with no language), lang (the dataset's, as sent, or null), areaOnly, scope ({ parts,
  * keys, whereYielded, region }, or null: what of the Scope is sent, and to how many places its Where gave way), first:
@@ -296,12 +312,13 @@ export function planQueries(places, options = {}) {
   // Scope (scope.js), to WHG only: what the workflow's (or the tab's) Scope adds to each query.
   const scope = whg && o.scope && !isEmptyScope(o.scope) ? normaliseScope(o.scope) : null;
   const queries = [], chunks = [];
-  let chunk = null, withoutCountries = 0, withoutPoint = 0, withoutName = 0, withoutLanguage = 0, looked = 0, whereYielded = 0;
+  let chunk = null, withoutCountries = 0, withoutPoint = 0, withoutName = 0, withoutLanguage = 0, looked = 0, whereYielded = 0, countryHints = 0;
   const scopeParts = new Set(), scopeKeys = new Set();
   for (const place of places) {
     const names = namesToSend(place, o.allNames, o.variants);
     if (!names.length) { withoutName++; continue; }
     looked++;
+    if (hintOf(place)) countryHints++;
     const params = filtersOf(place, o);
     if (o.countries && !params?.countries) withoutCountries++;
     if (o.nearKm > 0 && params?.radius === undefined) withoutPoint++;
@@ -330,6 +347,7 @@ export function planQueries(places, options = {}) {
     places: looked, queries: queries.length, requests, allNames: !!o.allNames, variants: !!o.variants, limit: o.limit, filters,
     sendsCoordinates: queries.some((q) => q.params?.radius !== undefined), withoutCountries, withoutPoint, withoutName, withoutLanguage, lang: datasetLang, areaOnly,
     nearKm: o.nearKm > 0 ? Math.min(MAX_RADIUS_KM, o.nearKm) : null,
+    ...(countryHints ? { countryHints } : {}),
     ...(scope ? { scope: { parts: SCOPE_PARTS.filter((x) => scopeParts.has(x)), keys: SCOPE_KEYS.filter((x) => scopeKeys.has(x)), whereYielded, region: areaOnly } } : {}),
     service: o.service, first: queries.slice(0, PREVIEW_QUERIES).map(sent),
   };
@@ -350,6 +368,29 @@ export function placeQuery(place, options = {}) {
 }
 
 // ---- ranking -----------------------------------------------------------------------------------------------
+const upper = (x) => String(x).trim().toUpperCase();
+/**
+ * The country hint a place is ranked by: { code, name } (the code in capitals; `name` as its table writes
+ * it), or null. A place with country codes of its own has none: what the dataset states of the place
+ * comes before what a column's name suggested.
+ */
+export function hintOf(place) {
+  const h = place?.countryHint;
+  if (!h || typeof h.code !== 'string' || !/^[a-z]{2}$/i.test(h.code.trim()) || (Array.isArray(place.ccodes) && place.ccodes.length)) return null;
+  return { code: upper(h.code), name: typeof h.name === 'string' && h.name.trim() ? h.name.trim() : upper(h.code) };
+}
+/**
+ * What the review says of a candidate and the country the place's table gives: { name, code, agrees,
+ * theirs }, `agrees` true (the candidate's countries include it), false (they do not; `theirs` are its
+ * countries) or null (the gazetteer records no country for it); or null when the place has no hint.
+ * `place` and `candidate` as the work file keeps them (candidate.other.ccodes).
+ */
+export function countryCheck(place, candidate) {
+  const h = hintOf(place);
+  if (!h) return null;
+  const theirs = (candidate?.other?.ccodes || candidate?.ccodes || []).filter((x) => typeof x === 'string' && x.trim()).map(upper);
+  return { name: h.name, code: h.code, agrees: theirs.length ? theirs.includes(h.code) : null, theirs };
+}
 /**
  * The great-circle distance between two [lon, lat] points, in kilometres: match.js's distanceKm, not
  * imported from there because match.js brings in the pipeline, and a lookup runs on the page's thread.
@@ -378,28 +419,39 @@ export function typesOf(c) {
  * then by distance, whether the countries agree (yes, not known, no), Krisis's own name similarity, and the
  * service's order. The place's own kind (or a narrower one) is only a tiebreak, between candidates within
  * SAME_PLACE_KM (2 km) of each other: one place held by several sources. A place that says nothing of its
- * kind is ranked exactly as before the kinds were read (12 October 2026). Returns [{ candidate, similarity_score, distance_km,
+ * kind is ranked exactly as before the kinds were read (12 October 2026).
+ * The country hint (hintOf: a place with no country codes of its own, whose table names its country): a
+ * candidate in that country comes before the others at the same distance (for a table without
+ * coordinates, all of them), but only while its name matches about as well as the best of the place's
+ * candidates (within HINT_SIMILARITY_BAND). It promotes and never demotes or drops: a candidate in
+ * another country, or with no country, keeps its place among the rest, and `ccodes_agree` says which it
+ * is (which the bulk accept reads: guards.js leaves a candidate in another country to the reviewer). Returns [{ candidate, similarity_score, distance_km,
  * ccodes_agree: true|false|null, far, kind: 'match'|'other'|'unknown'|'conflict' }], nothing dropped.
  */
 const LETTERS_ONLY = compileQualifiers([]);
 export function rankGazetteer(place, candidates, { maxDistanceKm = LOOKUP_DEFAULTS.maxDistanceKm } = {}) {
   const mine = (place.names?.length ? place.names : [place.label]).filter(Boolean);
+  const hint = hintOf(place);
   const ranked = candidates.map((c, i) => {
     const theirs = [c.name, ...(c.altNames || [])].filter(Boolean);
     let best = 0;
     // Letters only, as before the qualifier lists (LOOKUP_ALGORITHM unchanged): the service has its own order.
     for (const a of mine) for (const b of theirs) best = Math.max(best, similarity(a, b, undefined, LETTERS_ONLY));
     const distance = Array.isArray(place.point) && Array.isArray(c.coords) ? round(distanceKm(place.point, c.coords), 1) : null;
-    const agree = place.ccodes?.length && c.ccodes?.length ? c.ccodes.some((x) => place.ccodes.includes(x)) : null;
+    const agree = place.ccodes?.length && c.ccodes?.length ? c.ccodes.some((x) => place.ccodes.includes(x))
+      : hint && c.ccodes?.length ? c.ccodes.some((x) => typeof x === 'string' && upper(x) === hint.code) : null;
     const kind = kindFit(place, c.kinds ?? typesOf(c)).fit;
     return { candidate: c, similarity_score: round(best, 3), distance_km: distance, ccodes_agree: agree, far: distance !== null && distance > maxDistanceKm, kind, order: c.answer_rank ?? i };
   });
-  const agreeKey = (x) => (x === true ? 0 : x === null ? 1 : 2);
+  // By the place's own country codes: agreeing, not known, disagreeing. By the hint: one in the country, its
+  // name about as good as the best, first; every other as it would be without the hint.
+  const bestName = hint ? Math.max(0, ...ranked.map((r) => r.similarity_score)) : 0;
+  const agreeKey = hint ? (x, r) => (x === true && r.similarity_score >= bestName - HINT_SIMILARITY_BAND ? 0 : 1) : (x) => (x === true ? 0 : x === null ? 1 : 2);
   // Beyond the greatest distance (or with no distance) last, as distance always put them; a conflicting kind
   // after the rest of its group; then as before the kinds were read: distance, countries, letters, the service's order.
   const beyond = (r) => Number((r.distance_km ?? Infinity) > maxDistanceKm), clash = (r) => Number(r.kind === 'conflict');
   ranked.sort((a, b) => beyond(a) - beyond(b) || clash(a) - clash(b)
-    || (a.distance_km ?? Infinity) - (b.distance_km ?? Infinity) || agreeKey(a.ccodes_agree) - agreeKey(b.ccodes_agree)
+    || (a.distance_km ?? Infinity) - (b.distance_km ?? Infinity) || agreeKey(a.ccodes_agree, a) - agreeKey(b.ccodes_agree, b)
     || b.similarity_score - a.similarity_score || a.order - b.order);
   // The place's own kind is only a tiebreak, between records of one place from several sources: in a run of
   // candidates within SAME_PLACE_KM of the run's first, one of the place's kind (or narrower) comes first.
@@ -426,6 +478,10 @@ export function newWork(subjects, { now = new Date().toISOString(), reviewer = n
 }
 const placeRecord = (p, work) => ({ label: p.label, names: p.names || [p.label], point: p.point ?? null, ...(p.ccodes ? { ccodes: p.ccodes } : {}), ...(p.types ? { types: p.types } : {}), ...(p.typeIds ? { typeIds: p.typeIds } : {}),
   ...(typeof p.within === 'string' && Object.hasOwn(work?.regions || {}, p.within) ? { within: p.within, level: p.level } : {}) });
+/** A place's country hint as the work file keeps it (countryHint: { code, name }), for the review to say what it ordered by. */
+const hintRecord = (p) => (p?.countryHint && typeof p.countryHint.code === 'string' ? { countryHint: { code: upper(p.countryHint.code), name: typeof p.countryHint.name === 'string' ? p.countryHint.name : upper(p.countryHint.code) } } : {});
+/** A looked-up place's hint, kept on its record in the work file: one just made, or one a local match made before (which reads none). */
+const keepHint = (work, p) => { if (p?.countryHint && Object.hasOwn(work.places, p.iri) && !work.places[p.iri].countryHint) Object.assign(work.places[p.iri], hintRecord(p)); };
 /** Is this key one of the review's regions (work.js, version 3), not a place? */
 const isRegionKey = (work, key) => Object.hasOwn(work.regions || {}, key);
 // placeholder (#21): a record whose every name is a cataloguing placeholder (placeholders.js), counted once per answer it was in.
@@ -440,6 +496,7 @@ export function startLookup(work, { service, parameters, plan, now = new Date().
   const queries = {};
   for (const p of plan.chunks.flatMap((c) => c.places)) {
     if (!isRegionKey(work, p.iri) && !Object.hasOwn(work.places, p.iri)) work.places[p.iri] = placeRecord(p, work);
+    if (!isRegionKey(work, p.iri)) keepHint(work, p);
     const mine = plan.queries.filter((q) => q.key[0] === p.iri);
     queries[p.iri] = { state: 'pending', sent: mine.map((q) => q.query), ...(p.constraint ? { constraint: storedConstraint(p.constraint) } : {}) };
     // Scope: which of its parts this place was sent under (scope.js), so that an empty answer can say why.
@@ -467,6 +524,7 @@ export function mergeAnswers(work, record, place, lists, { now = new Date().toIS
   const iri = place.iri, c = record.counts, q = record.queries[iri] || (record.queries[iri] = { state: 'pending', sent: lists.map((l) => l.key?.[1]).filter(Boolean) });
   // Krisis: region review. A region's answers are kept under its key, in `regions`, never as a place.
   if (!isRegionKey(work, iri) && !Object.hasOwn(work.places, iri)) work.places[iri] = placeRecord(place, work);
+  if (!isRegionKey(work, iri)) keepHint(work, place);
   // The service's word on a spatial filter (WHG's scope), kept; and a filter it could not apply that so
   // answered nothing (applied false, no candidates) FAILED CLOSED: not answered, never "no match".
   const scope = lists.find((l) => l.scope && typeof l.scope === 'object')?.scope;

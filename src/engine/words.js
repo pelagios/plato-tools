@@ -1139,6 +1139,7 @@ export const LOOKUP_WORDS = {
     if (p.lang) lines.push(`A name with no language of its own is sent as ${p.lang}, the dataset's language.`);
     if (p.withoutLanguage) lines.push(`${plural(p.withoutLanguage, 'query is', 'queries are')} sent with no language: the name has none of its own${p.lang ? '' : ', and no language is set for the dataset'}.`);
     if (p.sendsCoordinates) lines.push("The places' coordinates are sent.");
+    if (p.countryHints) lines.push(`${plural(p.countryHints, 'place has', 'places have')} a country from your table's country column. It is not sent, and leaves nothing out: candidates in that country are listed first when their names match about as well as the best.`);
     if (p.withoutCountries) lines.push(`${plural(p.withoutCountries, 'place has', 'places have')} no countries, and ${p.withoutCountries === 1 ? 'is' : 'are'} looked up without that filter.`);
     if (p.withoutName) lines.push(`${plural(p.withoutName, 'place has', 'places have')} no name (only a web address), and ${p.withoutName === 1 ? 'is' : 'are'} not looked up: an address is never sent as a name.`);
     if (p.withoutPoint) lines.push(`${plural(p.withoutPoint, 'place has', 'places have')} no coordinates, and ${p.withoutPoint === 1 ? 'is' : 'are'} looked up without the distance filter.`);
@@ -1226,6 +1227,13 @@ export const lookupPage = {
     return parts.length ? `${service}'s own figures: ${parts.join(', ')}. Neither says it is the same place.` : '';
   },
   described: (service, text) => `${service} describes it: ${text}`,
+  /**
+   * Whether a candidate is in the country the place's table gives (lookup.js countryCheck: { name, agrees,
+   * theirs }), '' when the table gives none. The country only ordered the candidates; none was left out.
+   */
+  country: (k) => (!k ? '' : k.agrees === true ? `In the country the table gives (${k.name}).`
+    : k.agrees === false ? `Not in the country the table gives (${k.name}): ${k.theirs.join(', ')}.`
+      : `The gazetteer records no country for it; the table gives ${k.name}.`),
   /** A candidate's kind of place (#20): its types, an AAT id by WHG's label for it, a source's code as a code; or not known. */
   kindLabel: 'Kind of place:',
   kindUnknown: 'type unknown',

@@ -810,9 +810,17 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
       // by place, the first each place's events give, and put back on its record's event when the place
       // is read back, for a sink that reads them.
       const withinByPlace = new Map();
+      // The country a table's country column names for the place (hermes/columns.js, countryHint), a lookup's
+      // hint, rides on the events too: kept when the place's rows give one country, dropped (null) when they give two.
+      const hintByPlace = new Map();
       const keepWithin = (ev) => {
         const iri = ev.type === 'attestation' ? ev.value?.about : ev.type === 'record' ? ev.value?.['@id'] : undefined;
-        if (typeof iri !== 'string' || withinByPlace.has(iri)) return;
+        if (typeof iri !== 'string') return;
+        if (typeof ev.countryHint?.code === 'string' && !ev.region) {
+          const had = hintByPlace.get(iri);
+          hintByPlace.set(iri, had === undefined || (had && had.code === ev.countryHint.code) ? (had || ev.countryHint) : null);
+        }
+        if (withinByPlace.has(iri)) return;
         const within = Array.isArray(ev.within) && ev.within.length ? { within: ev.within } : {};
         if (within.within || ev.region) withinByPlace.set(iri, { ...within, ...(ev.region ? { region: ev.region } : {}) });
       };
@@ -936,7 +944,7 @@ async function runChecked({ input, action, target, options = {} }, env, rep) {
         collectMembership(rec.attestations, rec['@id'], membership);
         figures.attestations(rec.attestations);
         if (fromGraph) cands.record(rec);
-        if (writer) await write({ type: 'record', value: rec, n, ...withinByPlace.get(e) });
+        if (writer) await write({ type: 'record', value: rec, n, ...withinByPlace.get(e), ...(hintByPlace.get(e) ? { countryHint: hintByPlace.get(e) } : {}) });
         beat('writing', { places: n });
       }
       for (const i of idrIds) {
