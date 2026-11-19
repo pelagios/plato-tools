@@ -3313,6 +3313,7 @@ def main():
             open_map_historical_checks(pw, url, tmp)
             open_map_workflow_checks(pw, url, tmp)
             site_layout_checks(pw, url, tmp)
+            dev_server_checks(pw)
     finally:
         stop(srv)
         stop_fixtures()
@@ -14457,6 +14458,38 @@ def serve_site(directory):
     srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(Pages, directory=str(directory)))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
+
+# The page as `npm run dev` serves it: each module on its own, as written, where the built page is one bundle. The
+# two differ in what a mistake costs. A `let` at the top of a module read before its line is reached (by a function
+# declared above it and called as the page starts) stops the module there, "Cannot access … before initialization";
+# the bundler writes such a `let` as a `var`, so the built page reads undefined and goes on, and every check of the
+# built page passes while the page a developer works on never starts (src/app.js, expertFold reading `methodos`,
+# November 2026). Not made against the deployed site (--url=): it is the source here that is served, not that site.
+def dev_server_checks(pw):
+    if REMOTE:
+        print('  (the page as the dev server serves it is not checked: it is the source here, not the deployed site)', flush=True); return
+    port = free_port()
+    srv = subprocess.Popen(['npx', 'vite', '--host', '127.0.0.1', '--port', str(port), '--strictPort'], cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
+    browser = None
+    def starts():
+        nonlocal browser
+        dev = f'http://127.0.0.1:{port}/'
+        for _ in range(120):
+            try: urllib.request.urlopen(dev, timeout=1); break
+            except Exception: time.sleep(0.5)
+        browser = pw.chromium.launch(headless=True)
+        page = browser.new_page()
+        errors = []; page.on('pageerror', lambda e: errors.append(str(e)[:200]))
+        page.goto(NOTOOLS if PROVE else dev)
+        ready = wait_state(page, lambda s: s.get('phase') == 'ready', 60, 'ready')
+        cards = page.evaluate("() => document.querySelectorAll('#toolbox .tool-link[data-tool]').length")
+        page.wait_for_timeout(500)             # an error thrown as the page starts has been reported by now
+        return ready.get('phase') == 'ready' and cards > 0 and not errors, {'errors': errors, 'phase': ready.get('phase'), 'cards': cards}
+    try:
+        attempt('The page as the dev server serves it (npm run dev), its modules unbundled, starts with no error and is ready', starts)
+    finally:
+        if browser: browser.close()
+        stop(srv)
 
 def site_layout_checks(pw, url, tmp):
     sites, servers = [], []

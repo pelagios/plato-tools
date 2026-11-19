@@ -59,6 +59,11 @@ const state = (window.__plato = { phase: 'loading' });
 let worker, files = [], input = null, targets = {}, busy = false;
 let chora = null;   // Chora, the map, once mounted (openChora, below): told the files chosen in step 1
 let runOp = null;   // the Methodos operation of the run under way (src/methodos/page.js), told when it ends
+// Methodos (mounted far below, mountMethodos). Declared here, above everything that runs as the page starts: chooseTool,
+// called then, reads it (expertFold), and a `let` read before its own line stops the module under the dev server, where
+// nothing is bundled (the built page, whose bundler writes it as a `var`, went on). Null until it is mounted, and while it
+// is being: onStep may be called before mountMethodos returns.
+let methodos = null;
 // The engine is ready (its first 'ready' message): a file Methodos chooses on load waits for it, or the
 // page's 'ready' would come after, and over, the file's detection. An engine that fails settles it too,
 // with false, so that nothing waits on it for ever.
@@ -1456,7 +1461,6 @@ const methodosStore = workflowStore();
 // Authorization header and nowhere else.
 const whgWorkbench = workbench({ fetch: (url, init) => permissions.fetch(url, { cat: 'collaborate', subj: 'whg', ...init }), token: () => permissions.token.get() });
 let scopeUi = null;   // Scope (Issue #33; src/scope-page.js), mounted below, once Methodos is
-let methodos = null;   // null while it is being mounted: onStep, below, may be called before it is returned
 let reviewOffered = null;   // the review kept in this browser that is offered as the page opens (reviewOffer, below), or null
 methodos = mountMethodos({
   banner: $('methodos-banner'), interview: $('methodos'), tracker: $('methodos-tracker'), tools: $('toolbox'), store: methodosStore,
