@@ -9,7 +9,8 @@ import { IDBFactory } from 'fake-indexeddb';
 import { readWork, serialiseWork, decide, flag, reviewProgress } from '../src/engine/krisis/work.js';
 import { PANEL } from '../src/lib/permission-words.js';
 import { REVIEW_KEPT } from '../src/engine/words.js';
-import { reviewKey, latestIn, sameWork, decidedOtherwise, recordOf, readRecord, onOpen, progressStore, DB, TAB, MOST } from '../src/lib/review-progress.js';
+import { reviewKey, latestIn, sameWork, decidedOtherwise, recordOf, readRecord, onOpen, progressStore, DB, TAB, MOST,
+  jsonPieces, recordSlowly, textOf, PART, PARTS, STORE, DB_VERSION, TAB_MOST, SLOWLY_FROM } from '../src/lib/review-progress.js';
 
 const A = (s) => `https://example.org/a/${s}`, B = (s) => `https://example.org/b/${s}`;
 const hex = (c) => c.repeat(64);
@@ -271,4 +272,169 @@ test(`the ${MOST} reviews last changed are kept between visits; the ones changed
   // One of the kept changed again is not one more: nothing else goes.
   await store.put({ ...records[2], at: '2026-11-03T09:00:00.000Z' });
   assert.equal((await store.get(records[3].key)).reviewed, 2);
+});
+
+// ---- a large review: written out in pieces, and kept in parts (measured in Chromium by e2e/review_autosave_scale.py) ----
+/** A review of `n` places, a candidate each, every one decided, and a lookup with a query for each: large where n is. */
+function large(n, { at = '2026-11-01T11:00:00Z' } = {}) {   // another review than fresh(): made at another time
+  const names = Array.from({ length: n }, (_, i) => `p${i}`);
+  return readWork(JSON.stringify({
+    krisis: 3, generated_at: at, algorithm_version: 'krisis-names 7', match_parameters: {},
+    subjects: { title: 'Mine', files: [{ name: 'mine.json', size: 10, sha256: hex('a') }] },
+    others: { title: 'Theirs', files: [{ name: 'theirs.json', size: 20, sha256: hex('b') }] },
+    places: Object.fromEntries(names.map((p) => [A(p), { label: `Place ${p} “quoted” \\ é`, names: [p], point: null }])),
+    regions: {}, lookups: [],
+    candidates: names.map((p, i) => ({ ...cand(`c${i}`, p, `${p}-there`), candidate_status: 'confirmed', note: 'a note, kept in the review only: '.repeat(4),
+      decision: { kind: 'match', decided_at: '2026-11-02T09:00:00Z', identityType: 'exactMatch' } })),
+    reviewer: null, cursor: 0,
+  }));
+}
+/** How many rows each store of the database holds. */
+async function rows(idb) {
+  const db = await new Promise((res, rej) => { const q = idb.open(DB); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+  try {
+    const count = (name) => new Promise((res, rej) => { const q = db.transaction(name).objectStore(name).count(); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+    return { version: db.version, reviews: await count(STORE), parts: await count(PARTS) };
+  } finally { db.close(); }
+}
+
+test('JSON in pieces: joined, the pieces are what JSON.stringify gives, whatever is in it; and of a large value no piece is long', () => {
+  const big = Object.fromEntries(Array.from({ length: 500 }, (_, i) => [`k${i}`, { n: i, s: 'x'.repeat(40) }]));
+  const values = [null, 0, -1.5, 'a "quoted" \\ string é\n', true, [], {}, [1, [2, [3, { a: [] }]]], { a: undefined, b: null, c: [undefined, () => 1, 2], d: { e: undefined } },
+    { few: { inner: big }, list: [{ deep: { deeper: big } }] }, Array.from({ length: 700 }, (_, i) => ({ i, t: [i, `${i}`] })), fresh(), decided(), large(300)];
+  for (const v of values) assert.equal([...jsonPieces(v)].join(''), JSON.stringify(v), JSON.stringify(v).slice(0, 60));
+  // A large review: thousands of pieces, the longest a small share of the whole (one candidate, one place), where the whole at once is one piece.
+  const w = large(3000), whole = JSON.stringify(w), pieces = [...jsonPieces(w)];
+  assert.ok(whole.length > 1_500_000, `the review is large (${whole.length} characters)`);
+  assert.ok(pieces.length > 6000, `in ${pieces.length} pieces`);
+  assert.ok(Math.max(...pieces.map((p) => p.length)) < 2000, `the longest piece is ${Math.max(...pieces.map((p) => p.length))} characters`);
+  // What is large inside something small is taken apart too: a lookup's queries, one for each place (a list of one lookup, as a work file has it).
+  const lookups = { lookups: [{ id: 'l1', queries: Object.fromEntries(Array.from({ length: 3000 }, (_, i) => [A(`p${i}`), { state: 'answered', sent: [`p${i}`], found: 1, added: 1 }])) }] };
+  const inside = [...jsonPieces(lookups)];
+  assert.equal(inside.join(''), JSON.stringify(lookups));
+  assert.ok(Math.max(...inside.map((p) => p.length)) < 500 && JSON.stringify(lookups).length > 200_000, 'no piece is the whole lookup');
+});
+
+test('a large review written out in pieces: the same review as at once, the page given turns meanwhile; given up when the review changes under it', async () => {
+  const w = large(SLOWLY_FROM); w.cursor = 7;
+  let turns = 0;
+  const slow = await recordSlowly(w, { name: 'large.krisis.json', at: AT, budget: 0, pause: async () => { turns++; } });
+  const once = recordOf(w, { name: 'large.krisis.json', at: AT });
+  assert.ok(turns > 100, `the page was given ${turns} turns`);
+  const but = ({ text, parts, ...rest }) => rest;
+  assert.deepEqual(but(slow), but(once), 'the same record but for its text: key, name, time, places reviewed');
+  assert.equal(slow.text, undefined);
+  assert.ok(slow.parts.length > 1 && slow.parts.every((p) => p.length < PART + 2000), `in ${slow.parts.length} parts of about ${PART} characters`);
+  assert.deepEqual(JSON.parse(textOf(slow)), JSON.parse(once.text), 'which joined are the work file');
+  assert.ok(textOf(slow).length < once.text.length, 'without the indentation');
+  const back = readRecord(slow, once.key);
+  assert.ok(sameWork(back.work, w) && back.work.cursor === 7 && back.reviewed === SLOWLY_FROM, 'and it reads back as the review it was made from');
+  // With the default pause (a real turn of the page), it is the same.
+  assert.deepEqual((await recordSlowly(large(50), { at: AT })).parts.join(''), `${JSON.stringify(large(50))}\n`);
+  // The review changes while the page has its turn (a decision undone): nothing is returned, at the first turn after it, not after the whole.
+  let after = 0;
+  const gone = await recordSlowly(w, { budget: 0, pause: async () => { if (++after === 3) w.candidates[0].decision = null; }, changed: () => w.candidates[0].decision === null });
+  assert.equal(gone, null);
+  assert.equal(after, 3, 'given up at the turn the review changed in');
+  // A cursor that is not one is 0, as in a record made at once.
+  assert.equal(readRecord(await recordSlowly(fresh(), { cursor: -3, at: AT })).work.cursor, 0);
+});
+
+test('a long record is kept in parts and read back whole; a shorter one after it, a clearing, and the cap leave no part behind', async () => {
+  const idb = new IDBFactory(), session = new Storage();
+  const store = progressStore({ indexedDB: idb, session, keep: () => true });
+  const w = large(SLOWLY_FROM);
+  const slow = await recordSlowly(w, { at: AT, budget: 1000 });
+  assert.equal(await store.put(slow), 'browser');
+  assert.deepEqual(await rows(idb), { version: DB_VERSION, reviews: 1, parts: slow.parts.length });
+  const back = await progressStore({ indexedDB: idb, session: new Storage(), keep: () => true }).get(slow.key);
+  assert.ok(back && sameWork(back.work, w) && back.reviewed === SLOWLY_FROM && back.at === AT.toISOString(), 'another tab reads it whole');
+  assert.equal(session.length, 0);
+  // A record made at once whose text is long is kept in parts too (as many as its length asks), and reads back the same; the parts of the one before are gone.
+  const once = recordOf(w, { at: new Date(AT.getTime() + 1000) });
+  assert.ok(once.text.length > PART);
+  await store.put(once);
+  assert.deepEqual(await rows(idb), { version: DB_VERSION, reviews: 1, parts: Math.ceil(once.text.length / PART) });
+  assert.ok(sameWork((await store.get(once.key)).work, w));
+  // All its parts put at once (the page leaving) keeps the same.
+  await store.put({ ...slow, at: new Date(AT.getTime() + 2000).toISOString() }, { atOnce: true });
+  assert.deepEqual(await rows(idb), { version: DB_VERSION, reviews: 1, parts: slow.parts.length });
+  assert.equal((await store.get(slow.key)).at, new Date(AT.getTime() + 2000).toISOString());
+  // A part missing (never the store's doing: the record is replaced in one transaction): the record is none, not a review with a hole in it.
+  const db = await new Promise((res) => { const q = idb.open(DB); q.onsuccess = () => res(q.result); });
+  const kept = await new Promise((res) => { const q = db.transaction(PARTS).objectStore(PARTS).get([slow.key, 1]); q.onsuccess = () => res(q.result); });
+  await new Promise((res) => { const t = db.transaction(PARTS, 'readwrite'); t.objectStore(PARTS).delete([slow.key, 1]); t.oncomplete = res; });
+  assert.equal(await store.get(slow.key), null);
+  await new Promise((res) => { const t = db.transaction(PARTS, 'readwrite'); t.objectStore(PARTS).put(kept, [slow.key, 1]); t.oncomplete = res; });
+  db.close();
+  assert.equal((await store.get(slow.key)).reviewed, SLOWLY_FROM, 'control: with the part back, it is read');
+  // The same review kept short (its text in its own row): no part is left.
+  const short = recordOf(decided(undefined, fresh()), { at: AT });
+  await store.put({ ...short, key: slow.key });   // a row under the long one's key, as a short record of it would be
+  assert.deepEqual(await rows(idb), { version: DB_VERSION, reviews: 1, parts: 0 });
+  // Cleared: the long record's row and every part.
+  await store.put(slow);
+  const other = recordOf(decided(), { at: AT });
+  await store.put(other);
+  assert.deepEqual(await rows(idb), { version: DB_VERSION, reviews: 2, parts: slow.parts.length });
+  await store.forget(slow.key);
+  assert.deepEqual(await rows(idb), { version: DB_VERSION, reviews: 1, parts: 0 });
+  assert.equal((await store.get(other.key)).reviewed, 2, 'and the other review is as it was');
+});
+
+test(`the cap counts reviews, not parts: ${MOST} are kept though one is in many parts, and a long one let go takes its parts with it`, async () => {
+  const idb = new IDBFactory();
+  const store = progressStore({ indexedDB: idb, session: new Storage(), keep: () => true });
+  const long = await recordSlowly(large(SLOWLY_FROM), { at: new Date('2026-11-02T08:00:00Z'), budget: 1000 });
+  await store.put(long);
+  const records = [];
+  for (let i = 0; i < MOST - 1; i++) {
+    const r = recordOf(decided(undefined, fresh({ at: `2026-10-${String(i + 1).padStart(2, '0')}T10:00:00Z` })), { at: new Date(Date.parse('2026-11-02T09:00:00Z') + i * 60000) });
+    records.push(r); await store.put(r);
+  }
+  assert.deepEqual(await rows(idb), { version: DB_VERSION, reviews: MOST, parts: long.parts.length }, `${MOST} reviews, the long one's parts not counted among them`);
+  assert.equal((await store.get(long.key)).reviewed, SLOWLY_FROM);
+  for (const r of records) assert.equal((await store.get(r.key)).reviewed, 2);
+  // One more: the one changed longest ago, the long one, is let go, and its parts with it.
+  await store.put(recordOf(decided(undefined, fresh({ at: '2026-10-30T10:00:00Z' })), { at: new Date('2026-11-03T09:00:00Z') }));
+  assert.deepEqual(await rows(idb), { version: DB_VERSION, reviews: MOST, parts: 0 });
+  assert.equal(await store.get(long.key), null);
+  assert.equal((await store.get(records[0].key)).reviewed, 2, 'the next oldest is still there');
+});
+
+test('a database made before long records were kept in parts (version 1) is taken as it is: what it holds is read, and a long record is then kept in it', async () => {
+  const idb = new IDBFactory();
+  const record = recordOf(decided(), { at: AT });
+  await new Promise((res, rej) => {
+    const q = idb.open(DB, 1);
+    q.onupgradeneeded = () => q.result.createObjectStore(STORE, { keyPath: 'key' }).createIndex('at', 'at');
+    q.onsuccess = () => { const t = q.result.transaction(STORE, 'readwrite'); t.objectStore(STORE).put(record); t.oncomplete = () => { q.result.close(); res(); }; };
+    q.onerror = () => rej(q.error);
+  });
+  const store = progressStore({ indexedDB: idb, session: new Storage(), keep: () => true });
+  assert.equal((await store.get(record.key)).reviewed, 2, 'the review kept before is read');
+  const long = await recordSlowly(large(SLOWLY_FROM), { at: AT, budget: 1000 });
+  assert.equal(await store.put(long), 'browser');
+  assert.deepEqual(await rows(idb), { version: DB_VERSION, reviews: 2, parts: long.parts.length });
+  assert.equal((await store.get(long.key)).reviewed, SLOWLY_FROM);
+});
+
+test('with "keep working data" off, a record longer than any sessionStorage holds is not written out to be refused: it is kept for the page, and said so', async () => {
+  const session = new Storage();
+  let tried = 0;
+  const set = session.setItem.bind(session);
+  session.setItem = (k, v) => { tried++; set(k, v); };
+  const store = progressStore({ indexedDB: new IDBFactory(), session, keep: () => false });
+  const w = fresh(); Object.values(w.places)[0].label = 'x'.repeat(TAB_MOST);
+  const long = recordOf(w, { at: AT }), short = recordOf(decided(), { at: AT });
+  assert.equal(await store.put(short), 'tab');
+  assert.equal(tried, 1, 'control: a record that fits is put in the tab\'s storage');
+  assert.equal(await store.put(long), 'page');
+  assert.equal(tried, 1, 'the long one was never tried there');
+  assert.equal((await store.get(long.key)).work.places[A('bath')].label.length, TAB_MOST, 'and the page holds it');
+  // In parts (written out in pieces), a record that fits is kept in the tab as its text, and reads back.
+  const parted = await recordSlowly(decided(undefined, fresh({ at: '2026-11-05T10:00:00Z' })), { at: AT });
+  assert.equal(await store.put(parted), 'tab');
+  assert.equal(typeof JSON.parse(session.getItem(TAB + parted.key)).text, 'string');
+  assert.equal((await progressStore({ indexedDB: new IDBFactory(), session, keep: () => false }).get(parted.key)).reviewed, 2);
 });

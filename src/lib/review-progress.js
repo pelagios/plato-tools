@@ -15,11 +15,29 @@
 // Nothing is sent anywhere: there is no request in this file. What the browser holds can be read, and
 // written, by any page of the site's origin (DEVELOPERS.md, "The shared origin"), so a record read back
 // is checked by the work file's own reader (readWork) and must be of the review it is kept under.
+//
+// A large review, and the page held. Measured in Chromium (e2e/review_autosave_scale.py, November 2026), a review of
+// 50,000 decisions is 108 MB as "Save the review" writes it: making that text at once held the page for 1.1 s, and
+// one put of it into IndexedDB for another 0.4 s (0.2 s and 0.2 s at 10,000), at every keeping. So a large review is
+// written out in pieces, the page answering between them (recordSlowly: the same review, as JSON without the
+// indentation, in parts of about PART characters; given up, never kept half-made, if the review changes meanwhile),
+// and a record longer than PART is kept as rows of its own (the store 'parts', keyed [key, n]), each put a task of
+// its own within the one transaction, so that the record is replaced whole or not at all. A review of ordinary size
+// is made and kept as before, its text in its one row. sessionStorage holds about five million characters for the
+// whole origin (2,183 decisions of that shape, measured): a record that cannot fit is not tried there.
 import { keepWorkingData } from './permissions.js';
 import { sha256 } from './sha256.js';
 import { readWork, serialiseWork, reviewProgress } from '../engine/krisis/work.js';
 
-export const DB = 'plato-tools-krisis-progress', STORE = 'reviews', TAB = 'plato-tools.krisis-progress.';
+export const DB = 'plato-tools-krisis-progress', STORE = 'reviews', PARTS = 'parts', TAB = 'plato-tools.krisis-progress.';
+/** The database's version: 2 since the store of a long record's parts was added (a version 1 database is upgraded as it is, its records kept). */
+export const DB_VERSION = 2;
+/** About how many characters a part of a long record holds; a record's text longer than this is kept in parts. */
+export const PART = 1_000_000;
+/** From how many candidates a review is written out in pieces (recordSlowly) and not at once (recordOf): at once, 2,000 hold the page some 60 ms. */
+export const SLOWLY_FROM = 2000;
+/** More characters than any browser's sessionStorage holds for an origin (about 5.2 million in Chromium, measured): a longer record is not tried there. */
+export const TAB_MOST = 11_000_000;
 /** How many reviews' progress is kept between visits: the latest changed; an older one is let go. */
 export const MOST = 20;
 const KEY = /^[0-9a-f]{64}$/;
@@ -68,15 +86,78 @@ export function recordOf(work, { name = 'review.krisis.json', cursor = work.curs
     text: serialiseWork({ ...work, cursor: Number.isInteger(cursor) && cursor >= 0 ? cursor : 0 }) };
 }
 
+// ---- a large review, written out in pieces ------------------------------------------------------------------
+const BIG = 200;
+const isObject = (v) => v !== null && typeof v === 'object';
+const sizeOf = (v) => (Array.isArray(v) ? v.length : Object.keys(v).length);
+const left_out = (x) => x === undefined || typeof x === 'function' || typeof x === 'symbol';
+/**
+ * `value` as JSON, in pieces which joined are what JSON.stringify(value) gives (for what a work file holds: plain
+ * objects, arrays, strings, numbers, true, false and null). The top two levels are always taken apart (the work
+ * file, then each of its fields: the candidates one by one, the places one by one), and below them whatever is
+ * large or holds something large (a lookup, for its queries, one for each place); the rest is written whole, so
+ * that no piece is long and none is so short that the pieces cost more than the writing.
+ */
+export function* jsonPieces(value, depth = 0) {
+  if (!isObject(value) || typeof value.toJSON === 'function') { yield JSON.stringify(value) ?? 'null'; return; }
+  if (!(depth < 2 || sizeOf(value) > BIG || Object.values(value).some((x) => isObject(x) && sizeOf(x) > BIG))) { yield JSON.stringify(value); return; }
+  if (Array.isArray(value)) {
+    yield '[';
+    for (let i = 0; i < value.length; i++) { if (i) yield ','; if (left_out(value[i])) yield 'null'; else yield* jsonPieces(value[i], depth + 1); }
+    yield ']';
+    return;
+  }
+  yield '{';
+  let first = true;
+  for (const k of Object.keys(value)) {
+    if (left_out(value[k])) continue;
+    yield `${first ? '' : ','}${JSON.stringify(k)}:`; first = false;
+    yield* jsonPieces(value[k], depth + 1);
+  }
+  yield '}';
+}
+const breathe = () => new Promise((resolve) => { setTimeout(resolve, 0); });
+const clock = () => (globalThis.performance ? globalThis.performance.now() : Date.now());
+/**
+ * The record of `work` as recordOf makes it, made without holding the page: written out in pieces, for `budget`
+ * milliseconds at a time, the page given a turn between (`pause`), its text in `parts` (which joined are the work
+ * file, as JSON without the indentation). `changed` is asked after every turn given whether the review has changed
+ * since the writing began: if it has, what was written is of two states of the review, and null is returned (the
+ * caller begins again). Without a `changed` nothing is known to change it: only for a review nothing else touches.
+ */
+export async function recordSlowly(work, { name = 'review.krisis.json', cursor = work.cursor, at, changed = () => false, budget = 8, pause = breathe } = {}) {
+  const head = { krisisProgress: 1, key: reviewKey(work), name: String(name).slice(0, 255), reviewed: reviewProgress(work).reviewed };
+  const parts = [];
+  let part = '', since = clock(), n = 0;
+  for (const piece of jsonPieces({ ...work, cursor: Number.isInteger(cursor) && cursor >= 0 ? cursor : 0 })) {
+    part += piece;
+    if (part.length >= PART) { parts.push(part); part = ''; }
+    if (++n % 16 === 0 && clock() - since >= budget) {
+      await pause();
+      if (changed()) return null;
+      since = clock();
+    }
+  }
+  parts.push(`${part}\n`);
+  return { ...head, at: (at || new Date()).toISOString(), parts };
+}
+/** A record's text: its own, or its parts joined; null if it has neither. */
+export function textOf(v) {
+  if (typeof v?.text === 'string') return v.text;
+  return Array.isArray(v?.parts) && v.parts.length && v.parts.every((p) => typeof p === 'string') ? v.parts.join('') : null;
+}
+const charsOf = (v) => (typeof v.text === 'string' ? v.text.length : v.parts.reduce((n, p) => n + p.length, 0));
+
 /**
  * A record read back, checked: { key, name, at, reviewed, work }, or null if it is not one (not a
  * record, a review the work file's reader refuses, or one kept under another review's key).
  */
 export function readRecord(v, key) {
   if (!v || typeof v !== 'object' || v.krisisProgress !== 1 || !KEY.test(v.key || '') || (key !== undefined && v.key !== key)) return null;
-  if (typeof v.at !== 'string' || Number.isNaN(Date.parse(v.at)) || typeof v.text !== 'string') return null;
+  const text = textOf(v);
+  if (typeof v.at !== 'string' || Number.isNaN(Date.parse(v.at)) || text === null) return null;
   let work;
-  try { work = readWork(v.text); } catch { return null; }
+  try { work = readWork(text); } catch { return null; }
   if (reviewKey(work) !== v.key) return null;
   return { key: v.key, name: typeof v.name === 'string' && v.name ? v.name.slice(0, 255) : 'review.krisis.json', at: v.at, reviewed: reviewProgress(work).reviewed, work };
 }
@@ -111,7 +192,14 @@ export function progressStore({ indexedDB, session, keep = keepWorkingData } = {
   const tab = {
     get: (key) => { try { const t = ss?.getItem(TAB + key); if (t) return JSON.parse(t); } catch { /* refused, or not JSON */ } return memory.get(key) ?? null; },
     // 'tab' where the tab keeps it (it is there after a reload), 'page' where only this page does.
-    put: (key, v) => { try { if (ss) { ss.setItem(TAB + key, JSON.stringify(v)); memory.delete(key); return 'tab'; } } catch { try { ss.removeItem(TAB + key); } catch { /* refused */ } } memory.set(key, v); return 'page'; },
+    // A record longer than any sessionStorage holds is not tried there (writing 120 MB out to be refused held the page 0.8 s).
+    put: (key, v) => {
+      try {
+        if (ss && charsOf(v) <= TAB_MOST) { const { parts, ...head } = v; ss.setItem(TAB + key, JSON.stringify(parts ? { ...head, text: parts.join('') } : v)); memory.delete(key); return 'tab'; }
+        ss?.removeItem(TAB + key);
+      } catch { try { ss.removeItem(TAB + key); } catch { /* refused */ } }
+      memory.set(key, v); return 'page';
+    },
     drop: (key) => { try { ss?.removeItem(TAB + key); } catch { /* refused */ } memory.delete(key); },
     dropAll: () => {
       memory.clear();
@@ -120,21 +208,76 @@ export function progressStore({ indexedDB, session, keep = keepWorkingData } = {
   };
   const open = () => new Promise((resolve, reject) => {
     if (!idb) { reject(new Error('IndexedDB is not available')); return; }
-    const req = idb.open(DB, 1);
-    req.onupgradeneeded = () => req.result.createObjectStore(STORE, { keyPath: 'key' }).createIndex('at', 'at');
+    const req = idb.open(DB, DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'key' }).createIndex('at', 'at');
+      if (!db.objectStoreNames.contains(PARTS)) db.createObjectStore(PARTS);   // a long record's text, in rows keyed [key, n]
+    };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
     req.onblocked = () => reject(new Error('the database is blocked'));
   });
+  // One transaction over both stores: `fn` is given them and a box, and what it leaves in box.out is the answer once
+  // the transaction is complete (so that nothing is answered of a transaction that then failed).
   const tx = async (mode, fn) => {
     const db = await open();
     try {
       return await new Promise((resolve, reject) => {
-        const t = db.transaction(STORE, mode), out = fn(t.objectStore(STORE));
-        t.oncomplete = () => resolve(out?.result);
+        const t = db.transaction([STORE, PARTS], mode), box = {};
+        t.oncomplete = () => resolve(box.out);
         t.onerror = t.onabort = () => reject(t.error);
+        fn(t.objectStore(STORE), t.objectStore(PARTS), box);
       });
     } finally { db.close(); }
+  };
+  const partsOf = (head) => (Number.isInteger(head?.parts) && head.parts > 0 ? head.parts : 0);
+  /** The parts of the record whose row is `head` let go (the row itself is the caller's). */
+  const dropParts = (p, head) => { for (let i = 0; i < partsOf(head); i++) p.delete([head.key, i]); };
+  /** The record's text as the rows it is kept in, or null where it is kept in its own row. */
+  const rowsOf = (record) => {
+    if (Array.isArray(record.parts)) return record.parts;
+    if (record.text.length <= PART) return null;
+    const rows = [];
+    for (let i = 0; i < record.text.length; i += PART) rows.push(record.text.slice(i, i + PART));
+    return rows;
+  };
+  /**
+   * `record` in place of what was kept of its review, in the one transaction: what was kept is read (for its
+   * parts, let go), the new parts are put, then its row, and then the oldest reviews over MOST are let go, parts
+   * and all. Each part is put when the one before it is in (a task each: the page answers between them), or, with
+   * `atOnce`, all are put now (the page is leaving: nothing later would be done).
+   */
+  const keepRecord = (s, p, record, atOnce) => {
+    const rows = rowsOf(record);
+    const { parts, text, ...head } = record;
+    const finish = () => {
+      s.put(rows ? { ...head, parts: rows.length } : { ...head, text });
+      // The latest MOST are kept (a review is a row of this store; its parts are in the other): the ones changed longest ago are let go.
+      const n = s.count();
+      n.onsuccess = () => {
+        let over = n.result - MOST;
+        if (over > 0) s.index('at').openCursor().onsuccess = (e) => { const c = e.target.result; if (c && over-- > 0) { dropParts(p, c.value); s.delete(c.primaryKey); c.continue(); } };
+      };
+    };
+    s.get(record.key).onsuccess = (e) => {
+      dropParts(p, e.target.result);
+      if (!rows) { finish(); return; }
+      if (atOnce) { rows.forEach((row, i) => p.put(row, [record.key, i])); finish(); return; }
+      let i = 0;
+      const next = () => { if (i === rows.length) finish(); else { p.put(rows[i], [record.key, i]).onsuccess = next; i++; } };
+      next();
+    };
+  };
+  /** The record kept under `key`, its parts joined (box.out): as it was put, or undefined; a record with a part missing is none. */
+  const read = (s, p, box, key) => {
+    s.get(key).onsuccess = (e) => {
+      const head = e.target.result, n = partsOf(head);
+      if (!n) { box.out = head; return; }
+      const texts = new Array(n);
+      let got = 0;
+      for (let i = 0; i < n; i++) p.get([key, i]).onsuccess = (g) => { texts[i] = g.target.result; if (++got === n) box.out = texts.every((x) => typeof x === 'string') ? { ...head, parts: texts } : undefined; };
+    };
   };
   // With working data not kept, nothing stays in IndexedDB: not a record, nor the database.
   const forgetKept = () => new Promise((resolve) => {
@@ -149,23 +292,16 @@ export function progressStore({ indexedDB, session, keep = keepWorkingData } = {
 
   return {
     /**
-     * Keep `record` (recordOf) in place of what was kept of its review. Returns where: 'browser'
+     * Keep `record` (recordOf, or recordSlowly) in place of what was kept of its review; `atOnce` when the page is
+     * leaving (a long record's parts are then all put now, not one after another). Returns where: 'browser'
      * (IndexedDB, between visits), 'tab' (working data not kept, or IndexedDB refused: until the tab
      * closes), or 'page' (the browser kept it nowhere: it does not outlive this page).
      */
-    put(record) {
+    put(record, { atOnce = false } = {}) {
       return serial(async () => {
         if (keeping()) {
           try {
-            await tx('readwrite', (s) => {
-              s.put(record);
-              // The latest MOST are kept: the ones changed longest ago are let go.
-              const n = s.count();
-              n.onsuccess = () => {
-                let over = n.result - MOST;
-                if (over > 0) s.index('at').openKeyCursor().onsuccess = (e) => { const c = e.target.result; if (c && over-- > 0) { s.delete(c.primaryKey); c.continue(); } };
-              };
-            });
+            await tx('readwrite', (s, p) => keepRecord(s, p, record, atOnce));
             tab.drop(record.key);
             return 'browser';
           } catch { /* the tab's, then */ }
@@ -182,7 +318,7 @@ export function progressStore({ indexedDB, session, keep = keepWorkingData } = {
         const here = readRecord(tab.get(key), key);
         if (!keeping()) { await forgetKept(); return here; }
         let there = null;
-        try { there = readRecord(await tx('readonly', (s) => s.get(key)), key); } catch { /* the tab's only */ }
+        try { there = readRecord(await tx('readonly', (s, p, box) => read(s, p, box, key)), key); } catch { /* the tab's only */ }
         if (here && there) return Date.parse(here.at) >= Date.parse(there.at) ? here : there;
         return here || there;
       });
@@ -192,7 +328,7 @@ export function progressStore({ indexedDB, session, keep = keepWorkingData } = {
       return serial(async () => {
         tab.drop(key);
         if (!keeping()) { await forgetKept(); return; }
-        try { await tx('readwrite', (s) => s.delete(key)); } catch { /* none kept */ }
+        try { await tx('readwrite', (s, p) => { s.get(key).onsuccess = (e) => { dropParts(p, e.target.result); s.delete(key); }; }); } catch { /* none kept */ }
       });
     },
     /** Let everything kept between visits go, the database too ("keep working data" turned off), after any keeping still under way. */
