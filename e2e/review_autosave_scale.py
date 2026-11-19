@@ -24,7 +24,8 @@ For each size:
   to its cap (MOST reviews) and one more kept, with how many it then holds and what the browser says the origin uses;
 - reading it back (get: the text parsed and checked by the work file's reader, in steps, the page answering between
   them), and the same record read at once (readRecord), as it was read before: the time in all, and the longest the page
-  was held;
+  was held. The cap is checked, not only counted: MOST reviews and no more, the one changed longest ago gone, the next
+  and the one just kept read back whole, and as many parts in the database as the reviews kept say they have;
 - sessionStorage (working data not kept): whether the record fits, and the largest review that does.
 
 "The longest the page was held" is the longest gap between two turns of a timer set to fire every 4 ms while the work
@@ -116,13 +117,26 @@ PAGE = r'''async ([n, capMax]) => {
   r.readAtOnce = { ms: whole.ms, held: whole.held, reviewed: whole.out && whole.out.reviewed };
   if (P.recordSlowly) { const leaving = await held(() => kept.put({ ...record, at: new Date().toISOString() }, { atOnce: true })); r.putLeaving = { ms: leaving.ms, held: leaving.held, where: leaving.out }; }
   if (n <= capMax) {
+    // MOST other reviews of this size, each changed later than the one before: the first of them is then the one changed longest ago.
+    const others = [];
     for (let i = 0; i < P.MOST; i++) {
       const other = make(n, new Date(Date.parse('2026-11-01T10:00:00Z') + (i + 1) * 1000).toISOString());
-      await kept.put(P.recordOf(other, { at: new Date(Date.now() + i) }));
+      const rec = P.recordOf(other, { at: new Date(Date.now() + i) });
+      others.push(rec.key);
+      await kept.put(rec);
     }
-    const over = await held(() => kept.put({ ...record, at: new Date(Date.now() + 1000).toISOString() }));
+    const over = await held(() => kept.put({ ...made, at: new Date(Date.now() + 1000).toISOString() }));
     const est = await navigator.storage.estimate();
-    r.cap = { ms: over.ms, held: over.held, where: over.out, holds: await count(), usageMB: Math.round(est.usage / 1e6), quotaMB: Math.round(est.quota / 1e6) };
+    // What the store then holds, read from the database itself: its rows, the parts they say they have, and the parts there are.
+    const holds = await new Promise((res, rej) => { const q = indexedDB.open(P.DB);
+      q.onerror = () => rej(q.error);
+      q.onsuccess = () => { const t = q.result.transaction([P.STORE, P.PARTS]), heads = t.objectStore(P.STORE).getAll(), parts = t.objectStore(P.PARTS).count();
+        t.oncomplete = () => { q.result.close(); res({ keys: heads.result.map((h) => h.key), partsSaid: heads.result.reduce((k, h) => k + (Number.isInteger(h.parts) ? h.parts : 0), 0), parts: parts.result }); }; t.onerror = () => rej(t.error); }; });
+    const newest = await kept.get(record.key), second = await kept.get(others[1]);
+    r.cap = { ms: over.ms, held: over.held, where: over.out, holds: await count(), usageMB: Math.round(est.usage / 1e6), quotaMB: Math.round(est.quota / 1e6),
+      rows: holds.keys.length, partsSaid: holds.partsSaid, parts: holds.parts,
+      oldestGone: !holds.keys.includes(others[0]) && (await kept.get(others[0])) === null, secondOldestKept: holds.keys.includes(others[1]) && !!second && second.reviewed === n,
+      newestKept: holds.keys.includes(record.key) && !!newest && newest.reviewed === n };
   }
   await kept.forgetAll();
   // sessionStorage: working data not kept.
@@ -174,6 +188,13 @@ def main():
                 if r.get('recordSlowly') and not r['recordSlowly']['same']: sys.exit(f'the review of {n} written out in pieces does not read back as the review: nothing measured')
                 if r['get']['reviewed'] != n or not r['get']['same']: sys.exit(f'the review of {n} kept in IndexedDB reads back with {r["get"]["reviewed"]} places decided, {"the same review" if r["get"]["same"] else "not the review kept"}: nothing measured')
                 if r['readAtOnce']['reviewed'] != n: sys.exit(f'the review of {n} read at once has {r["readAtOnce"]["reviewed"]} places decided: nothing measured')
+                c = r.get('cap')
+                if c:
+                    # The cap, checked: MOST reviews and no more, the one changed longest ago gone and the next still read back whole, the one just kept there, and no part of a review let go left behind.
+                    wrong = [w for w, bad in [(f'{c["holds"]} reviews are kept, not {r["most"]}', c['holds'] != r['most'] or c['rows'] != r['most']), ('the one changed longest ago is still kept', not c['oldestGone']),
+                        ('the next oldest is not kept whole', not c['secondOldestKept']), ('the one just kept is not there', not c['newestKept']), (f'{c["parts"]} parts are kept where the reviews kept have {c["partsSaid"]}', c['parts'] != c['partsSaid']),
+                        ('no review is in parts: the cap was not tried on long records', n >= 2000 and c['parts'] == 0)] if bad]
+                    if wrong: sys.exit(f'the cap at {n} decisions does not hold: ' + '; '.join(wrong))
                 rows.append(r); print(json.dumps(r), flush=True)
                 ctx.close()
             # sessionStorage's room, in decisions.
@@ -193,11 +214,11 @@ def main():
     finally:
         try: os.killpg(srv.pid, signal.SIGTERM)
         except ProcessLookupError: pass
-    print(f"\n{'decisions':>9} {'text MB':>8} | {'record at once':>15} | {'record in pieces':>17} | {'IndexedDB put':>14} | {'get':>12} | {'read at once':>12} | {'at the cap':>22} | tab")
+    print(f"\n{'decisions':>9} {'text MB':>8} | {'record at once':>15} | {'record in pieces':>17} | {'IndexedDB put':>14} | {'get':>12} | {'read at once':>12} | {'at the cap':>36} | tab")
     f = lambda x: f"{x['ms']} ms/{x['held']}" if x else '-'
     for r in rows:
-        cap = f"{r['cap']['ms']} ms, {r['cap']['holds']} kept, {r['cap']['usageMB']} MB" if r.get('cap') else '-'
-        print(f"{r['n']:>9} {r['chars'] / 1e6:>8.1f} | {f(r['recordAtOnce']):>15} | {f(r.get('recordSlowly')):>17} | {f(r['put']):>14} | {f(r['get']):>12} | {f(r['readAtOnce']):>12} | {cap:>22} | {r['tab']['where']}")
+        cap = f"{r['cap']['ms']} ms, {r['cap']['holds']} kept in {r['cap']['parts']} parts, {r['cap']['usageMB']} MB" if r.get('cap') else '-'
+        print(f"{r['n']:>9} {r['chars'] / 1e6:>8.1f} | {f(r['recordAtOnce']):>15} | {f(r.get('recordSlowly')):>17} | {f(r['put']):>14} | {f(r['get']):>12} | {f(r['readAtOnce']):>12} | {cap:>36} | {r['tab']['where']}")
     print('(each "a ms/b": a in all, b the longest the page was held)')
     out = opt('json')
     if out: pathlib.Path(out).write_text(json.dumps({'rows': rows, 'sessionStorage': room}, indent=2))

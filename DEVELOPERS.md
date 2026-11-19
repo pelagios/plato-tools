@@ -2011,9 +2011,18 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   piece; what it refuses is refused, over every cut and every one-character change of a text; the
   turns given), and in `test/review-progress.test.js` the same record and the same refusals as at
   once, the turns counted, and the reader in steps refusing in the reader's own words.
-  **What is not mended, and what was not measured.** The store filled to its cap was measured at
-  1,000 and 10,000 decisions (20 kept, the 21st let go; the browser reported 4 MB and 37 MB in use),
-  not at 50,000. **The tab's storage** (with "keep working data" off) held a review of at most 2,183
+  **The cap, at 50,000 decisions** (19 November 2026). The store filled to its cap was first
+  measured at 1,000 and 10,000 decisions only. It holds at 50,000 too, and the measuring script now
+  checks it and does not only count (`--cap-max=50000`; the run stops with what is wrong otherwise):
+  with a review of 50,000 kept, twenty more of that size kept after it, each 108 MB as text and in
+  109 parts, and then the first kept again, the database holds 20 reviews and no more; the one
+  changed longest ago is gone and reads back as nothing; the next oldest and the one just kept each
+  read back whole, 50,000 places decided; and the `parts` store holds 2,141 rows, exactly as many as
+  the 20 reviews kept say they have (19 of 109 and one of 70), so nothing of a review let go is left
+  behind. The same at 1,000 (60 parts) and 10,000 (432). The browser reported 189 MB in use for the
+  twenty at 50,000 (of the 1.7 GB it allowed that profile), 37 MB at 10,000 and 4 MB at 1,000, and
+  the keeping at the cap held the page 6 ms (139 ms in all). Nothing needed mending.
+  **What is not mended, and what was not measured.** **The tab's storage** (with "keep working data" off) held a review of at most 2,183
   such decisions (5,242,159 characters; 2,184 was refused): a larger one is kept for the page alone,
   the store answers 'page', and the line says so ("This browser would not keep your progress"). A
   record longer than any sessionStorage holds (`TAB_MOST`, 11 million characters) is no longer written
