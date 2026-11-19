@@ -131,6 +131,15 @@
   <!-- The browser refuses the page its file storage, so nothing can run (a Firefox private window), said as the page loads; or, once a
        file is chosen, allows it too little for that file (src/app.js, storageProbe and storageCheck). Above step 1, where it is seen first. -->
   <p id="storage-warning" class="warn" role="status" hidden></p>
+  <!-- A match review begun outside a workflow, kept in this browser as it was made and never saved to a file (src/lib/review-progress.js,
+       latestOffer), offered as the page opens; filled by src/app.js (reviewOffer; the words are words.js REVIEW_KEPT.offer). Never shown
+       with "Keep my working data between visits" off. -->
+  <aside id="review-offer" class="review-offer" aria-labelledby="review-offer-h" hidden>
+    <svg class="review-offer-mark" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M6 3.5h9l4 4V20a.5.5 0 0 1-.5.5h-12A.5.5 0 0 1 6 20z M15 3.5v4h4 M9 12.5l2.2 2.2 4-4.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <div class="review-offer-words"><h3 id="review-offer-h"></h3><p id="review-offer-what"></p></div>
+    <p class="review-offer-buttons"><button type="button" id="review-offer-open" class="primary"></button> <button type="button" id="review-offer-later"></button> <button type="button" id="review-offer-discard" class="link"></button></p>
+  </aside>
+  <p id="review-offer-said" class="review-offer-said" role="status" hidden></p>
   <section id="files" aria-labelledby="files-h">
     <h2 id="files-h" tabindex="-1"><span class="step">1</span> Choose your data</h2>
     <p id="for-tool" class="for-tool" hidden></p>

@@ -448,6 +448,22 @@ export const REVIEW_KEPT = {
   notKept: 'This browser would not keep your progress in this review: save the review to keep it.',
   clear: 'Clear what is kept',
   use: 'Use what is kept',
+  /** A review opened from what this browser kept, with no file chosen (the offer below): what was put back, and that no file has it. */
+  reopened: ({ at, reviewed }, where) => `Your review as it was kept ${where === 'tab' ? 'for this tab' : 'in this browser'} on ${keptAt(at)} has been put back: ${count(reviewed, 'places')} reviewed. No file has this yet: save the review to have it in one. It is kept ${keptWhere(where)} as you go, and sent nowhere.`,
+  /**
+   * The offer made as the page opens with no review on it: a match review begun outside a workflow, kept here and never
+   * saved to a file (src/lib/review-progress.js, latestOffer). Never made with "keep working data" off.
+   */
+  offer: {
+    heading: 'A review you did not save is kept in this browser',
+    what: ({ name, at, reviewed, total }) => `${name}, as you left it on ${keptAt(at)}: ${reviewed.toLocaleString('en-GB')} of ${count(total, 'places')} reviewed. No file has these decisions, and they have been sent nowhere.`,
+    open: 'Open the review kept in this browser',
+    later: 'Not now',
+    discard: 'Discard it',
+    laterSaid: 'It stays kept: it is offered again when you next open this page, and put back if you open its file.',
+    discarded: (name) => `Discarded: nothing of ${name} is kept in this browser now.`,
+    gone: 'That review is no longer kept in this browser (it was cleared, here or in another tab).',
+  },
 };
 
 // Krisis: matching. What the match review (src/engine/krisis/) says, on the page and the command line.

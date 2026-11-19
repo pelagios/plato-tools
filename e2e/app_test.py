@@ -8422,6 +8422,87 @@ def review_progress_checks(pw, url, tmp):
         return ok, {'opened': opened, 'kept': kept, 'written in pieces': slowly, 'held as': held, 'the small review after it': small, 'written in pieces then': slowly_after, 'both held as': both,
                     'after the reload': after, 'opened again': back}
     attempt('match review: a review of 4,000 places is written out in pieces and kept in parts of at most about a million characters (a review of three, after it, at once in its one row, adding no part); the page reloaded, the large review opened again has its two decisions back', large_review)
+    # ---- The offer made as the page opens (src/app.js reviewOffer): a review kept here and never saved ----
+    OFFER = '''() => { const p = window.__plato || {}, b = document.getElementById('review-offer'), t = document.getElementById('review-offer-said'), v = (e) => !!e && !e.hidden && !e.closest('[hidden]') && !!e.getClientRects().length;
+      return { offer: p.reviewOffer || null, shown: v(b), heading: v(b) ? document.getElementById('review-offer-h').textContent : null, what: v(b) ? document.getElementById('review-offer-what').textContent : null,
+        buttons: v(b) ? [...b.querySelectorAll('button')].filter(v).map((x) => x.textContent) : [], said: v(t) ? t.textContent : null, review: !!p.work }; }'''
+    KEPT_FLAGS = '''async () => { const db = await new Promise((res, rej) => { const q = indexedDB.open('plato-tools-krisis-progress'); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+      try { return await new Promise((res, rej) => { const g = db.transaction('reviews').objectStore('reviews').getAll(); g.onsuccess = () => res(g.result.map((r) => [r.name, r.unsaved === true, r.workflow === true])); g.onerror = () => rej(g.error); }); } finally { db.close(); } }'''
+    def offer_after_reload(page):
+        """The page reloaded, and what it offers once it has settled whether there is anything to offer."""
+        page.reload()
+        s = wait_state(page, lambda s: s.get('phase') == 'ready' and s.get('reviewOfferChecked'), T(30), 'reloaded, and the offer settled')
+        if not s.get('reviewOfferChecked'): raise RuntimeError(f'the page did not settle its offer: {s.get("phase")}')
+        return page.evaluate(OFFER)
+
+    def offered_at_load():
+        page = context().new_page(); ready(page); r['offer page'] = page
+        open_review(page)
+        decide(page, ['a', 'n'], 2)                                  # two places decided, nothing saved, no file chosen since
+        flags = page.evaluate(KEPT_FLAGS)
+        offer = offer_after_reload(page)                             # the page holds no review now: the one kept is offered
+        # "Not now": the card goes, the review stays kept, and the next load offers it again.
+        page.click('#review-offer-later', timeout=T(10) * 1000)
+        later = page.evaluate(OFFER)
+        again = offer_after_reload(page)
+        page.click('#review-offer-open', timeout=T(10) * 1000)
+        wait_state(page, lambda s: s.get('phase') == 'reviewing' and (s.get('reviewKept') or {}).get('kind') == 'reopened', T(30), 'the review kept, opened')
+        back, card = V(page), page.evaluate(OFFER)
+        ok = (flags == [['kept.krisis.json', True, False]]
+              and offer['shown'] and not offer['review'] and offer['heading'] == 'A review you did not save is kept in this browser'
+              and (offer['what'] or '').startswith('kept.krisis.json, as you left it on ') and '2 of 3 places reviewed' in (offer['what'] or '')
+              and offer['buttons'] == ['Open the review kept in this browser', 'Not now', 'Discard it'] and (offer['offer'] or {}).get('reviewed') == 2
+              and not later['shown'] and later['offer'] is None and 'It stays kept' in (later['said'] or '')
+              and again['shown'] and (again['offer'] or {}).get('reviewed') == 2
+              and back['reviewed'] == 2 and back['decisions'] == {'c1': 'match', 'c2': 'not-this', 'c3': None} and 'has been put back: 2 places reviewed. No file has this yet' in (back['line'] or '') and back['clear']
+              and not card['shown'] and card['review'])
+        return ok, {'kept as': flags, 'offered after the reload': offer, 'after "Not now"': later, 'offered again': again, 'opened': back, 'the card then': card}
+    attempt('match review: a review decided in and never saved is offered when the page next opens, in a card that says whose it is, when it was left and how far it had gone; "Not now" leaves it kept and it is offered again; "Open the review kept in this browser" puts both decisions back with no file chosen, and says no file has them', offered_at_load)
+
+    def saved_or_discarded_is_not_offered():
+        page = r.get('offer page')
+        if not page: raise RuntimeError('no review was offered (the check before)')
+        # Saved to a file, the review is kept as saved: the next load offers nothing. (Its presence: before the save, this same review was offered, above.)
+        with page.expect_download(timeout=T(30) * 1000): page.click('#save-review')
+        until(page, "async () => (await (%s)()).every((r) => r[1] === false)" % KEPT_FLAGS, T(20))
+        saved_flags = page.evaluate(KEPT_FLAGS)
+        saved = offer_after_reload(page)
+        # Decided further and not saved, it is offered again; discarded, it is gone from the browser, and the next load offers nothing.
+        open_review(page)
+        decide(page, ['a'], 3)
+        offer = offer_after_reload(page)
+        page.click('#review-offer-discard', timeout=T(10) * 1000)
+        until(page, "async () => (await (%s)()).length === 0" % KEPT_FLAGS, T(20))
+        discarded = page.evaluate(OFFER)
+        after = offer_after_reload(page)
+        back = open_review(page)                                     # its file, opened again: nothing is put back
+        ok = (saved_flags == [['kept.krisis.json', False, False]] and not saved['shown'] and saved['offer'] is None
+              and offer['shown'] and (offer['offer'] or {}).get('reviewed') == 3
+              and not discarded['shown'] and (discarded['said'] or '') == 'Discarded: nothing of kept.krisis.json is kept in this browser now.'
+              and not after['shown'] and after['offer'] is None
+              and back['reviewed'] == 0 and back['line'] is None)
+        return ok, {'kept as, once saved': saved_flags, 'after the save and a reload': saved, 'decided further, reloaded': offer, 'discarded': discarded, 'after a reload': after, 'its file opened again': back}
+    attempt('match review: once saved to a file the review is not offered at the next load; decided further and not saved, it is offered again; "Discard it" clears it from the browser, the next load offers nothing, and its file opens with nothing put back', saved_or_discarded_is_not_offered)
+
+    def keep_off_offers_nothing():
+        # The control first: working data kept, a decision not saved is offered after a reload.
+        on = context().new_page(); ready(on)
+        open_review(on); decide(on, ['a'], 1)
+        offered = offer_after_reload(on)
+        ctx = context(); page = ctx.new_page(); ready(page)
+        page.evaluate("() => { localStorage.setItem('plato-tools.keep-working-data', 'no'); }")
+        ready(page)
+        open_review(page)
+        kept = decide(page, ['a'], 1)
+        session = page.evaluate("() => Object.keys(sessionStorage).filter((k) => k.startsWith('plato-tools.krisis-progress.')).length")
+        nothing = offer_after_reload(page)
+        back = open_review(page)                                     # the tab still holds it, for its own file
+        ok = (offered['shown'] and (offered['offer'] or {}).get('reviewed') == 1
+              and (kept['kept'] or {}).get('where') == 'tab' and session == 1
+              and not nothing['shown'] and nothing['offer'] is None and nothing['said'] is None
+              and back['reviewed'] == 1 and (back['kept'] or {}).get('kind') == 'restored')
+        return ok, {'with working data kept': offered, 'kept, with it off': kept, 'in the tab\'s storage': session, 'offered after the reload': nothing, 'its file opened in the same tab': back}
+    attempt('match review: with "Keep my working data between visits" off no review is offered when the page opens, though the tab holds the decision and puts it back when its file is opened; with it on, the same steps end in the offer', keep_off_offers_nothing)
 
     for ctx in made:
         try: ctx.close()

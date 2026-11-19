@@ -80,11 +80,23 @@ export function decidedOtherwise(a, b) {
   return n;
 }
 
-/** The record kept of `work` as it stands: at `cursor`, under `name`, last changed at `at` (a Date). */
-export function recordOf(work, { name = 'review.krisis.json', cursor = work.cursor, at = new Date() } = {}) {
+/**
+ * The record kept of `work` as it stands: at `cursor`, under `name`, last changed at `at` (a Date). `unsaved`: it holds
+ * what no file has (something was decided since the review was begun, opened or last saved); `workflow`: it is a
+ * workflow's review, which the workflow itself brings back. A review that is unsaved and no workflow's is the one
+ * offered when the page next opens (offerable, below).
+ */
+export function recordOf(work, { name = 'review.krisis.json', cursor = work.cursor, at = new Date(), unsaved = false, workflow = false } = {}) {
   return { krisisProgress: 1, key: reviewKey(work), name: String(name).slice(0, 255), at: at.toISOString(), reviewed: reviewProgress(work).reviewed,
+    ...(unsaved ? { unsaved: true } : {}), ...(workflow ? { workflow: true } : {}),
     text: serialiseWork({ ...work, cursor: Number.isInteger(cursor) && cursor >= 0 ? cursor : 0 }) };
 }
+/**
+ * Whether a record as kept (not yet checked) is one to offer when the page opens with no review on it: a match review
+ * begun outside a workflow, holding what was never saved to a file. A record kept before this was recorded says
+ * neither, and is not offered (it is still put back when its own file is opened).
+ */
+export const offerable = (v) => !!v && typeof v === 'object' && v.krisisProgress === 1 && v.unsaved === true && v.workflow !== true;
 
 // ---- a large review, written out in pieces ------------------------------------------------------------------
 const BIG = 200;
@@ -125,8 +137,8 @@ const clock = () => (globalThis.performance ? globalThis.performance.now() : Dat
  * since the writing began: if it has, what was written is of two states of the review, and null is returned (the
  * caller begins again). Without a `changed` nothing is known to change it: only for a review nothing else touches.
  */
-export async function recordSlowly(work, { name = 'review.krisis.json', cursor = work.cursor, at, changed = () => false, budget = 8, pause = breathe } = {}) {
-  const head = { krisisProgress: 1, key: reviewKey(work), name: String(name).slice(0, 255), reviewed: reviewProgress(work).reviewed };
+export async function recordSlowly(work, { name = 'review.krisis.json', cursor = work.cursor, at, changed = () => false, budget = 8, pause = breathe, unsaved = false, workflow = false } = {}) {
+  const head = { krisisProgress: 1, key: reviewKey(work), name: String(name).slice(0, 255), reviewed: reviewProgress(work).reviewed, ...(unsaved ? { unsaved: true } : {}), ...(workflow ? { workflow: true } : {}) };
   const parts = [];
   let part = '', since = clock(), n = 0;
   for (const piece of jsonPieces({ ...work, cursor: Number.isInteger(cursor) && cursor >= 0 ? cursor : 0 })) {
@@ -159,7 +171,8 @@ export function readRecord(v, key) {
   let work;
   try { work = readWork(text); } catch { return null; }
   if (reviewKey(work) !== v.key) return null;
-  return { key: v.key, name: typeof v.name === 'string' && v.name ? v.name.slice(0, 255) : 'review.krisis.json', at: v.at, reviewed: reviewProgress(work).reviewed, work };
+  const p = reviewProgress(work);
+  return { key: v.key, name: typeof v.name === 'string' && v.name ? v.name.slice(0, 255) : 'review.krisis.json', at: v.at, reviewed: p.reviewed, total: p.total, unsaved: v.unsaved === true, workflow: v.workflow === true, work };
 }
 
 /**
@@ -319,6 +332,40 @@ export function progressStore({ indexedDB, session, keep = keepWorkingData } = {
         if (!keeping()) { await forgetKept(); return here; }
         let there = null;
         try { there = readRecord(await tx('readonly', (s, p, box) => read(s, p, box, key)), key); } catch { /* the tab's only */ }
+        if (here && there) return Date.parse(here.at) >= Date.parse(there.at) ? here : there;
+        return here || there;
+      });
+    },
+    /**
+     * The review to offer as the page opens with none on it, checked (readRecord), or null: of those kept that were
+     * never saved and are no workflow's (offerable), the one changed last, the browser's or (where IndexedDB refused
+     * it) the tab's. With "keep working data" off there is none: nothing is kept between visits, and nothing offered.
+     */
+    latestOffer() {
+      return serial(async () => {
+        if (!keeping()) { await forgetKept(); return null; }
+        let here = null;
+        try {
+          if (ss) for (let i = 0; i < ss.length; i++) {
+            const k = ss.key(i);
+            if (!k?.startsWith(TAB)) continue;
+            const v = tab.get(k.slice(TAB.length)), r = offerable(v) ? readRecord(v, k.slice(TAB.length)) : null;
+            if (r && (!here || Date.parse(r.at) > Date.parse(here.at))) here = r;
+          }
+        } catch { /* refused: the browser's only */ }
+        let there = null;
+        try {
+          // From the one changed last: the rows that may be offered (a row says so itself; a long record's text is in its parts)…
+          const keys = await tx('readonly', (st, _p, box) => {
+            box.out = [];
+            st.index('at').openCursor(null, 'prev').onsuccess = (e) => { const c = e.target.result; if (!c) return; if (offerable(c.value)) box.out.push(c.value.key); c.continue(); };
+          });
+          // …and of those, the first that reads back whole.
+          for (const key of keys) {
+            there = readRecord(await tx('readonly', (st, pt, box) => read(st, pt, box, key)), key);
+            if (there) break;
+          }
+        } catch { /* the tab's only */ }
         if (here && there) return Date.parse(here.at) >= Date.parse(there.at) ? here : there;
         return here || there;
       });

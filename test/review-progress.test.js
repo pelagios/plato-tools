@@ -9,7 +9,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { readWork, serialiseWork, decide, flag, reviewProgress } from '../src/engine/krisis/work.js';
 import { PANEL } from '../src/lib/permission-words.js';
 import { REVIEW_KEPT } from '../src/engine/words.js';
-import { reviewKey, latestIn, sameWork, decidedOtherwise, recordOf, readRecord, onOpen, progressStore, DB, TAB, MOST,
+import { reviewKey, latestIn, sameWork, decidedOtherwise, recordOf, readRecord, onOpen, progressStore, offerable, DB, TAB, MOST,
   jsonPieces, recordSlowly, textOf, PART, PARTS, STORE, DB_VERSION, TAB_MOST, SLOWLY_FROM } from '../src/lib/review-progress.js';
 
 const A = (s) => `https://example.org/a/${s}`, B = (s) => `https://example.org/b/${s}`;
@@ -437,4 +437,101 @@ test('with "keep working data" off, a record longer than any sessionStorage hold
   assert.equal(await store.put(parted), 'tab');
   assert.equal(typeof JSON.parse(session.getItem(TAB + parted.key)).text, 'string');
   assert.equal((await progressStore({ indexedDB: new IDBFactory(), session, keep: () => false }).get(parted.key)).reviewed, 2);
+});
+
+// ---- The offer made as the page opens (19 November 2026): a review begun outside a workflow, kept and never saved ----
+test('a record says whether it holds what no file has, and whether it is a workflow\'s; only one that is unsaved and no workflow\'s may be offered', () => {
+  const work = decided();
+  const plain = recordOf(work, { at: AT });
+  assert.equal('unsaved' in plain, false); assert.equal('workflow' in plain, false);
+  const unsaved = recordOf(work, { at: AT, unsaved: true }), held = recordOf(work, { at: AT, unsaved: true, workflow: true });
+  assert.equal(unsaved.unsaved, true); assert.equal(held.workflow, true);
+  assert.equal(offerable(unsaved), true, 'control: unsaved, and no workflow\'s');
+  assert.equal(offerable(plain), false, 'saved, or kept before this was recorded');
+  assert.equal(offerable(held), false, 'a workflow\'s review');
+  for (const bad of [null, 'x', {}, { ...unsaved, krisisProgress: 2 }, { ...unsaved, unsaved: 'yes' }]) assert.equal(offerable(bad), false);
+  const back = readRecord(JSON.parse(JSON.stringify(unsaved)), unsaved.key);
+  assert.deepEqual([back.unsaved, back.workflow, back.reviewed, back.total], [true, false, 2, 3]);
+  assert.deepEqual([readRecord(plain).unsaved, readRecord(held).workflow], [false, true]);
+});
+
+test('the review offered as the page opens is the unsaved one changed last; a saved one, a workflow\'s, and one that does not read back are passed over', async () => {
+  const idb = new IDBFactory(), session = new Storage();
+  const store = progressStore({ indexedDB: idb, session, keep: () => true });
+  assert.equal(await store.latestOffer(), null, 'nothing kept, nothing offered');
+  const at = (h) => new Date(`2026-11-02T${h}:00:00Z`);
+  const a = decided(undefined, fresh({ subject: 'a' })), b = decided(undefined, fresh({ subject: 'c' })), c = decided(undefined, fresh({ subject: 'd' })), d = decided(undefined, fresh({ subject: 'e' }));
+  await store.put(recordOf(a, { name: 'a.krisis.json', at: at('09'), unsaved: true }));
+  assert.equal((await store.latestOffer()).name, 'a.krisis.json', 'control: the one unsaved review is offered');
+  await store.put(recordOf(b, { name: 'b.krisis.json', at: at('10'), unsaved: true }));
+  await store.put(recordOf(c, { name: 'saved.krisis.json', at: at('11') }));                                   // saved since: not offered, though later
+  await store.put(recordOf(d, { name: 'workflow.krisis.json', at: at('12'), unsaved: true, workflow: true }));   // a workflow's: not offered, though latest
+  const offer = await store.latestOffer();
+  assert.deepEqual([offer.name, offer.reviewed, offer.total, offer.at], ['b.krisis.json', 2, 3, '2026-11-02T10:00:00.000Z']);
+  assert.deepEqual(offer.work, { ...b, cursor: 0 });
+  // Saved (kept again as saved), it is no longer offered: the next unsaved one is.
+  await store.put(recordOf(b, { name: 'b.krisis.json', at: at('13') }));
+  assert.equal((await store.latestOffer()).name, 'a.krisis.json');
+  // Discarded, there is none; the saved one and the workflow's are still kept, for their own files.
+  await store.forget(reviewKey(a));
+  assert.equal(await store.latestOffer(), null);
+  assert.ok(await store.get(reviewKey(c))); assert.ok(await store.get(reviewKey(d)));
+  // A record another page of the origin wrote wrongly (its text is no work file) is passed over for the next that reads.
+  await store.put(recordOf(a, { name: 'a.krisis.json', at: at('14'), unsaved: true }));
+  await store.put({ ...recordOf(b, { name: 'bad.krisis.json', at: at('15'), unsaved: true }), text: '{"not":"a review"}' });
+  assert.equal((await store.latestOffer()).name, 'a.krisis.json');
+});
+
+test('with "keep working data" off nothing is offered, though the tab still holds the review for its own file; where IndexedDB is refused, the tab\'s is offered', async () => {
+  const idb = new IDBFactory(), session = new Storage();
+  let keep = true;
+  const store = progressStore({ indexedDB: idb, session, keep: () => keep });
+  const work = decided();
+  await store.put(recordOf(work, { at: AT, unsaved: true }));
+  assert.ok(await store.latestOffer(), 'control: kept between visits, it is offered');
+  keep = false;
+  assert.equal(await store.latestOffer(), null, 'not kept between visits: nothing offered');
+  assert.deepEqual(await databases(idb), [], 'and what the browser held is let go');
+  assert.equal(await store.put(recordOf(work, { at: AT, unsaved: true })), 'tab');
+  assert.equal(await store.latestOffer(), null, 'the tab\'s own is not offered either');
+  assert.ok(await store.get(reviewKey(work)), 'control: it is there for its own file');
+  // IndexedDB refused, working data kept: what the tab holds is what there is to offer.
+  const tabOnly = progressStore({ indexedDB: refusing, session: new Storage(), keep: () => true });
+  assert.equal(await tabOnly.put(recordOf(work, { name: 'tab.krisis.json', at: AT, unsaved: true })), 'tab');
+  assert.equal((await tabOnly.latestOffer()).name, 'tab.krisis.json');
+  // Of the tab's and the browser's, the one changed later.
+  const both = progressStore({ indexedDB: new IDBFactory(), session: new Storage(), keep: () => true });
+  const other = decided(undefined, fresh({ subject: 'c' }));
+  await both.put(recordOf(work, { name: 'browser.krisis.json', at: new Date('2026-11-02T10:00:00Z'), unsaved: true }));
+  const v = recordOf(other, { name: 'tab.krisis.json', at: new Date('2026-11-02T11:00:00Z'), unsaved: true });
+  session.setItem(TAB + v.key, JSON.stringify(v));
+  const mixed = progressStore({ indexedDB: idb, session, keep: () => true });
+  assert.equal((await mixed.latestOffer()).name, 'tab.krisis.json');
+  assert.equal((await both.latestOffer()).name, 'browser.krisis.json');
+});
+
+test('the offer\'s words say whose review, when it was left and how far it had gone, and name its three ways on', () => {
+  const O = REVIEW_KEPT.offer;
+  assert.equal(O.open, 'Open the review kept in this browser');
+  assert.match(O.what({ name: 'mine.krisis.json', at: '2026-11-02T09:05:00Z', reviewed: 2, total: 3 }), /^mine\.krisis\.json, as you left it on 2 Nov, \d\d:\d\d: 2 of 3 places reviewed\. No file has these decisions, and they have been sent nowhere\.$/);
+  assert.deepEqual([O.later, O.discard], ['Not now', 'Discard it']);
+  assert.match(REVIEW_KEPT.reopened({ at: '2026-11-02T09:05:00Z', reviewed: 2 }, 'browser'), /has been put back: 2 places reviewed\. No file has this yet: save the review to have it in one\./);
+});
+
+test('a review written out in pieces and kept in parts is offered as one kept whole is, and says the same of itself', async () => {
+  const store = progressStore({ indexedDB: new IDBFactory(), session: new Storage(), keep: () => true });
+  const work = decided();
+  const slow = await recordSlowly(work, { name: 'large.krisis.json', at: AT, unsaved: true });
+  assert.ok(Array.isArray(slow.parts) && slow.unsaved === true && !('workflow' in slow));
+  assert.equal(offerable(slow), true);
+  assert.equal((await recordSlowly(work, { at: AT, unsaved: true, workflow: true })).workflow, true);
+  assert.equal('unsaved' in await recordSlowly(work, { at: AT }), false);
+  assert.equal(await store.put(slow), 'browser');
+  const offer = await store.latestOffer();
+  assert.deepEqual([offer.name, offer.reviewed, offer.total, offer.unsaved], ['large.krisis.json', 2, 3, true]);
+  assert.deepEqual(offer.work, { ...work, cursor: 0 });
+  // Kept again as saved, in parts still: not offered.
+  await store.put(await recordSlowly(work, { name: 'large.krisis.json', at: new Date('2026-11-02T10:00:00Z') }));
+  assert.equal(await store.latestOffer(), null);
+  assert.ok(await store.get(reviewKey(work)), 'control: it is still kept, for its own file');
 });

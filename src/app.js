@@ -1457,6 +1457,7 @@ const methodosStore = workflowStore();
 const whgWorkbench = workbench({ fetch: (url, init) => permissions.fetch(url, { cat: 'collaborate', subj: 'whg', ...init }), token: () => permissions.token.get() });
 let scopeUi = null;   // Scope (Issue #33; src/scope-page.js), mounted below, once Methodos is
 let methodos = null;   // null while it is being mounted: onStep, below, may be called before it is returned
+let reviewOffered = null;   // the review kept in this browser that is offered as the page opens (reviewOffer, below), or null
 methodos = mountMethodos({
   banner: $('methodos-banner'), interview: $('methodos'), tracker: $('methodos-tracker'), tools: $('toolbox'), store: methodosStore,
   page: {
@@ -1563,6 +1564,7 @@ function workflowMode(step) {
   const began = on && !document.body.dataset.workflow;
   if (on) document.body.dataset.workflow = tracker.dataset.recipe || 'workflow'; else delete document.body.dataset.workflow;
   if (on && tracker.dataset.plain !== undefined) document.body.dataset.plain = ''; else delete document.body.dataset.plain;
+  if (began && reviewOffered) reviewOffer(null);   // a workflow is followed now: it holds its own review, and the one kept from before is not offered over it
   if (on && note.parentElement !== head) head.append(note);
   if (!on && note.parentElement === head) $('files-h').after(note);
   $('workflow-title').textContent = on && step ? step.title : '';
@@ -1745,7 +1747,7 @@ function sayKept(said) {
   state.reviewKept = said ? { ...said } : null;   // for the tests: what the line says, and of what
   if (!said) return;
   $('review-kept-text').textContent = said.kind === 'restored' ? K.restored(said, said.where) : said.kind === 'offered' ? K.offered(said, said.where)
-    : said.kind === 'cleared' ? K.cleared : said.kind === 'not-kept' ? K.notKept : K.kept(said.where);
+    : said.kind === 'reopened' ? K.reopened(said, said.where) : said.kind === 'cleared' ? K.cleared : said.kind === 'not-kept' ? K.notKept : K.kept(said.where);
   const use = $('review-kept-use'), clear = $('review-kept-clear');
   use.textContent = K.use; use.hidden = said.kind !== 'offered';
   clear.textContent = K.clear; clear.hidden = said.kind === 'cleared' || said.kind === 'not-kept';
@@ -1760,6 +1762,8 @@ function keepProgress(atOnce = false) {
   keepWriting = null;
   if (!work) return;
   const w = work, t0 = performance.now(), sig = progressSig(), at = cursor, name = workName;
+  // What no file has, and whether it is a workflow's, go with the record: a review that is unsaved and no workflow's is offered when the page next opens.
+  const flags = { unsaved: unsaved > 0, workflow: !!methodos?.following() };
   const kept = (record) => {
     keptMark = { work: w, sig }; unkeptSince = 0; offeredFile = null;
     const said = (where) => { keepCost = performance.now() - t0; if (work === w) sayKept(where === 'page' ? { kind: 'not-kept' } : { kind: 'kept', where, at: record.at, reviewed: record.reviewed, key: record.key }); };
@@ -1767,13 +1771,13 @@ function keepProgress(atOnce = false) {
   };
   if (atOnce || w.candidates.length < SLOWLY_FROM || (unkeptSince && t0 - unkeptSince > STALE)) {
     let record;
-    try { record = progressRecord(w, { name, cursor: at }); } catch { return; }
+    try { record = progressRecord(w, { name, cursor: at, ...flags }); } catch { return; }
     kept(record);
     return;
   }
   const changed = () => pass !== keepPass || work !== w || progressSig() !== sig;
   keepWriting = { work: w, sig };
-  progressRecordSlowly(w, { name, cursor: at, changed }).then((record) => {
+  progressRecordSlowly(w, { name, cursor: at, changed, ...flags }).then((record) => {
     state.reviewKeptSlowly = { pass, givenUp: !record };   // for the tests: the last writing in pieces, and whether it was given up
     if (pass !== keepPass) return;   // given up for another keeping, which has its own end
     keepWriting = null;
@@ -1796,7 +1800,8 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 /** "Keep my working data" changed: turned off, what was kept between visits is cleared at once; the review open is kept again where it now may be. */
 function progressKeepChanged() {
   if (!permissions.keepWorkingData()) keptProgress.forgetKept();
-  if (work && (keepTimer || keepWriting || ['kept', 'restored'].includes(keptSaid?.kind))) keepProgress();
+  if (work && (keepTimer || keepWriting || ['kept', 'restored', 'reopened'].includes(keptSaid?.kind))) keepProgress();
+  if (!permissions.keepWorkingData()) reviewOffer(null);   // nothing is kept between visits now, so nothing is offered
 }
 /** What is kept of the review open is cleared ("Clear what is kept"); the page's own review stays, and is kept again from its next change. */
 async function clearProgress(all = false) {
@@ -1810,6 +1815,57 @@ async function clearProgress(all = false) {
 const clearAllProgress = () => clearProgress(true);
 $('review-kept-clear').onclick = async () => { await clearProgress(); $('save-review').focus(); };
 $('review-kept-use').onclick = () => { if (offeredFile && !busy && !looking) resume(offeredFile, { useKept: true }); };
+// A review kept here and never saved, offered as the page opens (review-progress.js latestOffer: a match review begun
+// outside a workflow, holding what no file has): a card above step 1, with when it was left and how far it had gone,
+// and three ways on: open it (it is put back as it was kept, with no file chosen), not now (it stays kept, and is
+// offered at the next visit), or discard it (it is cleared from this browser). Nothing is offered with "keep working
+// data" off, to a page that has a review or a workflow, or of a review a workflow holds (the workflow brings its own back).
+function reviewOffer(record, said = '') {
+  const O = REVIEW_KEPT.offer;
+  reviewOffered = record || null;
+  $('review-offer').hidden = !record;
+  $('review-offer-said').textContent = said; $('review-offer-said').hidden = !said;
+  state.reviewOffer = record ? { key: record.key, name: record.name, at: record.at, reviewed: record.reviewed, total: record.total } : null;
+  state.reviewOfferSaid = said || null;
+  if (!record) return;
+  $('review-offer-h').textContent = O.heading; $('review-offer-what').textContent = O.what(record);
+  $('review-offer-open').textContent = O.open; $('review-offer-later').textContent = O.later; $('review-offer-discard').textContent = O.discard;
+}
+async function reviewOfferAtStart() {
+  try {
+    if (!permissions.keepWorkingData()) return;
+    if (await whenReady === false) return;
+    await methodos.takenUp();                     // a workflow taken up brings its own review back
+    let r = null;
+    try { r = await keptProgress.latestOffer(); } catch { /* none kept */ }
+    if (r && !work && !methodos.following() && permissions.keepWorkingData()) reviewOffer(r);
+  } finally { state.reviewOfferChecked = true; }   // for the tests: whether there is an offer has been settled
+}
+$('review-offer-open').onclick = async () => {
+  const r = reviewOffered;
+  if (!r || busy || looking) return;
+  // Read again: it may have been cleared, or gone further in another tab, since it was offered.
+  let now = null;
+  try { now = await keptProgress.get(r.key); } catch { /* none kept */ }
+  if (!now) { reviewOffer(null, REVIEW_KEPT.offer.gone); return; }
+  reviewOffer(null);
+  $('result').hidden = true; $('others-title').value = '';
+  beginReview(now.work, now.name);
+  unsaved = 1;   // no file has it: it counts as not saved, as when it was decided
+  markProgress();
+  sayKept({ kind: 'reopened', where: keptWhere(), at: now.at, reviewed: now.reviewed, key: now.key });
+  $('review').scrollIntoView({ block: 'start' });
+  reviewAgainstFiles(now.work);
+};
+$('review-offer-later').onclick = () => { reviewOffer(null, REVIEW_KEPT.offer.laterSaid); $('files-h').focus({ preventScroll: true }); };
+$('review-offer-discard').onclick = async () => {
+  const r = reviewOffered;
+  if (!r) return;
+  try { await keptProgress.forget(r.key); } catch { /* none kept */ }
+  reviewOffer(null, REVIEW_KEPT.offer.discarded(r.name));
+  $('files-h').focus({ preventScroll: true });
+};
+reviewOfferAtStart();
 const REVIEW_HELD = new Set(['lookup', 'lookup.levels', 'review', 'wikidata.items', 'apply', 'relate.containment']);
 const REVIEWER_KEY = 'plato-tools.reviewer';
 /**
@@ -1888,7 +1944,10 @@ async function resume(file, { useKept = false } = {}) {
     sayKept({ kind: restored ? 'restored' : found.action === 'offer' ? 'offered' : 'kept', where: keptWhere(), at: r.at, reviewed: r.reviewed, key: r.key, ...(found.action === 'none' ? {} : { fileReviewed: found.fileReviewed }) });
     offeredFile = found.action === 'offer' ? file : null;
   }
-  // A review made from other files than those chosen now is still opened, with a warning; with none chosen, it says so.
+  reviewAgainstFiles(w);
+}
+/** A review opened is set against the files chosen now: made from others, it is still opened, with a warning; with none chosen, it says so. */
+async function reviewAgainstFiles(w) {
   if (!files.length) { showWarning(W.noDatasetYet); return; }
   if (!readable(input)) { showWarning(W.notRecognisedYet); return; }
   // A table of places is shown as the review read it, by the matching kept in the work file (or by the guess, if it keeps none).
@@ -1914,6 +1973,7 @@ function beginReview(w, name, { focus = true } = {}) {
   lockColumns();
   askName(!reviewer() && order.length > 0);
   markProgress(); offeredFile = null; sayKept(null);   // nothing of it is kept yet: its first change is
+  reviewOffer(null);   // a review is on the page now: the one kept from before is no longer offered (it stays kept)
   goTo(cursor, focus);
 }
 function showWarning(text) { $('review-warning').textContent = text; $('review-warning').hidden = !text; }
