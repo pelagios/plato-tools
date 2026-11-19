@@ -1956,15 +1956,48 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   file is shown and what is kept is offered ("Use what is kept"), never taken unasked, and is
   replaced at the next change; "Clear what is kept" lets it go (the page's review stays), and a
   workflow's "Clear them" lets every review's go. A record read back is checked by `readWork()` and
-  must be of the review it is kept under (the origin is shared). Nothing is sent anywhere. Measured
-  in Node (18 November 2026, synthetic reviews of five candidates a place): serialising takes 6 to
-  9 ms for 1,000 places (2.8 MB of text), 78 to 89 ms for 10,000 (28.7 MB) and 446 to 497 ms for
-  50,000 (145 MB), on the page's own thread; the writing to IndexedDB was not measured. The tab's
-  storage has a limit of its own (commonly some 5 MB; not measured here), so with "keep working
-  data" off a review of a few thousand places may not be kept: the store then answers 'page', and the
-  line says so ("This browser would not keep your progress"). The
+  must be of the review it is kept under (the origin is shared). Nothing is sent anywhere. The
   questions asked before leaving or reloading are unchanged: they are about decisions that no file and
   no workflow holds, and a review begun by a match and never saved has no file to open again.
+- **A large review is kept without holding the page** (19 November 2026). Measured in the browser
+  (`e2e/review_autosave_scale.py`: the module itself in Playwright's Chromium, with the browser's own
+  IndexedDB and sessionStorage, on reviews of one candidate a place, each decided, in the shape a WHG
+  lookup and a bulk accept leave; two runs of each side, one after the other, on this machine), the
+  keeping as it first landed held the page, at every keeping, for as long as the whole review took to
+  write out and then to put: 7 to 11 ms and 8 to 10 ms for 1,000 decisions (2.1 MB of text), 59 to
+  89 ms and 44 to 48 ms for 10,000 (21.5 MB), and 333 to 347 ms and 191 to 220 ms for 50,000
+  (108 MB): over half a second in which no key or click was answered, some five seconds after any
+  change (1.1 s and 0.4 s on the same machine under other sessions' load). So from 2,000 candidates
+  (`SLOWLY_FROM`) the record is written out in pieces (`recordSlowly()`, over `jsonPieces()`: the work
+  file as JSON without the indentation, 69 MB where the indented text was 108 MB; 8 ms of writing at a
+  time, then a turn of the page), and a record longer than a million characters (`PART`) is kept as
+  rows of its own in a second store, `parts`, keyed `[key, n]` (the database is now version 2: a
+  version 1 database is upgraded as it is), each row put when the one before it is in, all in the one
+  transaction, so that the record is replaced whole or not at all. The longest the page was then held
+  was 18 to 20 ms in the writing and 7 to 9 ms in the putting for 10,000 decisions, and 31 to 32 ms and
+  8 to 9 ms for 50,000 (the time in all is about what it was: 324 to 339 ms and 161 to 184 ms). A
+  review of 1,000 is kept at once as before (7 to 10 ms, then 4 to 5 ms). What is written in pieces
+  must be of one state of the review: `changed` is asked at every turn, and if the review has changed
+  (the page's own test of that, `progressSig()`), the writing is given up and begun again a moment
+  later; a review changed faster than it can be written for 30 seconds (`STALE`) is written at once,
+  held page and all, rather than left unkept longer. When the page is hidden or going, the review is
+  written at once and its parts are all put at once (`put(record, { atOnce: true })`: 157 to 204 ms
+  held for 50,000), since nothing later would be done. Unit tests: `test/review-progress.test.js`
+  (the pieces joined are `JSON.stringify`'s text and none is long; the record reads back as the
+  review; given up at the turn the review changed in; parts replaced, cleared and let go with their
+  review; the cap counts reviews; a version 1 database). In the browser: `review_progress_checks` in
+  `e2e/app_test.py` (a review of 4,000 places written in pieces, kept in parts, put back after a
+  reload, beside a review of three kept at once in its one row).
+  **What is not mended, and what was not measured.** Reading a kept review back (`get()`: the text
+  parsed and checked by `readWork()`) holds the page for 62 to 82 ms at 10,000 decisions and 0.4 to
+  0.5 s at 50,000, once, when its work file is opened. The store filled to its cap was measured at
+  1,000 and 10,000 decisions (20 kept, the 21st let go; the browser reported 4 MB and 37 MB in use),
+  not at 50,000. **The tab's storage** (with "keep working data" off) held a review of at most 2,183
+  such decisions (5,242,159 characters; 2,184 was refused): a larger one is kept for the page alone,
+  the store answers 'page', and the line says so ("This browser would not keep your progress"). A
+  record longer than any sessionStorage holds (`TAB_MOST`, 11 million characters) is no longer written
+  out to be refused, which held the page 56 to 58 ms at 10,000 decisions and 0.3 s at 50,000; one that
+  fits is written there at once (18 to 29 ms held at 1,000).
 
 ## Chora, the map
 
@@ -4507,6 +4540,9 @@ npm test                                  # the engine and the command line, in 
 python3 e2e/app_test.py                   # the page itself, in Playwright's bundled Chromium
 python3 e2e/app_test.py --url=https://plato.pelagios.org/tools/   # the deployed page
 python3 e2e/app_test.py --prove-it-fails  # every check pointed at a page with no tools: all must fail
+python3 e2e/walkthrough.py                # Map your data walked through, recorded: a video and screenshots (below)
+python3 e2e/walkthrough.py --headed --slow   # the same in a window, paced for showing it live
+python3 e2e/review_autosave_scale.py      # keeping a review's progress, timed in the browser at 1,000 to 50,000 decisions
 python3 e2e/ink_budget.py                 # the budget of tracing with assistance, timed in the page
 node e2e/ink_memory.mjs                   # the tracing worker's memory, for its budget
 node scripts/install-test.mjs             # install the packed tools as npx does, and run the command
@@ -4554,6 +4590,10 @@ every night on `main` (03:17 UTC), and by hand with `gh workflow run Gates --ref
   run twice counts twice), must be the same list. prove-it-fails says only that every check that ran
   failed; a check it never reached (a section stopped early) would otherwise go unnoticed. A
   difference is shown as a diff, and an empty list from **e2e** fails too.
+- **The walkthrough** (below) runs in both browser jobs after the checks, with no pauses, as a step
+  of its own: in **e2e** every one of its steps must hold, and in **prove-it-fails** every one must
+  fail. Its `RESULT:` or `PROVE-IT-FAILS:` line is in the summary, and its screenshots are kept with
+  the logs when the job fails.
 
 ```bash
 git push -u origin my-branch
@@ -4624,6 +4664,64 @@ CORS or refusing the pixels (403).
 
 A check that finds nothing is worth something only if it could have found something: each test of
 an absence has a presence beside it, or a control that finds the same thing when it is there.
+
+### The walkthrough: Map your data, shown and recorded
+
+`e2e/walkthrough.py` follows "Map your data" on the real page as a visitor does, from the interview to
+the file downloaded, twice: **places** (WHG's own twelve-place sample, `test/fixtures/generic/whg-lp7-12.tsv`:
+its columns read by their LP-TSV roles, checked, converted, looked up, reviewed with one decision by
+hand, three accepted in bulk and one tie left to the reviewer, the decisions recorded, the matched
+places' locations taken through the licence gate, the map, the spreadsheet) and **regions** (ten farms
+with a parish and a county, `test/fixtures/methodos/parishes.csv`: counties, then parishes within
+them, then the places within their parishes, reviewed, recorded, located, the map, the spreadsheet).
+Fourteen steps each. WHG is never called: every request to it is answered by the script, so a walk is
+the same every time and needs no network and no token. The browser is Playwright's own Chromium with a
+profile made for the run: never the Chrome installed, with a window or without.
+
+```bash
+~/.config/plato-tools/heavy.sh python3 e2e/walkthrough.py                  # recorded, no window (about 1.5 minutes)
+~/.config/plato-tools/heavy.sh python3 e2e/walkthrough.py --headed --slow  # in a window, each caption held 4 s
+python3 e2e/walkthrough.py --walk=regions --pace=2500 --out=DIR            # one walk, another pace, another place
+python3 e2e/walkthrough.py --pace=0 --no-build                             # as a check only (20 s), on dist/ as built
+python3 e2e/walkthrough.py --prove-it-fails                                # against a page with no tools: 28 of 28 must fail
+python3 e2e/walkthrough.py --break=no-candidates                           # the real page, WHG's stub finding nothing: must stop at the lookup
+```
+
+A caption bar along the bottom of the window says what is being done (it is the walkthrough's, put
+there through the element's style object, which the page's Content Security Policy allows;
+`--no-captions` leaves it out, for screenshots of the page as it is). What a run writes goes to
+`.scratch/walkthrough/` (in `.gitignore`; `--out=` for elsewhere), and only that run's files are there
+after it: `NN-<walk>-<step>.png` as each step ends, `walkthrough-<walk>.webm` as Playwright records
+it (1280 × 800, about 6 MB for the 52 seconds of a walk at the default pace), and, where `ffmpeg` is
+installed, `walkthrough-<walk>.mp4` (H.264 at 8 frames a second, about 2 MB) and a
+`walkthrough-<walk>.gif` (720 px wide, 2 frames a second, 48 colours, about 4 MB). With `--headed`
+the same files are written.
+
+Every step ends on something read from the page or from a file the page wrote (the queries sent, the
+decisions in the work file, the locations in the dataset downloaded, the rows of the spreadsheet), and
+a step that does not hold stops the walk there, with `NN-…-FAILED.png`, what the page said, and exit
+status 1. That it can fail was shown each way it could be vacuous: against a page with no tools all 28
+steps fail (`--prove-it-fails`); on the real page with the stub answering wrongly the walk stops at
+the step that depends on the answer and names it (`--break=no-candidates`: the lookup, and the
+counties; `--break=no-licence`: where the locations are taken); and the two things it reads off the
+page as drawn, below, each failed on the page as it was before it was mended.
+
+Looking at its screenshots at 1280 × 800 found two things wrong on the page, both mended and both now
+read by the walkthrough where it shows them (19 November 2026):
+
+- **A label parted from its own list.** The bars of controls of the review and of the regions are
+  rows that wrap, and at this width a label was left at one line's end with its list on the next
+  ("How certain" and its list; the bulk accept's "as" and its list). Each label and its list are now
+  one `.field` (`index.html`, `drawBulk()` in `src/app.js`, `.field` in `src/styles.css`), which goes
+  to the next line whole; the bulk accept's button is in the field of the list that says what it
+  accepts as. `BESIDE` in the walkthrough reads, for every label shown in a bar, whether it is on its
+  list's line.
+- **The step at hand out of sight in the tracker.** In the rail only the list of steps scrolls, and
+  the step at hand was brought into sight when the workflow came to it, but not when the list was then
+  given less room: at "Use the locations of the matches", the step's words and its licence box take
+  the room, and the list showed steps 1 to 5 of 11 with the step at hand, the seventh, below them. A
+  `ResizeObserver` on the list now brings the step back into sight (`stepInSight()` in `src/app.js`).
+  `IN_SIGHT` reads it at the licence step, where the list does scroll.
 
 Tests that need the DEEP exports (from
 [WorldHistoricalGazetteer/epns](https://github.com/WorldHistoricalGazetteer/epns), in

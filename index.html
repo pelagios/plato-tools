@@ -386,10 +386,10 @@
       <p id="regions-how" class="note"></p>
       <nav id="regions-nav" class="regions-nav"></nav>
       <div class="regions-bar">
-        <label id="region-identity-label" for="region-identity"></label>
-        <select id="region-identity"></select>
-        <label id="region-certainty-label" for="region-certainty"></label>
-        <select id="region-certainty"></select>
+        <span class="field"><label id="region-identity-label" for="region-identity"></label>
+        <select id="region-identity"></select></span>
+        <span class="field"><label id="region-certainty-label" for="region-certainty"></label>
+        <select id="region-certainty"></select></span>
         <button id="regions-stop" type="button" hidden></button>
       </div>
       <p id="regions-permission" hidden></p>
@@ -399,17 +399,17 @@
     </section>
     <div class="review-bar">
       <p id="review-progress" aria-live="polite"></p>
-      <label for="review-filter">Show</label>
+      <span class="field"><label for="review-filter">Show</label>
       <select id="review-filter">
         <option value="undecided">places still to decide</option>
         <option value="all">all places</option>
-      </select>
-      <label for="identity-type">Record “Same place” as</label>
+      </select></span>
+      <span class="field"><label for="identity-type">Record “Same place” as</label>
       <select id="identity-type">
         <option value="exactMatch">the same place (exact match)</option>
         <option value="closeMatch">much the same place (close match)</option>
         <option value="related">a related place</option>
-      </select>
+      </select></span>
     </div>
     <!-- Krisis × Methodos: the order of the places, and the bulk accept of what passes WHG's guards; drawn by src/app.js (words.js guardWords). -->
     <div id="review-bulk" class="review-bulk"></div>

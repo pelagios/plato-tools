@@ -987,6 +987,10 @@ h2[hidden] { display: none; }
 .review-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .7rem; margin: 0 0 .6rem; }
 .review-bulk #bulk-result { flex-basis: 100%; margin: .1rem 0 0; }
 .review-bulk #bulk-result:empty { display: none; }
+/* A label and its own list (and the bulk accept's button with the list that says what it accepts as), kept together:
+   where the row wraps, the pair goes to the next line whole, never the label at one line's end and its list on the
+   next; a pair wider than the row (a phone) wraps within itself. */
+.review-bar .field, .review-bulk .field, .regions-bar .field { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .6rem; min-width: 0; max-width: 100%; }
 /* The place under review: its name, then what the data says of it, with room before its candidates. */
 #review-place > h3 { margin-top: 1rem; }
 .candidate .acts button { min-height: 2.5rem; }

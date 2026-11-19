@@ -127,6 +127,15 @@ jobs:
         env:
           PLATO_REPO: ${{ github.workspace }}/plato-repo
           PYTHONUNBUFFERED: '1'
+      # The walkthrough of Map your data (e2e/walkthrough.py), its two walks run as a check, with no pauses: every step
+      # must hold against the build, and every step must fail against the page with no tools. Run whatever the checks
+      # above came to; its own log, so that the names for same-checks are the browser checks' alone.
+      - name: Walkthrough (${{ matrix.mode }})
+        if: always()
+        shell: bash
+        run: python e2e/walkthrough.py --no-build --pace=0 ${{ matrix.mode == 'prove-it-fails' && '--prove-it-fails' || '' }} 2>&1 | tee walkthrough.log
+        env:
+          PYTHONUNBUFFERED: '1'
       # The names of the checks run, for same-checks below: sorted, not made unique, so a check run twice counts twice.
       - name: Names of the checks run
         if: always()
@@ -148,6 +157,10 @@ jobs:
             grep -E '^(RESULT|PROVE-IT-FAILS):' e2e.log || echo "no RESULT line (the run stopped before it)"
             echo "$(grep -c '^  PASS ' e2e.log || true) passed, $(grep -c '^  FAIL ' e2e.log || true) failed"
             echo '```'
+            echo "### Walkthrough: ${{ matrix.mode }}"
+            echo '```'
+            grep -E '^(RESULT|PROVE-IT-FAILS):' walkthrough.log || echo "no RESULT line (the walkthrough stopped before it, or did not run)"
+            echo '```'
             if [ "${{ matrix.mode }}" = e2e ] && grep -q '^  FAIL ' e2e.log; then echo "Failed:"; echo '```'; grep '^  FAIL ' e2e.log | head -40; echo '```'; fi
             if [ "${{ matrix.mode }}" = prove-it-fails ] && grep -q '^  PASS ' e2e.log; then echo "Passed against a page with no tools:"; echo '```'; grep '^  PASS ' e2e.log | head -40; echo '```'; fi
           } >> "$GITHUB_STEP_SUMMARY"
@@ -155,8 +168,12 @@ jobs:
         if: failure()
         with:
           name: ${{ matrix.mode }}-log
-          path: e2e.log
+          path: |
+            e2e.log
+            walkthrough.log
+            .scratch/walkthrough/*.png
           if-no-files-found: ignore
+          include-hidden-files: true
 
   # prove-it-fails says every check that RAN failed; this says the same checks ran in both legs. A check
   # that the page with no tools never reached (a section stopped early) is otherwise missed: it would be

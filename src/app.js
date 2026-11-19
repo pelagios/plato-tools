@@ -12,7 +12,7 @@ import { splitMatching } from './engine/hermes/cluster.js';
 import { review as W, POOL_BUSY, POOL_STUCK, PREVIEW_WORDS, CANCEL_RELEASING, CHORA_HANDOVER, NO_STORAGE, storageRefused, NOT_DOWNLOADED, downloadFailed, NO_ENGINE_STORAGE, engineStorageLacking, NO_ROOM, noRoom } from './engine/words.js';
 const REVIEW_WORDS = W;   // the review's words, where W names the words for the columns
 import { REVIEW_KEPT } from './engine/words.js';
-import { progressStore, recordOf as progressRecord, onOpen as progressOnOpen, reviewKey } from './lib/review-progress.js';
+import { progressStore, recordOf as progressRecord, recordSlowly as progressRecordSlowly, onOpen as progressOnOpen, reviewKey, SLOWLY_FROM } from './lib/review-progress.js';
 import { readable } from './engine/input.js';
 import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions, flag, noteOn, setRowState, kindOfCandidate, acceptedFor } from './engine/krisis/work.js';
 import { QUALIFIER_LISTS } from './engine/krisis/qualifiers.js';
@@ -1575,16 +1575,21 @@ function workflowMode(step) {
   }
   // The list of steps scrolls on its own in the rail when it is longer than the room: the step at hand is
   // brought into sight in it when the workflow comes to another step (the list alone, never the page).
-  const list = $('methodos-track'), now = list.querySelector('li[aria-current]');
-  if (on && now && now.dataset.step !== railAt) {
-    railAt = now.dataset.step;
-    if (list.scrollHeight > list.clientHeight) {
-      const r = list.getBoundingClientRect(), n = now.getBoundingClientRect();
-      if (n.top < r.top || n.bottom > r.bottom) list.scrollTop += n.top - r.top - r.height / 3;
-    }
-  }
+  const now = $('methodos-track').querySelector('li[aria-current]');
+  if (on && now && now.dataset.step !== railAt) { railAt = now.dataset.step; stepInSight(); }
   expertFold();   // a scholar-facing workflow begun or left: step 2's other parts folded away, or put back
 }
+/** The step at hand brought into sight in the list of steps, where the list scrolls and the step is out of it. */
+function stepInSight() {
+  const list = $('methodos-track'), now = list.querySelector('li[aria-current]');
+  if (!now || list.scrollHeight <= list.clientHeight) return;
+  const r = list.getBoundingClientRect(), n = now.getBoundingClientRect();
+  if (n.top < r.top || n.bottom > r.bottom) list.scrollTop += n.top - r.top - r.height / 3;
+}
+// The list is given less room without the workflow coming to another step, when what is under it grows (a step's
+// message, the box and the warning of the locations' step, a shorter window): the step at hand, in sight when the
+// workflow came to it, was then left above or below what the list showed (seen at 1280 x 800, November 2026).
+if (typeof ResizeObserver === 'function') new ResizeObserver(() => stepInSight()).observe($('methodos-track'));
 /** The label that says which step a result shown was of (#result-of), or none. */
 function resultOf(label) { $('result-of').textContent = label || ''; $('result-of').hidden = !label; }
 /** The user acts on the step at hand: a result still shown from an earlier step is put away, summed up in its row. */
@@ -1718,6 +1723,15 @@ const keptProgress = progressStore({ keep: () => permissions.keepWorkingData() }
 // keptMark: the review as last kept (or as begun: nothing to keep yet). keptSaid: what the line says. offeredFile:
 // the file opened while other progress is kept, for "Use what is kept".
 let keptMark = null, keepTimer = 0, keepCost = 0, keptSaid = null, offeredFile = null;
+// A large review (SLOWLY_FROM candidates or more) is written out in pieces, the page answering between them, and the
+// writing is given up and begun again when the review changes under it (a record of two states of a review is never
+// kept): keepPass numbers the writings, so that one given up says nothing; unkeptSince is when the review first
+// changed and was not yet kept, and after STALE of that (decisions made faster than the writing, for that long) the
+// review is written out at once, the page held for it, rather than left unkept longer.
+// keepWriting is the review being written out in pieces, as it stood when the writing began: it is not begun again
+// for a drawing of the page that changed nothing.
+let keepPass = 0, unkeptSince = 0, keepWriting = null;
+const STALE = 30000;
 const progressSig = () => `${unsaved}|${saves}|${work.candidates.length}|${(work.lookups || []).length}`;
 const markProgress = () => { keptMark = work ? { work, sig: progressSig() } : null; };
 const keptWhere = () => (permissions.keepWorkingData() ? 'browser' : 'tab');
@@ -1733,34 +1747,57 @@ function sayKept(said) {
   use.textContent = K.use; use.hidden = said.kind !== 'offered';
   clear.textContent = K.clear; clear.hidden = said.kind === 'cleared' || said.kind === 'not-kept';
 }
-/** Keep the review as it stands, now. */
-function keepProgress() {
+/**
+ * Keep the review as it stands. `atOnce`: now, the page held while it is written out (the page is leaving, or the
+ * review has gone unkept too long); otherwise a large review is written out in pieces, and kept when it is written.
+ */
+function keepProgress(atOnce = false) {
   clearTimeout(keepTimer); keepTimer = 0;
+  const pass = ++keepPass;   // a writing under way is given up
+  keepWriting = null;
   if (!work) return;
-  const w = work, t0 = performance.now();
-  let record;
-  try { record = progressRecord(w, { name: workName, cursor }); } catch { return; }
-  markProgress(); offeredFile = null;
-  const said = (where) => { keepCost = performance.now() - t0; if (work === w) sayKept(where === 'page' ? { kind: 'not-kept' } : { kind: 'kept', where, at: record.at, reviewed: record.reviewed, key: record.key }); };
-  keptProgress.put(record).then(said, () => said('page'));
+  const w = work, t0 = performance.now(), sig = progressSig(), at = cursor, name = workName;
+  const kept = (record) => {
+    keptMark = { work: w, sig }; unkeptSince = 0; offeredFile = null;
+    const said = (where) => { keepCost = performance.now() - t0; if (work === w) sayKept(where === 'page' ? { kind: 'not-kept' } : { kind: 'kept', where, at: record.at, reviewed: record.reviewed, key: record.key }); };
+    keptProgress.put(record, { atOnce }).then(said, () => said('page'));
+  };
+  if (atOnce || w.candidates.length < SLOWLY_FROM || (unkeptSince && t0 - unkeptSince > STALE)) {
+    let record;
+    try { record = progressRecord(w, { name, cursor: at }); } catch { return; }
+    kept(record);
+    return;
+  }
+  const changed = () => pass !== keepPass || work !== w || progressSig() !== sig;
+  keepWriting = { work: w, sig };
+  progressRecordSlowly(w, { name, cursor: at, changed }).then((record) => {
+    state.reviewKeptSlowly = { pass, givenUp: !record };   // for the tests: the last writing in pieces, and whether it was given up
+    if (pass !== keepPass) return;   // given up for another keeping, which has its own end
+    keepWriting = null;
+    if (record) kept(record);
+    else if (work === w) { keepCost = performance.now() - t0; progressChanged(); }   // the review changed under it: again, in a moment
+  }, () => { if (pass === keepPass) keepWriting = null; });
 }
 /** The review may have changed (it is asked at every drawing of it): if it has since it was last kept, it is kept again in a moment, the longer the larger it is. */
 function progressChanged() {
   if (!work || (keptMark?.work === work && keptMark.sig === progressSig())) return;
+  if (!unkeptSince) unkeptSince = performance.now();
+  if (keepWriting?.work === work && keepWriting.sig === progressSig()) return;   // it is being written out as it stands
   if (!keepTimer) keepTimer = setTimeout(keepProgress, Math.min(5000, Math.max(250, keepCost * 10)));
 }
-// The page going (a reload, a tab closed or put in the background): what was to be kept in a moment is kept now.
-const keepBeforeLeaving = () => { progressChanged(); if (keepTimer) keepProgress(); };
+// The page going (a reload, a tab closed or put in the background): what was to be kept in a moment, or was being
+// written out in pieces, is kept now, at once.
+const keepBeforeLeaving = () => { progressChanged(); if (keepTimer || keepWriting) keepProgress(true); };
 window.addEventListener('pagehide', keepBeforeLeaving);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') keepBeforeLeaving(); });
 /** "Keep my working data" changed: turned off, what was kept between visits is cleared at once; the review open is kept again where it now may be. */
 function progressKeepChanged() {
   if (!permissions.keepWorkingData()) keptProgress.forgetKept();
-  if (work && (keepTimer || ['kept', 'restored'].includes(keptSaid?.kind))) keepProgress();
+  if (work && (keepTimer || keepWriting || ['kept', 'restored'].includes(keptSaid?.kind))) keepProgress();
 }
 /** What is kept of the review open is cleared ("Clear what is kept"); the page's own review stays, and is kept again from its next change. */
 async function clearProgress(all = false) {
-  clearTimeout(keepTimer); keepTimer = 0;
+  clearTimeout(keepTimer); keepTimer = 0; keepPass++; keepWriting = null; unkeptSince = 0;   // and a writing under way is given up: it would keep what is being cleared
   const w = work;
   try { if (all) await keptProgress.forgetAll(); else if (w) await keptProgress.forget(reviewKey(w)); } catch { /* none kept */ }
   if (work !== w) return;
@@ -1831,7 +1868,7 @@ async function resume(file, { useKept = false } = {}) {
   // records, it is put back (the page reloaded, or come back to); not, the file is shown and what is kept is offered
   // ("Use what is kept": useKept). So too when this review is the one on the page now: its file was chosen over it.
   let found = { action: 'none', record: null };
-  if (keepTimer) keepProgress();   // the review open now may be this one: what is read of it is then its latest
+  if (keepTimer || keepWriting) keepProgress(true);   // the review open now may be this one: what is read of it is then its latest
   const open = !!work && reviewKey(work) === reviewKey(w);
   try { found = progressOnOpen(w, await keptProgress.get(reviewKey(w)), { use: useKept, open }); } catch { /* none kept */ }
   const restored = found.action === 'restore';
@@ -1856,7 +1893,7 @@ async function resume(file, { useKept = false } = {}) {
   try { const differ = await filesDiffer(w.subjects, files); showWarning(differ.length ? W.differs(differ) : ''); } catch { showWarning(''); }
 }
 function beginReview(w, name, { focus = true } = {}) {
-  if (keepTimer) keepProgress();   // the review this one takes the place of, as it stood
+  if (keepTimer || keepWriting) keepProgress(true);   // the review this one takes the place of, as it stood
   work = w; workName = name || workName; basisFor = null; findFor = null; allDone = false; unsaved = 0; handedOver = 0;
   exportedSet = null; earlierSets = []; candidatesStatus('');
   wikidata.reset();   // Krisis: Wikidata items (#36): a new review, nothing of the last one's kept
@@ -2113,11 +2150,12 @@ function drawBulk() {
   const box = $('review-bulk');
   if (!box) return;
   if (!box.firstChild) {
-    box.innerHTML = `<label for="review-order">${escapeHtml(GW.orderLabel)}</label><select id="review-order">`
-      + Object.entries(GW.orders).map(([k, t]) => `<option value="${k}">${escapeHtml(t)}</option>`).join('') + '</select>'
-      + '<button id="bulk-accept" type="button"></button>'
+    // Each label with its own list in one .field, and the button with the list that says what it accepts as: a row that wraps never parts them.
+    box.innerHTML = `<span class="field"><label for="review-order">${escapeHtml(GW.orderLabel)}</label><select id="review-order">`
+      + Object.entries(GW.orders).map(([k, t]) => `<option value="${k}">${escapeHtml(t)}</option>`).join('') + '</select></span>'
+      + '<span class="field"><button id="bulk-accept" type="button"></button>'
       + `<label for="bulk-type">${escapeHtml(GW.typeLabel)}</label><select id="bulk-type">`
-      + ['closeMatch', 'exactMatch', 'related'].map((t) => `<option value="${t}"${t === 'closeMatch' ? ' selected' : ''}>${escapeHtml($('identity-type').querySelector(`option[value="${t}"]`)?.textContent || t)}</option>`).join('') + '</select>'
+      + ['closeMatch', 'exactMatch', 'related'].map((t) => `<option value="${t}"${t === 'closeMatch' ? ' selected' : ''}>${escapeHtml($('identity-type').querySelector(`option[value="${t}"]`)?.textContent || t)}</option>`).join('') + '</select></span>'
       + '<p id="bulk-result" aria-live="polite"></p>';
     $('review-order').onchange = () => { reorder(); render(false); };
     $('bulk-accept').onclick = bulkAccept;

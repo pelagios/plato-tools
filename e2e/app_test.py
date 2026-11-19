@@ -8250,8 +8250,13 @@ REVIEW_KEPT = '''() => { const p = window.__plato || {}, l = document.getElement
     use: v(document.getElementById('review-kept-use')), clear: v(document.getElementById('review-kept-clear')),
     decisions: Object.fromEntries(((p.work || {}).candidates || []).map((c) => [c.id, c.decision ? c.decision.kind : null])) }; }'''
 REVIEW_DBS = "async () => (await indexedDB.databases()).map((d) => d.name).filter((n) => /krisis/.test(n))"
-REVIEW_RECORDS = '''async () => { const db = await new Promise((res, rej) => { const q = indexedDB.open('plato-tools-krisis-progress', 1); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+REVIEW_RECORDS = '''async () => { const db = await new Promise((res, rej) => { const q = indexedDB.open('plato-tools-krisis-progress'); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
   try { return await new Promise((res, rej) => { const g = db.transaction('reviews').objectStore('reviews').count(); g.onsuccess = () => res(g.result); g.onerror = () => rej(g.error); }); } finally { db.close(); } }'''
+# How the database holds what it keeps: its reviews (each a row), and the rows a long record's text is kept in (the store 'parts').
+REVIEW_ROWS = '''async () => { const db = await new Promise((res, rej) => { const q = indexedDB.open('plato-tools-krisis-progress'); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+  const all = (name) => new Promise((res, rej) => { const g = db.transaction(name).objectStore(name).getAll(); g.onsuccess = () => res(g.result); g.onerror = () => rej(g.error); });
+  try { const reviews = await all('reviews'), parts = await all('parts');
+    return { reviews: reviews.map((v) => ({ reviewed: v.reviewed, parts: v.parts ?? null, text: typeof v.text === 'string' })).sort((a, b) => a.reviewed - b.reviewed), parts: parts.length, longest: Math.max(0, ...parts.map((p) => p.length)) }; } finally { db.close(); } }'''
 
 def review_progress_checks(pw, url, tmp):
     base = url.rstrip('/') + '/'
@@ -8370,6 +8375,40 @@ def review_progress_checks(pw, url, tmp):
               and elsewhere['reviewed'] == 0 and elsewhere['line'] is None)
         return ok, {'kept': kept, 'databases': dbs, 'in the tab\'s storage': session, 'after the reload': after, 'opened again': back, 'in another tab': elsewhere}
     attempt('match review: with "Keep my working data between visits" off, the progress is kept for the tab only and the line says so: no database is made, the same tab reloaded has the decision back, and another tab of the same browser has none', tab_only)
+
+    def large_review():
+        # A review of 4,000 places, a candidate each (from 2,000 a review is written out in pieces, the page answering between
+        # them, and kept in parts: review-progress.js SLOWLY_FROM, PART). How long the page is held is measured apart
+        # (e2e/review_autosave_scale.py); here, that what is kept that way is the review, and is put back.
+        n = 4000
+        big = {**work, 'generated_at': '2026-11-01T12:00:00Z', 'places': {A + f'p{i}': {'label': f'Place {i}', 'names': [f'Place {i}'], 'point': None} for i in range(n)},
+               'candidates': [cand(i + 1, f'p{i}', f'q{i}') for i in range(n)]}
+        big_file = out / 'large.krisis.json'; big_file.write_text(json.dumps(big, indent=2) + '\n')
+        page = context().new_page(); ready(page)
+        opened = open_review(page, big_file)
+        kept = decide(page, ['a', 'n'], 2)
+        slowly = page.evaluate('() => window.__plato.reviewKeptSlowly || null')
+        held = page.evaluate(REVIEW_ROWS)
+        # The control, in the same browser: a review of three places is kept at once, its text in its own row, and adds no part.
+        open_review(page)
+        small = decide(page, ['a'], 1)
+        slowly_after = page.evaluate('() => window.__plato.reviewKeptSlowly || null')
+        both = page.evaluate(REVIEW_ROWS)
+        after = reloaded(page)
+        back = open_review(page, big_file)
+        firsts = {k: back['decisions'].get(k) for k in ('c1', 'c2', 'c3')}
+        ok = (opened['reviewed'] == 0 and opened['line'] is None and kept['reviewed'] == 2 and (kept['kept'] or {}).get('where') == 'browser'
+              and slowly is not None and slowly.get('givenUp') is False
+              and len(held['reviews']) == 1 and held['reviews'][0]['text'] is False and held['reviews'][0]['parts'] == held['parts'] >= 2 and 0 < held['longest'] < 1_100_000
+              and small['reviewed'] == 1 and slowly_after == slowly
+              and both['reviews'] == [{'reviewed': 1, 'parts': None, 'text': True}, held['reviews'][0]] and both['parts'] == held['parts']
+              and after == {'phase': 'ready', 'review on the page': False}
+              and back['reviewed'] == 2 and firsts == {'c1': 'match', 'c2': 'not-this', 'c3': None} and len(back['decisions']) == n and (back['kept'] or {}).get('kind') == 'restored'
+              and 'has been put back: 2 places reviewed, where the file opened has 0' in (back['line'] or ''))
+        for v in (opened, kept, small, back): v['decisions'] = {k: v['decisions'].get(k) for k in ('c1', 'c2', 'c3')}
+        return ok, {'opened': opened, 'kept': kept, 'written in pieces': slowly, 'held as': held, 'the small review after it': small, 'written in pieces then': slowly_after, 'both held as': both,
+                    'after the reload': after, 'opened again': back}
+    attempt('match review: a review of 4,000 places is written out in pieces and kept in parts of at most about a million characters (a review of three, after it, at once in its one row, adding no part); the page reloaded, the large review opened again has its two decisions back', large_review)
 
     for ctx in made:
         try: ctx.close()
