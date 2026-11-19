@@ -6230,6 +6230,11 @@ def locate_checks(pw, url, tmp):
         decided = lambda s: sum(1 for c in (s.get('work') or {}).get('candidates', []) if (c.get('decision') or {}).get('kind') == 'match')
         n = decided(wait_state(page, lambda s: decided(s) == 3, T(15), 'accepted'))
         page.click('#methodos-done'); step_is('review', 'done', 15)
+        # "Only my decisions" first: the file of the decisions alone is written, and is not the step (the next steps need the places).
+        page.check('input[name="review-output"][value="attestations"]')
+        alone = run('#finish')
+        said = soon(page, "() => /This run is not counted as the step/.test(document.getElementById('methodos-message').textContent)", 20)
+        r['only decisions'] = {'written': [o['name'] for o in (alone.get('outputs') or [])], 'said': said, **{k: track()[k] for k in ('steps', 'message')}}
         page.check('input[name="review-output"][value="dataset"]')
         s = run('#finish'); step_is('apply', 'done', 30)
         name = next(o['name'] for o in (s.get('outputs') or []) if o['name'].endswith('.krisis-dataset.json'))
@@ -6254,6 +6259,14 @@ def locate_checks(pw, url, tmp):
                 and e.get('Beta Mill') == [] and e.get('Gamma Cross') == []), \
             {'accepted': n, 'as recorded': recorded, 'at the step': b, 'after': {k: s[k] for k in ('message', 'step', 'next', 'chosen', 'undo')}, 'locations': e}
     attempt('Map your data (locations): three places matched and recorded, none yet located; the step says "Use the locations of 1 of 3 matched places" and takes nothing; "Use the locations of 1 place" pressed, the step is done, Alpha Ford has its record\'s point, citing WHG with the source\'s CC BY 4.0, in the reviewer\'s name, and Beta Mill (no licence stated) and Gamma Cross (no point) have none', licensed)
+
+    def only_decisions():
+        need('only decisions', 'once')
+        o = r['only decisions']
+        # The file of the decisions alone was made (the run happened: the refusal is of a run, not of nothing), and the step waited.
+        return (any(n.endswith('.krisis-attestations.json') for n in o['written']) and o['steps'].get('apply') == 'current' and o['steps'].get('locate') != 'current'
+                and o['message'] == 'This run is not counted as the step “Save your decisions”: it saved only your decisions, as a file of their own, and the steps that follow need your places with the decisions added. Choose “Add my decisions to my places (the usual choice)”. Press “Save your decisions”, below the review.'), o
+    attempt('Map your data (locations): "Only my decisions" chosen at the step that saves them writes the file of the decisions alone and is not counted as the step, said in plain words; the step waits until they are added to the places', only_decisions)
 
     def unknown_licence():
         need('once')

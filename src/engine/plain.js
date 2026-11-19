@@ -204,6 +204,8 @@ export const plainCites = (sources) => (sources.length
 export const PLAIN_RECORDED = 'What was saved, and by whom, is noted in your review, so that saving again later can tell what it wrote before: save the review too (“Save the review”).';
 /** What the workflow says to press at the step that saves the decisions. */
 export const PRESS_SAVE = `“${PLAIN_FINISH.button}”, below the review`;
+/** "Only my decisions" chosen in a workflow whose later steps read the places: the run is not the step's (`title`), and why (the step's own message, which follows it, says what to press). */
+export const onlyDecisions = (title) => `This run is not counted as the step “${title}”: it saved only your decisions, as a file of their own, and the steps that follow need your places with the decisions added. Choose “${PLAIN_FINISH.dataset.split('.')[0]}”.`;
 /** The fold within the review's end, and within the lookup: what each holds. */
 export const FINISH_EXPERT_NOTE = 'What happens to an answer you change later, and the list of suggestions for publishing. Neither is needed to save your decisions.';
 export const LOOKUP_EXPERT_NOTE = 'Another service, each place’s other names and spellings, the language of the names, filters, and the first queries exactly as they would be sent. None of it is needed to look your places up.';

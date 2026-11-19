@@ -17,7 +17,7 @@ import { outputStore } from './outputs.js';
 import { stepAt, currentInput, startFiles, keptBy, keptFor, keptWords, distinct, projectWords, notKept } from './seams.js';
 import { regionsSettled, notReviewed, relateProblem, unexported, reviewDiffers, writesItself, columnsProblem } from '../engine/methodos/containment.js';
 import { stepMark, whereWords, lower } from './layout.js';
-import { lossyWords, toolTip, PLAIN_WAITS, PLAIN_MAP, PLAIN_PUBLISH, plainPart, publishNext, PRESS_SAVE } from '../engine/plain.js';
+import { lossyWords, toolTip, PLAIN_WAITS, PLAIN_MAP, PLAIN_PUBLISH, plainPart, publishNext, PRESS_SAVE, onlyDecisions } from '../engine/plain.js';
 import { whyWords, shareLink, ENROL, WorkbenchError, WORDS, capWords } from '../engine/workbench.js';
 import { stateOf, fromSnapshot } from './whg.js';
 
@@ -579,12 +579,15 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       }
       // A Finish counts as recording the decisions only if it makes what the workflow keeps them in, and, when the
       // workflow publishes, on a review whose suggestions are exported (each answer then names its candidate).
-      if (s.op === 'apply' && s.options && 'intoDataset' in s.options) {
-        const want = s.options.intoDataset === false ? 'attestations' : 'dataset';
+      // A workflow that does not ask keeps them in the dataset, as its own engine does (adapters.js, apply): the steps that
+      // follow (the matches' locations, the map, the check) read the places, which a file of the decisions alone has none of.
+      if (runOf(s.op) === 'apply') {
+        const want = s.options?.intoDataset === false ? 'attestations' : 'dataset';
         if (run.output && run.output !== want) {
-          say(`This run is not counted as the step “${s.title}”: this workflow ${want === 'dataset' ? 'adds the decisions to your dataset' : 'keeps the decisions in a file of their own'}, so choose “${want === 'dataset' ? 'Your dataset with the new attestations added' : 'A PLATO file of only the new attestations'}” under Finish, and finish again.`, true); render(false); return;
+          if (plainWf() && want === 'dataset') say(onlyDecisions(s.title), true);
+          else say(`This run is not counted as the step “${s.title}”: this workflow ${want === 'dataset' ? 'adds the decisions to your dataset' : 'keeps the decisions in a file of their own'}, so choose “${want === 'dataset' ? 'Your dataset with the new attestations added' : 'A PLATO file of only the new attestations'}” under Finish, and finish again.`, true); render(false); return;
         }
-        if (s.options.exportCandidates === true) {
+        if (s.options?.exportCandidates === true) {
           const r = page.review();
           let why;
           try { why = r ? unexported(JSON.parse(r.text)) : 'There is no review open.'; } catch { why = 'The review open cannot be read.'; }
