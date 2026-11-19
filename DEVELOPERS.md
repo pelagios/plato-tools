@@ -1988,9 +1988,30 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   review; the cap counts reviews; a version 1 database). In the browser: `review_progress_checks` in
   `e2e/app_test.py` (a review of 4,000 places written in pieces, kept in parts, put back after a
   reload, beside a review of three kept at once in its one row).
-  **What is not mended, and what was not measured.** Reading a kept review back (`get()`: the text
-  parsed and checked by `readWork()`) holds the page for 62 to 82 ms at 10,000 decisions and 0.4 to
-  0.5 s at 50,000, once, when its work file is opened. The store filled to its cap was measured at
+  **A kept review is read back without holding the page** (19 November 2026). Reading one back
+  (`get()`, and `latestOffer()` as the page opens: the text parsed, then every place, candidate and
+  query checked by `readWork()`) held the page for as long as it took, once, when its work file was
+  opened or the page offered it: 59 to 66 ms at 10,000 decisions and 407 to 457 ms at 50,000 (the same
+  record read by `readRecord()`, in the same two runs as what follows, on this machine under other
+  sessions' load; 335 ms on a quieter run). The store now reads with `readRecordSlowly()`: the text is
+  parsed in steps by `src/lib/json-slowly.js` (`parseSteps()`: a value of at most 65,536 characters,
+  `WHOLE`, is given to `JSON.parse` as it is, and only what is longer, the work file, its candidates,
+  its places, a lookup's queries, is taken apart member by member, so every value is still parsed by
+  `JSON.parse` and the punctuation between them is read strictly; a member named `__proto__` is a
+  member, as `JSON.parse` has it), and checked in steps by `readWorkSlowly()` in
+  `src/engine/krisis/work.js`, which is `readWork()`'s own code: the reader's checks are a generator
+  (`workSteps()`, yielding every 256 places, candidates or queries) that `readWork()` runs to its end
+  and `readWorkSlowly()` runs 8 ms at a time with a turn of the page between. The longest the page is
+  then held is 23 ms at 10,000 decisions and 46 to 57 ms at 50,000 (the time in all is about double:
+  133 to 142 ms and 782 to 836 ms). What is left of that at 50,000 is the 69 million characters of the
+  parts made one string (about 30 ms, in one go: the browser's own work), and two lists of the
+  places' and the queries' entries. `sameWork()` and `decidedOtherwise()`, which `onOpen()` runs when
+  a work file is opened over progress kept, still write both reviews out at once: not measured here.
+  Unit tests: `test/json-slowly.test.js` (what is read is what `JSON.parse` reads, at every size of
+  piece; what it refuses is refused, over every cut and every one-character change of a text; the
+  turns given), and in `test/review-progress.test.js` the same record and the same refusals as at
+  once, the turns counted, and the reader in steps refusing in the reader's own words.
+  **What is not mended, and what was not measured.** The store filled to its cap was measured at
   1,000 and 10,000 decisions (20 kept, the 21st let go; the browser reported 4 MB and 37 MB in use),
   not at 50,000. **The tab's storage** (with "keep working data" off) held a review of at most 2,183
   such decisions (5,242,159 characters; 2,184 was refused): a larger one is kept for the page alone,

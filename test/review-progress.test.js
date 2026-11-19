@@ -6,11 +6,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { IDBFactory } from 'fake-indexeddb';
-import { readWork, serialiseWork, decide, flag, reviewProgress } from '../src/engine/krisis/work.js';
+import { readWork, readWorkSlowly, serialiseWork, decide, flag, reviewProgress } from '../src/engine/krisis/work.js';
 import { PANEL } from '../src/lib/permission-words.js';
 import { REVIEW_KEPT } from '../src/engine/words.js';
 import { reviewKey, latestIn, sameWork, decidedOtherwise, recordOf, readRecord, onOpen, progressStore, offerable, DB, TAB, MOST,
-  jsonPieces, recordSlowly, textOf, PART, PARTS, STORE, DB_VERSION, TAB_MOST, SLOWLY_FROM } from '../src/lib/review-progress.js';
+  jsonPieces, recordSlowly, readRecordSlowly, textOf, PART, PARTS, STORE, DB_VERSION, TAB_MOST, SLOWLY_FROM } from '../src/lib/review-progress.js';
 
 const A = (s) => `https://example.org/a/${s}`, B = (s) => `https://example.org/b/${s}`;
 const hex = (c) => c.repeat(64);
@@ -94,6 +94,72 @@ test('a record that is not one is not read: not the work file\'s format, another
   assert.equal(readRecord(other, record.key), null, 'another review\'s record is not this key\'s');
   assert.ok(readRecord(other, other.key), 'control: it is its own');
   assert.ok(readRecord(other), 'control: and reads when no key is asked of it');
+});
+
+test('read back without holding the page: the same record as read at once, the same refusals, and the page given its turns', async () => {
+  const record = recordOf(decided(), { at: AT });
+  assert.deepEqual(await readRecordSlowly(record, record.key), readRecord(record, record.key), 'a short record, read in one go');
+  const other = recordOf(decided(undefined, fresh({ subject: 'c' })), { at: AT });
+  for (const [why, bad] of [
+    ['nothing', null], ['a string', 'x'], ['no mark', { ...record, krisisProgress: undefined }],
+    ['a text that is not a work file', { ...record, text: '{"krisis":3}' }],
+    ['a text that is not JSON', { ...record, text: record.text.slice(0, 40) }],
+    ['a decision no review could have written', { ...record, text: record.text.replace('"confirmed"', '"suggested"') }],
+    ['another review\'s text under this key', { ...record, text: other.text }],
+    ['no time', { ...record, at: 'yesterday' }],
+    ['a key that is not one', { ...record, key: 'abc' }],
+  ]) assert.equal(await readRecordSlowly(bad, record.key), null, why);
+  assert.equal(await readRecordSlowly(other, record.key), null, 'another review\'s record is not this key\'s');
+  assert.ok(await readRecordSlowly(other, other.key), 'control: it is its own');
+  // A large review, kept in parts: turns are given while it is parsed, and while it is checked.
+  const w = large(SLOWLY_FROM); w.cursor = 9;
+  const slow = await recordSlowly(w, { at: AT, unsaved: true });
+  let turns = 0;
+  const back = await readRecordSlowly(slow, slow.key, { budget: 0, pause: async () => { turns++; } });
+  assert.deepEqual(back, readRecord(slow, slow.key), 'the same record as read at once');
+  assert.ok(back.reviewed === SLOWLY_FROM && back.work.cursor === 9 && back.unsaved === true && sameWork(back.work, w), 'which is the review kept');
+  // One turn for every 16 places or candidates parsed; one for every 256 checked: the places, the candidates and the candidates again by the reader itself,
+  // the candidates by the lookups' check (there is no lookup), the places and the candidates by the workflow fields' check.
+  const N = SLOWLY_FROM, parsing = Math.floor((2 * N) / 16), checking = Math.floor((3 * N) / 256) + Math.floor(N / 256) + Math.floor((2 * N) / 256);
+  assert.ok(turns >= parsing + checking - 1 && turns <= parsing + checking + 1, `the page was given ${turns} turns: ${parsing} in the parsing and ${checking} in the checking`);
+  // A large record whose last candidate is one no review could have written is refused whole, after the turns given on the way to it.
+  const last = slow.parts.length - 1, spoiled = { ...slow, parts: slow.parts.map((part, i) => (i === last ? part.replace(/"candidate_status":"confirmed"(?![^]*"candidate_status")/, '"candidate_status":"suggested"') : part)) };
+  assert.notEqual(spoiled.parts[last], slow.parts[last], 'control: the last candidate was changed');
+  turns = 0;
+  assert.equal(await readRecordSlowly(spoiled, slow.key, { budget: 0, pause: async () => { turns++; } }), null);
+  assert.equal(readRecord(spoiled, slow.key), null, 'as it is at once');
+  assert.ok(turns > parsing, `refused after ${turns} turns`);
+});
+
+test('the work file\'s reader in steps reads and refuses as the reader at once does, in the same words', async () => {
+  const good = JSON.parse(serialiseWork(decided()));
+  assert.deepEqual(await readWorkSlowly(structuredClone(good)), readWork(structuredClone(good)));
+  const lookedUp = { ...structuredClone(good), others: null, lookups: [{ id: 'l1', service: { endpoint: 'https://example.org/reconcile', title: 'A gazetteer' }, started_at: '2026-11-01T10:00:00Z',
+    queries: Object.fromEntries(Object.keys(good.places).map((iri) => [iri, { state: 'answered', sent: ['x'] }])) }],
+    candidates: good.candidates.map((c) => ({ ...c, lookup: 'l1', gazetteer: { service: 'https://example.org/reconcile', score: 90 } })) };
+  assert.deepEqual(await readWorkSlowly(structuredClone(lookedUp)), readWork(structuredClone(lookedUp)), 'with a lookup');
+  const spoil = [
+    (w) => { delete w.krisis; }, (w) => { w.krisis = 99; }, (w) => { w.places['not an address'] = { label: 'x', names: [], point: null }; },
+    (w) => { w.candidates[2].similarity_score = 7; }, (w) => { w.candidates[1].id = 'c1'; }, (w) => { w.candidates[0].candidate_status = 'suggested'; },
+    (w) => { w.candidates[2].flagged = 'yes'; }, (w) => { w.cursor = -1; }, (w) => { w.candidates = null; },
+  ];
+  for (const f of spoil) {
+    const a = structuredClone(good), b = structuredClone(good);
+    f(a); f(b);
+    let said = null;
+    try { readWork(a); } catch (e) { said = e; }
+    assert.ok(said && said.name === 'DataError', `control: the reader at once refuses it (${f})`);
+    await assert.rejects(readWorkSlowly(b, { budget: 0, pause: async () => {} }), (e) => e.name === said.name && e.message === said.message, said.message);
+  }
+  const queries = [(w) => { w.lookups[0].queries['https://example.org/elsewhere'] = { state: 'answered', sent: [] }; }, (w) => { Object.values(w.lookups[0].queries)[1].state = 'lost'; }, (w) => { w.candidates[1].lookup = 'l9'; }];
+  for (const f of queries) {
+    const a = structuredClone(lookedUp), b = structuredClone(lookedUp);
+    f(a); f(b);
+    let said = null;
+    try { readWork(a); } catch (e) { said = e; }
+    assert.ok(said && said.name === 'DataError', `control: the reader at once refuses it (${f})`);
+    await assert.rejects(readWorkSlowly(b), (e) => e.message === said.message, said.message);
+  }
 });
 
 test('opening a work file: what is kept and later than the file is put back; what is not later is offered; the same, or none, does nothing', () => {

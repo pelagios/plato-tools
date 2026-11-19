@@ -22,7 +22,9 @@ For each size:
 - IndexedDB (working data kept): one keeping of the record as the page makes it at that size, the time in all and the
   longest the page was held; a keeping with every part put at once (as when the page is leaving); then the store filled
   to its cap (MOST reviews) and one more kept, with how many it then holds and what the browser says the origin uses;
-- reading it back (get: the text parsed and checked by the work file's reader);
+- reading it back (get: the text parsed and checked by the work file's reader, in steps, the page answering between
+  them), and the same record read at once (readRecord), as it was read before: the time in all, and the longest the page
+  was held;
 - sessionStorage (working data not kept): whether the record fits, and the largest review that does.
 
 "The longest the page was held" is the longest gap between two turns of a timer set to fire every 4 ms while the work
@@ -108,7 +110,10 @@ PAGE = r'''async ([n, capMax]) => {
   const again = await held(() => kept.put({ ...made, at: new Date().toISOString() }));
   r.putAgain = { ms: again.ms, held: again.held, where: again.out };
   const back = await held(() => kept.get(record.key));
-  r.get = { ms: back.ms, held: back.held, reviewed: back.out && back.out.reviewed };
+  r.get = { ms: back.ms, held: back.held, reviewed: back.out && back.out.reviewed, same: !!back.out && P.sameWork(back.out.work, work) };
+  // The same record read at once (readRecord: the text parsed and checked with no turn given), as the store read it before: both in this run, under this code.
+  const whole = await held(async () => P.readRecord(made, record.key));
+  r.readAtOnce = { ms: whole.ms, held: whole.held, reviewed: whole.out && whole.out.reviewed };
   if (P.recordSlowly) { const leaving = await held(() => kept.put({ ...record, at: new Date().toISOString() }, { atOnce: true })); r.putLeaving = { ms: leaving.ms, held: leaving.held, where: leaving.out }; }
   if (n <= capMax) {
     for (let i = 0; i < P.MOST; i++) {
@@ -167,7 +172,8 @@ def main():
                 r = page.evaluate(PAGE, [n, CAP_MAX])
                 if r['decided'] != n: sys.exit(f'the review constructed has {r["decided"]} of {n} places decided: nothing measured')
                 if r.get('recordSlowly') and not r['recordSlowly']['same']: sys.exit(f'the review of {n} written out in pieces does not read back as the review: nothing measured')
-                if r['get']['reviewed'] != n: sys.exit(f'the review of {n} kept in IndexedDB reads back with {r["get"]["reviewed"]} places decided: nothing measured')
+                if r['get']['reviewed'] != n or not r['get']['same']: sys.exit(f'the review of {n} kept in IndexedDB reads back with {r["get"]["reviewed"]} places decided, {"the same review" if r["get"]["same"] else "not the review kept"}: nothing measured')
+                if r['readAtOnce']['reviewed'] != n: sys.exit(f'the review of {n} read at once has {r["readAtOnce"]["reviewed"]} places decided: nothing measured')
                 rows.append(r); print(json.dumps(r), flush=True)
                 ctx.close()
             # sessionStorage's room, in decisions.
@@ -187,11 +193,11 @@ def main():
     finally:
         try: os.killpg(srv.pid, signal.SIGTERM)
         except ProcessLookupError: pass
-    print(f"\n{'decisions':>9} {'text MB':>8} | {'record at once':>15} | {'record in pieces':>17} | {'IndexedDB put':>14} | {'get':>12} | {'at the cap':>22} | tab")
+    print(f"\n{'decisions':>9} {'text MB':>8} | {'record at once':>15} | {'record in pieces':>17} | {'IndexedDB put':>14} | {'get':>12} | {'read at once':>12} | {'at the cap':>22} | tab")
     f = lambda x: f"{x['ms']} ms/{x['held']}" if x else '-'
     for r in rows:
         cap = f"{r['cap']['ms']} ms, {r['cap']['holds']} kept, {r['cap']['usageMB']} MB" if r.get('cap') else '-'
-        print(f"{r['n']:>9} {r['chars'] / 1e6:>8.1f} | {f(r['recordAtOnce']):>15} | {f(r.get('recordSlowly')):>17} | {f(r['put']):>14} | {f(r['get']):>12} | {cap:>22} | {r['tab']['where']}")
+        print(f"{r['n']:>9} {r['chars'] / 1e6:>8.1f} | {f(r['recordAtOnce']):>15} | {f(r.get('recordSlowly')):>17} | {f(r['put']):>14} | {f(r['get']):>12} | {f(r['readAtOnce']):>12} | {cap:>22} | {r['tab']['where']}")
     print('(each "a ms/b": a in all, b the longest the page was held)')
     out = opt('json')
     if out: pathlib.Path(out).write_text(json.dumps({'rows': rows, 'sessionStorage': room}, indent=2))

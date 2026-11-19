@@ -23,11 +23,15 @@
 // indentation, in parts of about PART characters; given up, never kept half-made, if the review changes meanwhile),
 // and a record longer than PART is kept as rows of its own (the store 'parts', keyed [key, n]), each put a task of
 // its own within the one transaction, so that the record is replaced whole or not at all. A review of ordinary size
-// is made and kept as before, its text in its one row. sessionStorage holds about five million characters for the
+// is made and kept as before, its text in its one row. Read back at once (its text parsed, then every place and
+// candidate checked by the work file's reader), such a review held the page for 0.4 s: what the store reads it reads in
+// steps (readRecordSlowly: json-slowly.js, and the reader's own checks as steps), the page held 46 to 57 ms at most.
+// sessionStorage holds about five million characters for the
 // whole origin (2,183 decisions of that shape, measured): a record that cannot fit is not tried there.
 import { keepWorkingData } from './permissions.js';
 import { sha256 } from './sha256.js';
-import { readWork, serialiseWork, reviewProgress } from '../engine/krisis/work.js';
+import { readWork, readWorkSlowly, serialiseWork, reviewProgress } from '../engine/krisis/work.js';
+import { parseSlowly } from './json-slowly.js';
 
 export const DB = 'plato-tools-krisis-progress', STORE = 'reviews', PARTS = 'parts', TAB = 'plato-tools.krisis-progress.';
 /** The database's version: 2 since the store of a long record's parts was added (a version 1 database is upgraded as it is, its records kept). */
@@ -160,19 +164,43 @@ export function textOf(v) {
 }
 const charsOf = (v) => (typeof v.text === 'string' ? v.text.length : v.parts.reduce((n, p) => n + p.length, 0));
 
+/** The text of what may be a record (not yet read), or null if it is not one: not a record, kept under another review's key, with no time or no text. */
+function textToRead(v, key) {
+  if (!v || typeof v !== 'object' || v.krisisProgress !== 1 || !KEY.test(v.key || '') || (key !== undefined && v.key !== key)) return null;
+  const text = textOf(v);
+  return typeof v.at !== 'string' || Number.isNaN(Date.parse(v.at)) ? null : text;
+}
+/** The record `v` whose text read as `work`, or null if it is another review's. */
+function recordRead(v, work) {
+  if (reviewKey(work) !== v.key) return null;
+  const p = reviewProgress(work);
+  return { key: v.key, name: typeof v.name === 'string' && v.name ? v.name.slice(0, 255) : 'review.krisis.json', at: v.at, reviewed: p.reviewed, total: p.total, unsaved: v.unsaved === true, workflow: v.workflow === true, work };
+}
 /**
  * A record read back, checked: { key, name, at, reviewed, work }, or null if it is not one (not a
  * record, a review the work file's reader refuses, or one kept under another review's key).
  */
 export function readRecord(v, key) {
-  if (!v || typeof v !== 'object' || v.krisisProgress !== 1 || !KEY.test(v.key || '') || (key !== undefined && v.key !== key)) return null;
-  const text = textOf(v);
-  if (typeof v.at !== 'string' || Number.isNaN(Date.parse(v.at)) || text === null) return null;
+  const text = textToRead(v, key);
+  if (text === null) return null;
   let work;
   try { work = readWork(text); } catch { return null; }
-  if (reviewKey(work) !== v.key) return null;
-  const p = reviewProgress(work);
-  return { key: v.key, name: typeof v.name === 'string' && v.name ? v.name.slice(0, 255) : 'review.krisis.json', at: v.at, reviewed: p.reviewed, total: p.total, unsaved: v.unsaved === true, workflow: v.workflow === true, work };
+  return recordRead(v, work);
+}
+/**
+ * The same, without holding the page, as the store reads what it kept. Read at once, a review of 50,000 decisions
+ * held the page for 407 to 457 ms (measured in Chromium, e2e/review_autosave_scale.py, 19 November 2026: its 69 million
+ * characters parsed, then every place and candidate checked by the work file's reader). Here the text is parsed in
+ * steps (json-slowly.js) and checked in steps (readWorkSlowly: the reader's own checks), for `budget` milliseconds
+ * at a time, the page given a turn between (`pause`). What is returned, and what is refused, are readRecord's.
+ */
+export async function readRecordSlowly(v, key, { budget = 8, pause } = {}) {
+  const text = textToRead(v, key);
+  if (text === null) return null;
+  const turns = { budget, ...(pause ? { pause } : {}) };
+  let work;
+  try { work = await readWorkSlowly(await parseSlowly(text, turns), turns); } catch { return null; }
+  return recordRead(v, work);
 }
 
 /**
@@ -324,14 +352,15 @@ export function progressStore({ indexedDB, session, keep = keepWorkingData } = {
     },
     /**
      * What is kept of the review `key`, checked (readRecord), or null: the tab's, or the browser's,
-     * whichever was changed later. Read after any keeping still under way, so that it is the latest.
+     * whichever was changed later. Read after any keeping still under way, so that it is the latest, and without
+     * holding the page (readRecordSlowly).
      */
     get(key) {
       return serial(async () => {
-        const here = readRecord(tab.get(key), key);
+        const here = await readRecordSlowly(tab.get(key), key);
         if (!keeping()) { await forgetKept(); return here; }
         let there = null;
-        try { there = readRecord(await tx('readonly', (s, p, box) => read(s, p, box, key)), key); } catch { /* the tab's only */ }
+        try { there = await readRecordSlowly(await tx('readonly', (s, p, box) => read(s, p, box, key)), key); } catch { /* the tab's only */ }
         if (here && there) return Date.parse(here.at) >= Date.parse(there.at) ? here : there;
         return here || there;
       });
@@ -349,7 +378,7 @@ export function progressStore({ indexedDB, session, keep = keepWorkingData } = {
           if (ss) for (let i = 0; i < ss.length; i++) {
             const k = ss.key(i);
             if (!k?.startsWith(TAB)) continue;
-            const v = tab.get(k.slice(TAB.length)), r = offerable(v) ? readRecord(v, k.slice(TAB.length)) : null;
+            const v = tab.get(k.slice(TAB.length)), r = offerable(v) ? await readRecordSlowly(v, k.slice(TAB.length)) : null;
             if (r && (!here || Date.parse(r.at) > Date.parse(here.at))) here = r;
           }
         } catch { /* refused: the browser's only */ }
@@ -362,7 +391,7 @@ export function progressStore({ indexedDB, session, keep = keepWorkingData } = {
           });
           // …and of those, the first that reads back whole.
           for (const key of keys) {
-            there = readRecord(await tx('readonly', (st, pt, box) => read(st, pt, box, key)), key);
+            there = await readRecordSlowly(await tx('readonly', (st, pt, box) => read(st, pt, box, key)), key);
             if (there) break;
           }
         } catch { /* the tab's only */ }

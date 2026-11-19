@@ -164,6 +164,30 @@ export function readWork(text) {
   let w;
   try { w = typeof text === 'string' ? JSON.parse(text) : text; }
   catch (e) { throw new DataError(`This is not a Krisis work file: it is not JSON (${e.message}).`); }
+  const steps = workSteps(w);
+  for (;;) { const s = steps.next(); if (s.done) return s.value; }
+}
+const breathe = () => new Promise((resolve) => { setTimeout(resolve, 0); });
+const clock = () => (globalThis.performance ? globalThis.performance.now() : Date.now());
+/**
+ * The same reading of a work file already parsed (`w`: what JSON.parse gives of its text), without holding the page:
+ * the checks are made for `budget` milliseconds at a time, the page given a turn between (`pause`). What it returns
+ * and what it refuses are readWork's own (the checks are the same code, workSteps): for a review nothing else
+ * touches meanwhile (one just read from where it was kept).
+ */
+export async function readWorkSlowly(w, { budget = 8, pause = breathe } = {}) {
+  const steps = workSteps(w);
+  for (let since = clock(); ;) {
+    const s = steps.next();
+    if (s.done) return s.value;
+    if (clock() - since >= budget) { await pause(); since = clock(); }
+  }
+}
+/** How many places, candidates or queries are checked between two steps of workSteps. */
+const STEP = 256;
+/** readWork's checks of `w`, as steps: it yields every STEP places, candidates or queries, and returns the work file read. */
+function* workSteps(w) {
+  let n = 0;
   if (!isObject(w) || !Object.hasOwn(w, 'krisis')) throw new DataError('This is not a Krisis work file: it has no "krisis" version.');
   if (w.krisis !== WORK_VERSION && !READS.includes(w.krisis)) throw new DataError(`This work file is of version ${JSON.stringify(w.krisis)}, and these tools read version ${WORK_VERSION}${typeof w.krisis === 'number' && w.krisis > WORK_VERSION ? ': it was made by a later version of the tools' : ''}.`);
   const bad = (m) => { throw new DataError(`This work file cannot be used: ${m}`); };
@@ -180,12 +204,14 @@ export function readWork(text) {
     if (!isObject(p) || typeof p.label !== 'string' || !isNames(p.names) || !isPoint(p.point ?? null)) bad(`the place ${iri} is not given as a label, names and a point.`);
     if (Object.hasOwn(p, 'within') && !(typeof p.within === 'string' && Object.hasOwn(regions, p.within))) bad(REGION_WORDS.work.placeWithin(iri, p.within));
     if (Object.hasOwn(p, 'level') && !(isLevel(p.level) && Object.hasOwn(p, 'within') && regions[p.within].level === p.level)) bad(REGION_WORDS.work.placeLevel(iri));
+    if (++n % STEP === 0) yield;
   }
   // A candidate is for a place or a region (version 3).
   const listed = (k) => typeof k === 'string' && (Object.hasOwn(w.places, k) || Object.hasOwn(regions, k));
   if (!Array.isArray(w.candidates)) bad('it has no list of candidates (candidates).');
   const ids = new Set(), pairs = new Set();
   for (const c of w.candidates) {
+    if (++n % STEP === 0) yield;
     const where = isObject(c) && typeof c.id === 'string' ? `candidate ${c.id}` : 'a candidate';
     if (!isObject(c) || typeof c.id !== 'string' || !c.id) bad('a candidate has no id.');
     if (ids.has(c.id)) bad(`two candidates have the id ${c.id}.`);
@@ -229,13 +255,17 @@ export function readWork(text) {
     bad('the Finishes it records (finished) are not each a file written, its SHA-256 digest, when, and by whom.');
   if (w.reviewer !== undefined && w.reviewer !== null) { try { checkReviewer(w.reviewer); } catch (e) { bad(e.message[0].toLowerCase() + e.message.slice(1)); } }
   if (w.cursor !== undefined && !(Number.isInteger(w.cursor) && w.cursor >= 0)) bad('its place in the review (cursor) is not a count.');
-  checkLookups(w, bad);
-  checkMethodos(w, bad);
+  yield* checkLookups(w, bad);
+  yield* checkMethodos(w, bad);
   checkMint(w, bad);   // Krisis: Wikidata items (wikidata.js), optional in any version
   if (w.krisis < 3 && w.regions !== undefined) bad(REGION_WORDS.work.noRegionsBefore(w.krisis));
   // WHG by its one address (canonicalEndpoint), however a file wrote it; nothing given is changed in place.
   const lookups = (w.lookups ?? []).map((l) => (canonicalEndpoint(l.service.endpoint) === l.service.endpoint ? l : { ...l, service: { ...l.service, endpoint: canonicalEndpoint(l.service.endpoint) } }));
-  const candidates = w.candidates.map((c) => (typeof c.gazetteer?.service === 'string' && canonicalEndpoint(c.gazetteer.service) !== c.gazetteer.service ? { ...c, gazetteer: { ...c.gazetteer, service: canonicalEndpoint(c.gazetteer.service) } } : c));
+  const candidates = [];
+  for (const c of w.candidates) {
+    if (++n % STEP === 0) yield;
+    candidates.push(typeof c.gazetteer?.service === 'string' && canonicalEndpoint(c.gazetteer.service) !== c.gazetteer.service ? { ...c, gazetteer: { ...c.gazetteer, service: canonicalEndpoint(c.gazetteer.service) } } : c);
+  }
   return { reviewer: null, cursor: 0, ...w, krisis: WORK_VERSION, regions: w.krisis >= 3 ? w.regions : {}, candidates, lookups };
 }
 
@@ -289,7 +319,8 @@ function checkConstraint(c, where, regions, bad) {
 const READS = [1, 2, 3];
 export const QUERY_STATES = ['pending', 'answered', 'unanswered', 'stopped'];
 /** What version 2 adds, checked: the lookups, and the candidates that come from them. */
-function checkLookups(w, bad) {
+function* checkLookups(w, bad) {
+  let n = 0;
   if (w.krisis < 2) { if (w.lookups !== undefined) bad('it is of version 1, which has no lookups.'); return; }
   if (!Array.isArray(w.lookups)) bad('it has no list of lookups (lookups).');
   const ids = new Set();
@@ -303,6 +334,7 @@ function checkLookups(w, bad) {
     if (!isObject(l.queries)) bad(`lookup ${l.id} does not list the places it looked up (queries).`);
     const regions = w.krisis >= 3 ? w.regions : {};
     for (const [iri, q] of Object.entries(l.queries)) {
+      if (++n % STEP === 0) yield;
       if (!Object.hasOwn(w.places, iri) && !Object.hasOwn(regions, iri)) bad(`lookup ${l.id} looked up a place the file does not list (${iri}).`);
       if (Object.hasOwn(q, 'constraint')) checkConstraint(q.constraint, `lookup ${l.id}, ${iri}`, regions, bad);
       if (Object.hasOwn(q, 'scope') && !(isObject(q.scope) && typeof q.scope.applied === 'boolean')) bad(REGION_WORDS.work.scope(l.id, iri));
@@ -311,6 +343,7 @@ function checkLookups(w, bad) {
     }
   }
   for (const c of w.candidates) {
+    if (++n % STEP === 0) yield;
     if (c.lookup === undefined || c.lookup === null) { if (w.others === null) bad(`candidate ${c.id} comes from a local match, but the file names no other dataset.`); continue; }
     if (!ids.has(c.lookup)) bad(`candidate ${c.id} names a lookup the file does not have (${c.lookup}).`);
     if (!isObject(c.gazetteer)) bad(`candidate ${c.id} comes from a lookup but has no gazetteer figures (gazetteer).`);
@@ -320,9 +353,14 @@ function checkLookups(w, bad) {
 // ---- Krisis × Methodos (#28): optional fields (versions 2 and 3; ROW_STATES is in the version 3 section) ----
 const BATCH = /^b[1-9]\d*$/;
 /** The optional fields Methodos adds, checked when present (see the top of this file). */
-function checkMethodos(w, bad) {
-  for (const [iri, p] of Object.entries(w.places)) if (p.rowState !== undefined && p.rowState !== null && !ROW_STATES.includes(p.rowState)) bad(`the place ${iri} has a row state that is not filter or exclude (rowState).`);
+function* checkMethodos(w, bad) {
+  let n = 0;
+  for (const [iri, p] of Object.entries(w.places)) {
+    if (++n % STEP === 0) yield;
+    if (p.rowState !== undefined && p.rowState !== null && !ROW_STATES.includes(p.rowState)) bad(`the place ${iri} has a row state that is not filter or exclude (rowState).`);
+  }
   for (const c of w.candidates) {
+    if (++n % STEP === 0) yield;
     if (c.flagged !== undefined && typeof c.flagged !== 'boolean') bad(`candidate ${c.id} has a flag that is not true or false (flagged).`);
     if (c.note !== undefined && typeof c.note !== 'string') bad(`candidate ${c.id} has a note that is not text (note).`);
     const g = c.gazetteer;
@@ -340,6 +378,7 @@ function checkMethodos(w, bad) {
   }
   if (w.batches !== undefined && !(Array.isArray(w.batches) && w.batches.every((b) => isObject(b) && typeof b.id === 'string' && BATCH.test(b.id)))) bad('its batches of the bulk accept are not listed as b1, b2, … (batches).');
   for (const l of w.lookups || []) for (const [iri, q] of Object.entries(l.queries || {})) {
+    if (++n % STEP === 0) yield;
     if (q.variants !== undefined && !(Array.isArray(q.variants) && q.variants.length === q.sent.length && q.variants.every((v, i) => isObject(v) && v.text === q.sent[i] && typeof v.how === 'string')))
       bad(`lookup ${l.id} records forms of the names of ${iri} that are not what it sent (variants).`);
   }
