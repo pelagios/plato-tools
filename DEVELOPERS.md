@@ -2023,8 +2023,21 @@ others), and records the reviewer's judgements as PLATO attestations. `src/engin
   twenty at 50,000 (of the 1.7 GB it allowed that profile), 37 MB at 10,000 and 4 MB at 1,000, and
   the keeping at the cap held the page 6 ms (139 ms in all). Nothing needed mending.
   **What is not mended, and what was not measured.** **The tab's storage** (with "keep working data" off) held a review of at most 2,183
-  such decisions (5,242,159 characters; 2,184 was refused): a larger one is kept for the page alone,
-  the store answers 'page', and the line says so ("This browser would not keep your progress"). A
+  such decisions (5,242,159 characters; 2,184 was refused, measured again on 19 November 2026): a
+  larger one is kept for the page alone. That is now said for what it is. The store answers
+  `'too-big'` (the record is longer than `TAB_MOST`, or the tab's storage refused it for want of
+  room, a `QuotaExceededError`), where `'page'` is left for a browser that refuses the tab's storage
+  altogether, and the line under "Save the review" becomes a warning, in the warning's colour
+  (`REVIEW_KEPT.tooBig` in `src/engine/words.js`): how big the review is against the room a tab has,
+  that reloading the page or closing the tab loses what is not saved, and the two ways out (save the
+  review; turn on "Keep my working data between visits", where IndexedDB kept twenty reviews of
+  50,000 decisions in 189 MB). What the tab kept of the review while it still fitted is let go at the
+  same keeping, so an earlier state is never put back as the latest. Making it fit was considered
+  and not done: gzip would need the page to wait on a stream at the moment it is leaving, when
+  nothing later is done, and the choice not to keep working data is the user's own; a plain notice
+  is the simpler thing that is true. Unit tests in `test/review-progress.test.js`; in the browser,
+  `too_big_for_the_tab` in `review_progress_checks` (a small review kept in the same tab beside it,
+  the warning read off the page, and the reload losing the decision as it said). A
   record longer than any sessionStorage holds (`TAB_MOST`, 11 million characters) is no longer written
   out to be refused, which held the page 56 to 58 ms at 10,000 decisions and 0.3 s at 50,000; one that
   fits is written there at once (18 to 29 ms held at 1,000).

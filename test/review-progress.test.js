@@ -10,7 +10,7 @@ import { readWork, readWorkSlowly, serialiseWork, decide, flag, reviewProgress }
 import { PANEL } from '../src/lib/permission-words.js';
 import { REVIEW_KEPT } from '../src/engine/words.js';
 import { reviewKey, latestIn, sameWork, decidedOtherwise, recordOf, readRecord, onOpen, progressStore, offerable, DB, TAB, MOST,
-  jsonPieces, recordSlowly, readRecordSlowly, textOf, PART, PARTS, STORE, DB_VERSION, TAB_MOST, SLOWLY_FROM } from '../src/lib/review-progress.js';
+  jsonPieces, recordSlowly, readRecordSlowly, recordChars, textOf, PART, PARTS, STORE, DB_VERSION, TAB_MOST, SLOWLY_FROM } from '../src/lib/review-progress.js';
 
 const A = (s) => `https://example.org/a/${s}`, B = (s) => `https://example.org/b/${s}`;
 const hex = (c) => c.repeat(64);
@@ -485,7 +485,7 @@ test('a database made before long records were kept in parts (version 1) is take
   assert.equal((await store.get(long.key)).reviewed, SLOWLY_FROM);
 });
 
-test('with "keep working data" off, a record longer than any sessionStorage holds is not written out to be refused: it is kept for the page, and said so', async () => {
+test('with "keep working data" off, a record longer than any sessionStorage holds is not written out to be refused: it is kept for the page, and the store says it was too big', async () => {
   const session = new Storage();
   let tried = 0;
   const set = session.setItem.bind(session);
@@ -495,14 +495,60 @@ test('with "keep working data" off, a record longer than any sessionStorage hold
   const long = recordOf(w, { at: AT }), short = recordOf(decided(), { at: AT });
   assert.equal(await store.put(short), 'tab');
   assert.equal(tried, 1, 'control: a record that fits is put in the tab\'s storage');
-  assert.equal(await store.put(long), 'page');
+  assert.equal(await store.put(long), 'too-big');
   assert.equal(tried, 1, 'the long one was never tried there');
   assert.equal((await store.get(long.key)).work.places[A('bath')].label.length, TAB_MOST, 'and the page holds it');
+  assert.equal(await progressStore({ indexedDB: new IDBFactory(), session, keep: () => false }).get(long.key), null, 'a new page of the tab (a reload) has nothing of it');
+  assert.equal(long.key, short.key); assert.equal(session.length, 0, 'the short one, an earlier state of the same review, went from the tab with it');
+  assert.ok(recordChars(long) > TAB_MOST && recordChars(short) === short.text.length && recordChars({}) === 0, 'how long each is');
   // In parts (written out in pieces), a record that fits is kept in the tab as its text, and reads back.
   const parted = await recordSlowly(decided(undefined, fresh({ at: '2026-11-05T10:00:00Z' })), { at: AT });
   assert.equal(await store.put(parted), 'tab');
   assert.equal(typeof JSON.parse(session.getItem(TAB + parted.key)).text, 'string');
   assert.equal((await progressStore({ indexedDB: new IDBFactory(), session, keep: () => false }).get(parted.key)).reviewed, 2);
+});
+
+test('a review the tab kept, grown past the room the tab has: the store says too big, and the earlier state is not left to be put back for the latest', async () => {
+  // A Storage with room for `room` characters in all, refusing as the browsers do (a QuotaExceededError).
+  class Roomy extends Storage {
+    constructor(room) { super(); this.room = room; }
+    setItem(k, v) {
+      const used = [...this.m].reduce((n, [key, x]) => n + (key === k ? 0 : key.length + x.length), 0);
+      if (used + k.length + String(v).length > this.room) throw Object.assign(new Error('The quota has been exceeded.'), { name: 'QuotaExceededError', code: 22 });
+      super.setItem(k, v);
+    }
+  }
+  const early = recordOf(decided(['2026-11-02T09:00:00Z', '2026-11-02T09:01:00Z']), { at: AT });
+  const grown = decided(); Object.values(grown.places)[0].label = 'x'.repeat(4000);
+  const later = recordOf(grown, { at: new Date(AT.getTime() + 1000) });
+  assert.equal(early.key, later.key, 'control: the same review, grown');
+  const session = new Roomy(JSON.stringify(early).length + TAB.length + early.key.length + 1000);
+  const store = progressStore({ indexedDB: new IDBFactory(), session, keep: () => false });
+  assert.equal(await store.put(early), 'tab', 'control: while it fits, the tab keeps it');
+  assert.equal(session.length, 1);
+  assert.equal(await store.put(later), 'too-big');
+  assert.equal(session.length, 0, 'the earlier state is gone from the tab: it is never put back as if it were the latest');
+  assert.equal((await store.get(later.key)).at, later.at, 'the page holds the latest');
+  assert.equal(await progressStore({ indexedDB: new IDBFactory(), session, keep: () => false }).get(later.key), null, 'and a reload has nothing: as the page says');
+  // Small again (decisions undone, a note cut), it is the tab's again.
+  assert.equal(await store.put({ ...early, at: new Date(AT.getTime() + 2000).toISOString() }), 'tab');
+  assert.equal((await progressStore({ indexedDB: new IDBFactory(), session, keep: () => false }).get(early.key)).at, new Date(AT.getTime() + 2000).toISOString());
+  // A tab's storage that refuses for another reason than room (the browser forbids it) is 'page', not 'too-big': the page then says the browser would not keep it.
+  assert.equal(await progressStore({ indexedDB: refusing, session: new Storage({ full: true }), keep: () => true }).put(early), 'page');
+  // With "keep working data" on and IndexedDB refused, the tab is what is left, and the same holds of it.
+  assert.equal(await progressStore({ indexedDB: refusing, session: new Roomy(100), keep: () => true }).put(early), 'too-big');
+});
+
+test('the words for a review too big for the tab say how big, what a reload loses, and the two ways out; they do not say it is kept', () => {
+  const said = REVIEW_KEPT.tooBig({ chars: 24_055_460 });
+  assert.match(said, /^This review is too big to be kept for this tab: it is about 24 million characters, and the browser gives a tab room for about 5 million\./);
+  assert.match(said, /on this page only: reloading the page or closing the tab loses any that are not saved/);
+  assert.match(said, /Save the review to have them in a file, or turn on “Keep my working data between visits” \(in Permissions\)/);
+  assert.ok(said.includes(PANEL.keepWork), 'the setting by the name the Permissions panel gives it');
+  assert.doesNotMatch(said, /is kept (for this tab|in this browser) as you go/);
+  assert.match(REVIEW_KEPT.kept('tab'), /is kept for this tab only/, 'control: the words for a review that is kept say so');
+  // The tab's storage full of other things: no size is given as the reason.
+  assert.match(REVIEW_KEPT.tooBig({ chars: 40_000 }), /^This review is too big to be kept for this tab: the browser has no room left in this tab’s storage for it\. Your decisions are on this page only/);
 });
 
 // ---- The offer made as the page opens (19 November 2026): a review begun outside a workflow, kept and never saved ----

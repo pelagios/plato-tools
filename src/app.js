@@ -12,7 +12,7 @@ import { splitMatching } from './engine/hermes/cluster.js';
 import { review as W, POOL_BUSY, POOL_STUCK, PREVIEW_WORDS, CANCEL_RELEASING, CHORA_HANDOVER, NO_STORAGE, storageRefused, NOT_DOWNLOADED, downloadFailed, NO_ENGINE_STORAGE, engineStorageLacking, NO_ROOM, noRoom } from './engine/words.js';
 const REVIEW_WORDS = W;   // the review's words, where W names the words for the columns
 import { REVIEW_KEPT } from './engine/words.js';
-import { progressStore, recordOf as progressRecord, recordSlowly as progressRecordSlowly, onOpen as progressOnOpen, reviewKey, SLOWLY_FROM } from './lib/review-progress.js';
+import { progressStore, recordOf as progressRecord, recordSlowly as progressRecordSlowly, onOpen as progressOnOpen, reviewKey, recordChars, SLOWLY_FROM } from './lib/review-progress.js';
 import { readable } from './engine/input.js';
 import { readWork, serialiseWork, decide, reviewPlaces, candidatesOf, isReviewed, reviewProgress, filesDiffer, checkReviewer, checkMatchOptions, flag, noteOn, setRowState, kindOfCandidate, acceptedFor } from './engine/krisis/work.js';
 import { QUALIFIER_LISTS } from './engine/krisis/qualifiers.js';
@@ -1751,13 +1751,14 @@ function sayKept(said) {
   keptSaid = said;
   const K = REVIEW_KEPT;
   $('review-kept').hidden = !said;
+  $('review-kept').classList.toggle('warn', said?.kind === 'too-big' || said?.kind === 'not-kept');   // a warning where the review is not kept: it is not to be missed
   state.reviewKept = said ? { ...said } : null;   // for the tests: what the line says, and of what
   if (!said) return;
   $('review-kept-text').textContent = said.kind === 'restored' ? K.restored(said, said.where) : said.kind === 'offered' ? K.offered(said, said.where)
-    : said.kind === 'reopened' ? K.reopened(said, said.where) : said.kind === 'cleared' ? K.cleared : said.kind === 'not-kept' ? K.notKept : K.kept(said.where);
+    : said.kind === 'reopened' ? K.reopened(said, said.where) : said.kind === 'cleared' ? K.cleared : said.kind === 'not-kept' ? K.notKept : said.kind === 'too-big' ? K.tooBig(said) : K.kept(said.where);
   const use = $('review-kept-use'), clear = $('review-kept-clear');
   use.textContent = K.use; use.hidden = said.kind !== 'offered';
-  clear.textContent = K.clear; clear.hidden = said.kind === 'cleared' || said.kind === 'not-kept';
+  clear.textContent = K.clear; clear.hidden = said.kind === 'cleared' || said.kind === 'not-kept' || said.kind === 'too-big';
 }
 /**
  * Keep the review as it stands. `atOnce`: now, the page held while it is written out (the page is leaving, or the
@@ -1773,7 +1774,7 @@ function keepProgress(atOnce = false) {
   const flags = { unsaved: unsaved > 0, workflow: !!methodos?.following() };
   const kept = (record) => {
     keptMark = { work: w, sig }; unkeptSince = 0; offeredFile = null;
-    const said = (where) => { keepCost = performance.now() - t0; if (work === w) sayKept(where === 'page' ? { kind: 'not-kept' } : { kind: 'kept', where, at: record.at, reviewed: record.reviewed, key: record.key }); };
+    const said = (where) => { keepCost = performance.now() - t0; if (work === w) sayKept(where === 'page' ? { kind: 'not-kept' } : where === 'too-big' ? { kind: 'too-big', chars: recordChars(record), reviewed: record.reviewed } : { kind: 'kept', where, at: record.at, reviewed: record.reviewed, key: record.key }); };
     keptProgress.put(record, { atOnce }).then(said, () => said('page'));
   };
   if (atOnce || w.candidates.length < SLOWLY_FROM || (unkeptSince && t0 - unkeptSince > STALE)) {

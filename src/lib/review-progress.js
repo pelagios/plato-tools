@@ -27,7 +27,9 @@
 // candidate checked by the work file's reader), such a review held the page for 0.4 s: what the store reads it reads in
 // steps (readRecordSlowly: json-slowly.js, and the reader's own checks as steps), the page held 46 to 57 ms at most.
 // sessionStorage holds about five million characters for the
-// whole origin (2,183 decisions of that shape, measured): a record that cannot fit is not tried there.
+// whole origin (2,183 decisions of that shape, measured): a record that cannot fit is not tried there, and the store
+// answers 'too-big' (the tab has no room for it: it is the page's alone), which the page says as a warning, with how
+// big the review is, what a reload then loses, and the two ways out (REVIEW_KEPT.tooBig in src/engine/words.js).
 import { keepWorkingData } from './permissions.js';
 import { sha256 } from './sha256.js';
 import { readWork, readWorkSlowly, serialiseWork, reviewProgress } from '../engine/krisis/work.js';
@@ -163,6 +165,10 @@ export function textOf(v) {
   return Array.isArray(v?.parts) && v.parts.length && v.parts.every((p) => typeof p === 'string') ? v.parts.join('') : null;
 }
 const charsOf = (v) => (typeof v.text === 'string' ? v.text.length : v.parts.reduce((n, p) => n + p.length, 0));
+/** How many characters a record's text is (its own, or its parts'): what the tab's storage must have room for. */
+export const recordChars = (v) => (textOf(v) === null ? 0 : charsOf(v));
+/** Whether a Storage refused a write for want of room (the browsers' QuotaExceededError, by its name or its old code), and not for another reason. */
+const noRoom = (e) => e?.name === 'QuotaExceededError' || e?.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e?.code === 22 || e?.code === 1014;
 
 /** The text of what may be a record (not yet read), or null if it is not one: not a record, kept under another review's key, with no time or no text. */
 function textToRead(v, key) {
@@ -232,14 +238,18 @@ export function progressStore({ indexedDB, session, keep = keepWorkingData } = {
   const keeping = () => { try { return keep() !== false; } catch { return true; } };
   const tab = {
     get: (key) => { try { const t = ss?.getItem(TAB + key); if (t) return JSON.parse(t); } catch { /* refused, or not JSON */ } return memory.get(key) ?? null; },
-    // 'tab' where the tab keeps it (it is there after a reload), 'page' where only this page does.
+    // 'tab' where the tab keeps it (it is there after a reload); where only this page does, 'too-big' if the tab's storage
+    // has not the room for it, and 'page' if the browser refuses the tab's storage altogether.
     // A record longer than any sessionStorage holds is not tried there (writing 120 MB out to be refused held the page 0.8 s).
+    // What the tab kept of the review before is let go either way: an earlier state is never put back for the latest.
     put: (key, v) => {
+      let where = 'page';
       try {
         if (ss && charsOf(v) <= TAB_MOST) { const { parts, ...head } = v; ss.setItem(TAB + key, JSON.stringify(parts ? { ...head, text: parts.join('') } : v)); memory.delete(key); return 'tab'; }
         ss?.removeItem(TAB + key);
-      } catch { try { ss.removeItem(TAB + key); } catch { /* refused */ } }
-      memory.set(key, v); return 'page';
+        if (ss) where = 'too-big';
+      } catch (e) { if (noRoom(e)) where = 'too-big'; try { ss.removeItem(TAB + key); } catch { /* refused */ } }
+      memory.set(key, v); return where;
     },
     drop: (key) => { try { ss?.removeItem(TAB + key); } catch { /* refused */ } memory.delete(key); },
     dropAll: () => {
@@ -336,7 +346,8 @@ export function progressStore({ indexedDB, session, keep = keepWorkingData } = {
      * Keep `record` (recordOf, or recordSlowly) in place of what was kept of its review; `atOnce` when the page is
      * leaving (a long record's parts are then all put now, not one after another). Returns where: 'browser'
      * (IndexedDB, between visits), 'tab' (working data not kept, or IndexedDB refused: until the tab
-     * closes), or 'page' (the browser kept it nowhere: it does not outlive this page).
+     * closes), 'too-big' (the tab's storage has not the room for it: it does not outlive this page), or 'page' (the
+     * browser kept it nowhere: it does not outlive this page).
      */
     put(record, { atOnce = false } = {}) {
       return serial(async () => {

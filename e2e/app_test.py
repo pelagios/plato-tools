@@ -8442,6 +8442,43 @@ def review_progress_checks(pw, url, tmp):
         return ok, {'kept': kept, 'databases': dbs, 'in the tab\'s storage': session, 'after the reload': after, 'opened again': back, 'in another tab': elsewhere}
     attempt('match review: with "Keep my working data between visits" off, the progress is kept for the tab only and the line says so: no database is made, the same tab reloaded has the decision back, and another tab of the same browser has none', tab_only)
 
+    def too_big_for_the_tab():
+        # With "keep working data" off a review is kept in the tab's own storage, which holds about five million characters
+        # for the whole site. A review longer than that (here made so by seven million characters of padding in its
+        # match parameters, which the page never draws) cannot be kept there: the page says so, in a warning, with what it
+        # means and the two ways out, and is not silent. The control is in the same tab, before it: the small review is kept.
+        padded = {**work, 'generated_at': '2026-11-01T13:00:00Z', 'match_parameters': {'padding': 'x' * 7_000_000}}
+        padded_file = out / 'too-big.krisis.json'; padded_file.write_text(json.dumps(padded, indent=2) + '\n')
+        ctx = context(); page = ctx.new_page(); ready(page)
+        page.evaluate("() => { localStorage.setItem('plato-tools.keep-working-data', 'no'); }")
+        ready(page)
+        KEYS = "() => Object.keys(sessionStorage).filter((k) => k.startsWith('plato-tools.krisis-progress.')).length"
+        LOOK = "() => { const l = document.getElementById('review-kept'); return { warn: l.classList.contains('warn'), colour: getComputedStyle(l).color, save: getComputedStyle(document.getElementById('save-review')).color }; }"
+        open_review(page)
+        small = decide(page, ['a'], 1)
+        small_look, small_keys = page.evaluate(LOOK), page.evaluate(KEYS)
+        open_review(page, padded_file)
+        page.locator('#review-place').focus(); page.keyboard.press('a')
+        wait_state(page, lambda s: (s.get('reviewKept') or {}).get('kind') in ('too-big', 'kept', 'not-kept'), T(20), 'the keeping of the padded review settled')
+        big = V(page)
+        big_look, big_keys = page.evaluate(LOOK), page.evaluate(KEYS)
+        dbs = page.evaluate(REVIEW_DBS)
+        after = reloaded(page)
+        back = open_review(page, padded_file)                        # as the warning said: the reload lost the decision
+        small_back = open_review(page)                               # and the small review, kept in the tab, has its own
+        line = big['line'] or ''
+        ok = (small['reviewed'] == 1 and (small['kept'] or {}).get('where') == 'tab' and small_keys == 1 and not small_look['warn']
+              and big['reviewed'] == 1 and (big['kept'] or {}).get('kind') == 'too-big' and (big['kept'] or {}).get('chars', 0) > 7_000_000
+              and line.startswith('This review is too big to be kept for this tab') and 'about 7 million characters' in line and 'reloading the page or closing the tab loses' in line
+              and 'Save the review' in line and 'Keep my working data between visits' in line and not big['clear'] and not big['use']
+              and big_look['warn'] and big_look['colour'] != small_look['colour'] and big_keys == 1 and dbs == []
+              and after == {'phase': 'ready', 'review on the page': False}
+              and back['reviewed'] == 0 and back['line'] is None
+              and small_back['reviewed'] == 1 and (small_back['kept'] or {}).get('kind') == 'restored')
+        return ok, {'the small review': small, 'its line': small_look, 'the padded review': {**big, 'line': line[:400]}, 'its line as drawn': big_look, 'in the tab\'s storage': [small_keys, big_keys], 'databases': dbs,
+                    'after the reload': after, 'the padded review opened again': back, 'the small review opened again': small_back}
+    attempt('match review: with "Keep my working data between visits" off, a review too big for the tab\'s storage says so in a warning (how big it is, that a reload or a closed tab loses what is not saved, and the two ways out), where a small review in the same tab is kept and says so; reloaded, the big review\'s decision is gone as it said, and the small one\'s is put back', too_big_for_the_tab)
+
     def large_review():
         # A review of 4,000 places, a candidate each (from 2,000 a review is written out in pieces, the page answering between
         # them, and kept in parts: review-progress.js SLOWLY_FROM, PART). How long the page is held is measured apart

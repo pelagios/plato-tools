@@ -403,6 +403,7 @@ kbd { font: .8em var(--font-mono); border: 1px solid var(--line); border-bottom-
 .review-end > small { color: var(--muted); flex: 1 1 14rem; }
 .review-end > .review-kept { flex-basis: 100%; margin: 0; color: var(--muted); font-size: .92rem; }
 .review-kept button.link { font-size: inherit; }
+.review-end > .review-kept.warn { color: var(--warn); font-size: 1rem; }
 /* A card that offers or asks something as the page opens or a workflow begins, above step 1: a review kept in this browser
    and never saved (index.html, #review-offer), and the World Historical Gazetteer asked for up front (#whg-ask). Quiet: the
    page's accent down its left edge, its words beside a small mark, its ways on below them. */

@@ -446,6 +446,12 @@ export const REVIEW_KEPT = {
   offered: ({ at, reviewed, fileReviewed }, where) => `${where === 'tab' ? 'This tab' : 'This browser'} keeps other progress in this review, from ${keptAt(at)}: ${count(reviewed, 'places')} reviewed, where the file opened has ${fileReviewed.toLocaleString('en-GB')}. It is not put back unless you ask, and is replaced when you next decide.`,
   cleared: 'Cleared: nothing of this review is kept in this browser now. What is on the page stays, and is kept again from your next decision; to see the file as it was saved, open it again.',
   notKept: 'This browser would not keep your progress in this review: save the review to keep it.',
+  /**
+   * The review is longer than the tab's storage has room for (with "keep working data" off; or IndexedDB refused): it is
+   * in the page alone. `chars`: how long it is as kept. Said as a warning: what is lost and when, and the two ways out.
+   */
+  tooBig: ({ chars }) => `This review is too big to be kept for this tab: ${chars >= 5_500_000 ? `it is about ${Math.round(chars / 1e6).toLocaleString('en-GB')} million characters, and the browser gives a tab room for about 5 million` : 'the browser has no room left in this tab’s storage for it'}. `
+    + 'Your decisions are on this page only: reloading the page or closing the tab loses any that are not saved. Save the review to have them in a file, or turn on “Keep my working data between visits” (in Permissions): the review is then kept in this browser, where there is far more room.',
   clear: 'Clear what is kept',
   use: 'Use what is kept',
   /** A review opened from what this browser kept, with no file chosen (the offer below): what was put back, and that no file has it. */
