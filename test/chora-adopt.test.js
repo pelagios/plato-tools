@@ -177,7 +177,7 @@ test('a candidate the dataset says is a different place is refused, and nothing 
   assert.equal(adopt.candidateStatus(byId['place:gn:2155472'], { identities: base.identities }).denied, true);
   const r = adopt.adoptionAttestations(base);
   assert.equal(r.refused.kind, 'denied');
-  assert.match(r.refused.reason, /Krisis/);
+  assert.match(r.refused.reason, /review the matches again, under “Find in gazetteers”/);
   assert.deepEqual(r.attestations, []);
   // Control: the same place and another record, which it does not deny.
   assert.equal(adopt.adoptionAttestations({ ...base, candidate: byId['place:gn:2641673'] }).attestations.length, 2);

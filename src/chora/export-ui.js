@@ -125,7 +125,7 @@ export function createExport(root, preview, ctx) {
     $('body').innerHTML = `
       <fieldset><legend>Background</legend>
         <p id="chora-export-background">${esc(b.name)}: ${ex.refused ? `<span class="warn">${esc(ex.refused)}.</span>` : ex.licence ? esc(`${ex.licence.credit}`) : '<span class="warn">its licence is not known, so the map cannot go to Wikimedia Commons.</span>'}
-          ${ex.vector ? ' Drawn as vectors.' : ' Embedded as a picture: the SVG is then mostly a picture, so the PNG may suit Commons better.'}</p>
+          ${ex.vector ? ' Drawn as lines and shapes, which stay sharp at any size.' : ' Embedded as a picture: the SVG is then mostly a picture, so the PNG may suit Commons better.'}</p>
         ${b.local ? `<p><label><input type="checkbox" id="chora-export-modern"${s.ne.modern ? ' checked' : ''}> Modern borders and names (towns, countries)</label>
           <label><input type="checkbox" id="chora-export-marine"${s.ne.marine ? ' checked' : ''}> Seas named</label>
           <label><input type="checkbox" id="chora-export-physical"${s.ne.physical ? ' checked' : ''}> Mountains, deserts and other regions named</label>
@@ -152,7 +152,7 @@ export function createExport(root, preview, ctx) {
       <fieldset><legend>Licence</legend>
         <p><label for="chora-export-own">Your own drawing and labels</label> <select id="chora-export-own">${MAP_LICENCES.map((l) => `<option value="${esc(l.iri)}"${l.iri === s.licence ? ' selected' : ''}>${esc(l.label)}</option>`).join('')}</select></p>
         <p id="chora-export-licence"></p>
-        <p id="chora-export-author">${contributor ? `Author: ${esc(contributor.name)}${contributor.orcid ? ` (${esc(contributor.orcid)})` : ''}, Chora's contributor in this browser.` : 'Author: not given yet: you are asked your name (and, if you like, your ORCID iD) before the first download, as before a save.'}</p>
+        <p id="chora-export-author">${contributor ? `Author: ${esc(contributor.name)}${contributor.orcid ? ` (${esc(contributor.orcid)})` : ''}, the name the map keeps in this browser.` : 'Author: not given yet: you are asked your name (and, if you like, your ORCID iD) before the first download, as before a save.'}</p>
       </fieldset>
       <p><button type="button" id="chora-export-preview-open">Show the preview</button>
         <button type="button" id="chora-export-svg" class="primary">Download the SVG</button>
@@ -166,11 +166,11 @@ export function createExport(root, preview, ctx) {
   function historicalForm(e) {
     const r = e.rights || {}, s = settings.historical, free = !needsStatement(r);
     return `<div class="export-hist"><p>${esc(r.words || '')}</p>
-      ${r.map?.credit ? `<p class="muted">Its manifest says: “${esc(r.map.credit)}”${r.map.licence ? `; licence ${esc(r.map.licenceLabel || r.map.licence)}` : ''}.</p>` : ''}
+      ${r.map?.credit ? `<p class="muted">The map’s own description (its manifest) says: “${esc(r.map.credit)}”${r.map.licence ? `; licence ${esc(r.map.licenceLabel || r.map.licence)}` : ''}.</p>` : ''}
       ${free ? '' : `<p><label for="chora-export-statement">Its rights, as you state them</label> <select id="chora-export-statement"><option value="">Choose…</option>${STATEMENTS.filter((x) => x.key !== 'manifest' || r.map?.licence).map((x) => `<option value="${esc(x.key)}"${s.statement === x.key ? ' selected' : ''}>${esc(x.words)}</option>`).join('')}</select>
         <small class="muted">Recorded as your statement, in the file's description.${r.free === false ? ` ${esc(OVERRIDE_WORDS)}` : ''}</small></p>`}
       <p><label for="chora-export-hist-opacity">Its opacity</label> <input id="chora-export-hist-opacity" type="range" min="0.2" max="1" step="0.05" value="${s.opacity}">
-        <label for="chora-export-hist-over">Over</label> <select id="chora-export-hist-over"><option value="basemap"${s.over === 'basemap' ? ' selected' : ''}>the basemap</option><option value="alone"${s.over === 'alone' ? ' selected' : ''}>nothing: the map alone</option></select></p></div>`;
+        <label for="chora-export-hist-over">Over</label> <select id="chora-export-hist-over"><option value="basemap"${s.over === 'basemap' ? ' selected' : ''}>the background map</option><option value="alone"${s.over === 'alone' ? ' selected' : ''}>nothing: the map alone</option></select></p></div>`;
   }
   function placesWords() {
     const ticked = places.filter((p) => settings.places[p.id]?.off !== true).length;

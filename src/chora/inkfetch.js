@@ -30,13 +30,13 @@ export function tileErrorOf(e, url) {
   if (e instanceof TileError) return e;
   const site = originOf(url) || 'the map\'s server';
   if (e instanceof RemoteError && e.kind === 'status') {
-    if (e.status === 401 || e.status === 403) return new TileError(`${site} refused to give the map's pixels for tracing (${e.status}). Maps that need a login (IIIF Auth) cannot be traced here; draw by hand instead.`, 'auth', { status: e.status });
+    if (e.status === 401 || e.status === 403) return new TileError(`${site} refused to give the map's pixels for tracing (${e.status}). Maps that need a login cannot be traced here; draw by hand instead.`, 'auth', { status: e.status });
     if (e.status === 429) return new TileError(`${site} is asking the page to slow down (429), and went on refusing; try again in a minute, or draw by hand.`, 'busy', { status: 429 });
     return new TileError(`${site} could not give part of the map for tracing (it answered ${e.status}).`, 'status', { status: e.status });
   }
   if (isPermissionError(e) && e.kind === 'network') {
     // The browser says no more than that the fetch failed: no answer, or one the server does not let other sites read.
-    return new TileError(`${site} did not let this page read the map's pixels (it allows no other site to read them: CORS), or did not answer, so the map cannot be traced here; draw by hand instead.`, 'cors');
+    return new TileError(`${site} did not let this page read the map's pixels (it allows no other site to read them), or did not answer, so the map cannot be traced here; draw by hand instead.`, 'cors');
   }
   if (isPermissionError(e) && e.kind === 'moved') return new TileError(`${site} answered a request for part of the map by sending it elsewhere, which PLATO tools does not follow, so the map cannot be traced here; draw by hand instead.`, 'moved');
   // Not allowed (undecided, never, reload) or not protected: the module's own words, which name the site only.
@@ -114,7 +114,7 @@ export function createTileFetcher({ fetch = fetchImage, decode = defaultDecode, 
       // Only the map's own image server: a tile address anywhere else is refused before anything is asked.
       if (origin) {
         const away = urls.find((u) => originOf(u) !== origin);
-        if (away) throw new TileError(`A tile of the map is not on its image server (${origin}), so nothing was asked for.`, 'other');
+        if (away) throw new TileError(`A part of the map's image is not on its image server (${origin}), so nothing was asked for.`, 'other');
       }
       const out = new Array(urls.length);
       let next = 0, failed = null;

@@ -23,8 +23,9 @@ import { bundledAatLabel } from '../engine/krisis/kinds.js';
 import * as A from '../engine/chora/adopt.js';
 import { ROLES } from '../engine/chora/draw.js';
 import { CHORA_ADOPT_TEXT, lookupPage as LW } from '../engine/words.js';
-// The panel's words: the tools' own (words.js CHORA_ADOPT_PAGE), or the plain ones in a scholar-facing workflow (plain-panels.js).
+// The panel's words (words.js CHORA_ADOPT_PAGE, plain in themselves); in a scholar-facing workflow what a search sends is said without the gazetteer's ids (plain-panels.js).
 import { ADOPT_SAID as W } from '../engine/plain-panels.js';
+import { shapeWord } from './card.js';
 import * as permissions from '../lib/permissions.js';
 import { tokenFieldHtml, giveToken, rememberToken, forgetToken, noteInput } from '../lib/token-field.js';
 
@@ -211,7 +212,7 @@ export function createAdopt({ root, mapApi, state, addAdoption, armConsult, adop
         <p><button type="button" id="adopt-draw">${esc(W.drawInstead)}</button></p>${p.armed ? `<p class="note" id="adopt-armed">${esc(W.drawArmed(c.name))} <button type="button" class="link" id="adopt-unarm">${esc(W.cancelDraw)}</button></p>` : ''}</div>`;
     }
     const opts = p.offered.length ? p.offered.map((o) => `<li><label${o.refused ? ' class="disabled"' : ''}><input type="radio" name="adopt-geom" value="${o.index}"${o.refused ? ' disabled' : ''}${p.chosen === o.index ? ' checked' : ''}>
-        ${esc(o.geojson.type)}${p.feature ? '' : ` (${esc(W.repOnly)})`}${o.when ? ` <span class="muted">${esc(W.when(whenText(o.when)))}</span>` : ''}</label>${o.refused ? ` <span class="warn">${esc(o.refused.reason)}</span>` : ''}</li>`).join('')
+        ${esc(shapeWord(o.geojson.type))}${p.feature ? '' : ` (${esc(W.repOnly)})`}${o.when ? ` <span class="muted">${esc(W.when(whenText(o.when)))}</span>` : ''}</label>${o.refused ? ` <span class="warn">${esc(o.refused.reason)}</span>` : ''}</li>`).join('')
       : `<li class="muted">${esc(W.noRecordGeometry)}</li>`;
     const chosen = p.offered.find((o) => o.index === p.chosen);
     const role = p.role || chosen?.role || '';

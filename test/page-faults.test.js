@@ -62,6 +62,6 @@ test('no room left for a result is recognised from the engine\'s words, the brow
 });
 
 test('the words for a map that cannot be made name WebGL, say what turned it off, and that the rest works', () => {
-  assert.match(NO_WEBGL, /it needs WebGL, which this browser or window has turned off/);
+  assert.match(NO_WEBGL, /it needs the browser’s 3D graphics \(WebGL\), which this browser or window has turned off/);
   assert.match(NO_WEBGL, /The rest of the tools work/);
 });

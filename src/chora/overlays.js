@@ -354,7 +354,7 @@ export async function admit(resolved, { fetchJson, allowed, enforced }) {
 
 /** The picker's form: a box for a georeference or an address, and its button; ids under `prefix` (Chora's: 'chora'). */
 export const pickerForm = (prefix = 'chora') => `<form id="${prefix}-map-form">
-        <label for="${prefix}-map-input">A georeference (a IIIF Georeference Annotation), or the address of one (Allmaps), of a IIIF manifest, or of a IIIF image</label>
+        <label for="${prefix}-map-input">Paste a georeference of the map (a IIIF Georeference Annotation), or a web address: of a georeference (from Allmaps), or of the map as its library publishes it (a IIIF manifest or image)</label>
         <textarea id="${prefix}-map-input" rows="2" autocomplete="off" spellcheck="false" placeholder="https://annotations.allmaps.org/maps/…"></textarea>
         <p><button type="submit">Add the map</button></p>
       </form>`;
@@ -404,7 +404,7 @@ const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;
 export function pickerStatus({ choice = null, offer = null, status = '', link = null, editor = true, prefix = 'chora' } = {}) {
   let html = '';
   if (choice) {
-    const one = (c) => `Georeference ${c.index + 1}${c.label ? `: ${escHtml(c.label)}` : ''} <span class="muted">(${c.modified ? `changed ${escHtml(c.modified.slice(0, 10))}` : 'no date given'}, ${c.gcps === null ? 'control points not given' : `${c.gcps} control point${c.gcps === 1 ? '' : 's'}`}${c.id ? `; ${escHtml(c.id)}` : ''})</span>`;
+    const one = (c) => `Georeference ${c.index + 1}${c.label ? `: ${escHtml(c.label)}` : ''} <span class="muted">(${c.modified ? `changed ${escHtml(c.modified.slice(0, 10))}` : 'no date given'}, ${c.gcps === null ? 'its matched points not given' : `placed by ${c.gcps} matched point${c.gcps === 1 ? '' : 's'}`}${c.id ? `; ${escHtml(c.id)}` : ''})</span>`;
     html += `<div class="choice" id="${prefix}-map-choice" role="group" aria-labelledby="${prefix}-map-choice-text"><p id="${prefix}-map-choice-text">This holds ${choice.choices.length} georeferences of the map, made separately. Choose the one to show (the most recently changed is chosen):</p>
       <ul class="choices">${choice.choices.map((c) => `<li><label><input type="radio" name="georef-choice" value="${c.index}"${c.index === choice.chosen ? ' checked' : ''}> ${one(c)}</label></li>`).join('')}</ul>
       <p><button type="button" class="primary" id="${prefix}-map-choose">Show this one</button> <button type="button" id="${prefix}-map-choose-no">Not now</button></p></div>`;

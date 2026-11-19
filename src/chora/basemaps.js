@@ -67,7 +67,7 @@ export function builtIn() {
   const carto = (name, label) => ({
     id: `carto-${name}`, name: `CARTO ${label}`, group: 'CARTO', kind: 'style', provider: 'carto', export: CARTO_EXPORT,
     url: `https://basemaps.cartocdn.com/gl/${name}-gl-style/style.json${CARTO_KEY ? `?api_key=${encodeURIComponent(CARTO_KEY)}` : ''}`,
-    disabled: CARTO_KEY ? null : 'needs an API key: not yet configured',
+    disabled: CARTO_KEY ? null : 'not set up on this site: it needs a key from CARTO',
   });
   const ofm = (name, label) => ({ id: `ofm-${name}`, name: `OpenFreeMap ${label}`, group: 'OpenFreeMap', kind: 'style', provider: 'openfreemap', url: `https://tiles.openfreemap.org/styles/${name}`,
     export: { ...OFM_EXPORT, coastline: coastOf(`OpenFreeMap ${label}`) } });
@@ -235,7 +235,7 @@ export async function styleFor(b) {
   if (b.local) {
     const url = new URL(b.url, location.href).href;
     const r = await fetch(url);
-    if (!r.ok) throw new Error(`The Natural Earth basemap could not be read (${r.status})`);
+    if (!r.ok) throw new Error(`The Natural Earth background map could not be read (${r.status})`);
     return resolveStyle(await r.json(), url);
   }
   if (b.kind === 'raster') {

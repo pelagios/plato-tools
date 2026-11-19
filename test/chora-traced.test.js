@@ -145,7 +145,7 @@ test('a map\'s settings: the base address needed, a bad language or radius refus
   assert.equal(was.date, '1764');
   assert.equal(was.datasetTitle, 'Places traced from A map');
   assert.deepEqual(was.defaults, { point: { ...TRACED_DEFAULTS.point }, line: { ...TRACED_DEFAULTS.line }, area: { ...TRACED_DEFAULTS.area } });
-  assert.match(traced.settingsFrom({ base: '' }, was).error, /Give the base address/);
+  assert.match(traced.settingsFrom({ base: '' }, was).error, /Give the web address for your identifiers/);
   assert.match(traced.settingsFrom({ base: 'https://example.org/x', language: 'not one!' }, was).error, /not a language code/);
   assert.match(traced.settingsFrom({ base: 'https://example.org/x', precisionKm: '-1' }, was).error, /kilometres/);
   const ok = traced.settingsFrom({ base: 'https://example.org/x', language: 'grc', script: 'Grek', lineRole: 'Itinerary', outline: false }, was).settings;

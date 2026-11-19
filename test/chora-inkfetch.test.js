@@ -67,10 +67,10 @@ test('a 429 is waited out as Retry-After says (else 1 s, then 2 s), and given up
 test('a 403, a server that lets no other site read it, a redirect and a permission not allowed are each said in words; nothing else is asked after', async () => {
   const f403 = fetchOf(() => status(403));
   await assert.rejects(createTileFetcher({ fetch: f403, decode }).fetch([`${A}/a.jpg`, `${A}/b.jpg`, `${A}/c.jpg`]),
-    (e) => e.kind === 'auth' && /403/.test(e.message) && /IIIF Auth/.test(e.message) && e.message.includes(A));
+    (e) => e.kind === 'auth' && /403/.test(e.message) && /Maps that need a login cannot be traced here/.test(e.message) && e.message.includes(A));
   assert.ok(f403.log.length <= 2, `asked ${f403.log.length} after a refusal`);
   const cors = fetchOf(() => permissionError('network'));
-  await assert.rejects(createTileFetcher({ fetch: cors, decode }).fetch([`${A}/a.jpg`]), (e) => e.kind === 'cors' && /CORS/.test(e.message));
+  await assert.rejects(createTileFetcher({ fetch: cors, decode }).fetch([`${A}/a.jpg`]), (e) => e.kind === 'cors' && /it allows no other site to read them\)/.test(e.message) && !/CORS/.test(e.message));
   const moved = fetchOf(() => permissionError('moved'));
   await assert.rejects(createTileFetcher({ fetch: moved, decode }).fetch([`${A}/a.jpg`]), (e) => e.kind === 'moved' && /elsewhere/.test(e.message) && !/paste/.test(e.message));
   for (const kind of ['undecided', 'never', 'reload', 'unprotected']) {

@@ -4,6 +4,8 @@
 // flag on the page. Each panel keeps the tools' own words (src/engine/words.js), said as they are outside such a
 // workflow and on the command line; here are the ones said in their place within one, by the same keys, so that a
 // word not listed is the tools' own. Nothing here changes what is sent, written or reported.
+// The map's own words are plain everywhere (words.js CHORA_*, and CARD_SAID here; test/chora-plain.test.js), so
+// only what a search sends is laid over them.
 import { REGION_PAGE, WIKIDATA_WORDS, CHORA_ADOPT_PAGE } from './words.js';
 
 // Whether the plain words are the ones said: on the page, while a scholar-facing workflow is followed (src/app.js
@@ -104,40 +106,25 @@ export const PLAIN_WIKIDATA = {
 export const WIKIDATA_SAID = wordsOf(WIKIDATA_WORDS, PLAIN_WIKIDATA);
 
 const scopeSaid = ({ labels = [], countries = [] } = {}) => [labels.length ? `inside ${labels.join(' or ')}` : '', countries.length ? `in ${countries.join(' or ')}` : ''].filter(Boolean).join(', ');
-/** The search of a gazetteer for one place, on the map (words.js CHORA_ADOPT_PAGE). */
+/**
+ * The search of a gazetteer for one place, on the map (words.js CHORA_ADOPT_PAGE, whose words are plain in themselves,
+ * in a workflow or not): within a scholar-facing workflow what a search sends is said without the type and the gazetteer's ids.
+ */
 export const PLAIN_ADOPT = {
-  noAddress: 'This place has no web address of its own in your data yet, so a gazetteer’s record cannot be used for it: give it one first.',
   sends: ({ lang, ...scope }) => `Sent to the gazetteer: the name${lang ? `, and its language (${lang})` : ''}; ${scopeSaid(scope) ? `looked for only ${scopeSaid(scope)}` : 'looked for everywhere'}.`,
   where: (scope) => scopeSaid(scope),
-  notApplied: (where) => `The gazetteer could not look ${where} (it has no outline of the region), so it answered nothing. Nothing wider is searched unless you ask.`,
-  none: 'The gazetteer found nothing of that name.',
-  caveat: 'Nothing is chosen for you: the gazetteer’s score only compares each suggestion with its best one, and its confidence is about the name alone.',
-  denied: 'Your data says this is a different place (to change that, review the matches again, under “Find in gazetteers”).',
-  krisisUnsaved: 'Decisions made in the review of matches, and not yet saved into the file open here, are not seen.',
-  different: 'Different places? Record it in the review of matches ↗',
-  dismissed: (k) => `${k === 1 ? 'One suggestion' : `${n(k)} suggestions`} set aside as not this one, for this visit only.`,
-  basis: 'Why they are the same place (optional, kept with your decision)',
-  adopt: 'Use it: this place is that record, and is located there',
-  adoptLinked: 'Use the record’s location',
-  adopted: (k) => `Taken: ${k === 2 ? 'the match and the location are' : 'the location is'} waiting to be saved.`,
-  pendingItem: (name) => `Location taken from ${name}`,
-  repOnly: 'the one point WHG gives for the record',
-  reloadLoses: 'The gazetteer search on screen, and its answers (anything taken from it is kept).',
 };
 export const ADOPT_SAID = wordsOf(CHORA_ADOPT_PAGE, PLAIN_ADOPT);
 
-/** What the map's card says of a place's drawings, and the question before the first is saved: the tools' own, and in plain words. */
-const CARD_OWN = {
-  who: 'Your drawings will be saved as attestations made by you. Who are you?',
-  withdrawn: (k) => `${n(k)} withdrawn attestation${k === 1 ? '' : 's'} not shown.`,
-  draw: 'Draw with the tools on the map. Each drawing is added as a new attestation of this place; nothing already there is changed.',
-};
-export const PLAIN_CARD = {
+/**
+ * What the map's card says of a place's drawings, and the question before the first is saved: the same in a workflow
+ * and outside one (until November 2026 they spoke of attestations outside a workflow, and these were laid over them).
+ */
+export const CARD_SAID = {
   who: 'Your drawings will be saved under your name, as yours. Who are you?',
   withdrawn: (k) => `${many(k, 'withdrawn statement')} not shown.`,
   draw: 'Draw with the tools on the map. Each drawing is added to what is recorded of this place; nothing already there is changed.',
 };
-export const CARD_SAID = wordsOf(CARD_OWN, PLAIN_CARD);
 
 /**
  * The list of suggestions, saved at the end of the review (the tools' "candidate set"): PLAIN_SUGGESTIONS by the key each

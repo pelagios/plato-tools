@@ -72,11 +72,11 @@ test('a status that names an inherited property (__proto__, constructor, toStrin
   }
 });
 
-test('the timeline says what its bars are: when each attestation applies or is attested, and the hatched ones', () => {
+test('the timeline says what its bars are: when each statement about the place applies or was made, and the hatched ones', () => {
   const claim = row({ start: '0100', end: '0200' });
   const ev = row({ facet: 'evidence', text: '', start: '0015', end: '0540', evidence: true });
-  assert.match(timeline([claim]), /aria-label="When each attestation applies or is attested, from \d+ to \d+">/);
-  assert.match(timeline([ev, claim]), /aria-label="When each attestation applies or is attested, from \d+ to \d+; hatched bars are when texts mention the place">/);
+  assert.match(timeline([claim]), /aria-label="When each statement about the place applies or was made, from \d+ to \d+">/);
+  assert.match(timeline([ev, claim]), /aria-label="When each statement about the place applies or was made, from \d+ to \d+; hatched bars are when texts mention the place">/);
 });
 
 test('#20: an evidence span given only in words is written as a mention too, and a claim in words is not', () => {

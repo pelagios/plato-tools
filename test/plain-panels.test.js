@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { setPlain, plainOn, laidOver, wordsOf, PLAIN_REGION, REGION_SAID, PLAIN_WIKIDATA, WIKIDATA_SAID, PLAIN_ADOPT, ADOPT_SAID, PLAIN_CARD, CARD_SAID,
+import { setPlain, plainOn, laidOver, wordsOf, PLAIN_REGION, REGION_SAID, PLAIN_WIKIDATA, WIKIDATA_SAID, PLAIN_ADOPT, ADOPT_SAID, CARD_SAID,
   PLAIN_SUGGESTIONS, plainUnexported, plainBareRegions, PLAIN_NO_REGIONS, plainExported, PAGE_REPORT, PLAIN_SUGGESTIONS_REPORT } from '../src/engine/plain-panels.js';
 import { REGION_PAGE, WIKIDATA_WORDS, CHORA_ADOPT_PAGE, summary } from '../src/engine/words.js';
 import { PLAIN_REPORT, PLAIN_FINISH } from '../src/engine/plain.js';
@@ -54,7 +54,7 @@ test('the words of a panel follow the page: the tools\' own outside a scholar-fa
 });
 
 test('every plain word names a word the panel has, and none says an expert\'s; the tools\' own, which they stand in for, do', () => {
-  for (const [name, plain, own] of [['regions', PLAIN_REGION, REGION_PAGE], ['Wikidata', PLAIN_WIKIDATA, WIKIDATA_WORDS], ['the map', PLAIN_ADOPT, CHORA_ADOPT_PAGE]]) {
+  for (const [name, plain, own] of [['regions', PLAIN_REGION, REGION_PAGE], ['Wikidata', PLAIN_WIKIDATA, WIKIDATA_WORDS]]) {
     for (const k of Object.keys(plain)) {
       assert.ok(Object.hasOwn(own, k), `${name}: ${k} is no word of the panel`);
       assert.equal(typeof plain[k], typeof own[k], `${name}: ${k}`);
@@ -66,9 +66,13 @@ test('every plain word names a word the panel has, and none says an expert\'s; t
     // The control: the same search finds an expert's word in the tools' own, in the words the plain ones replace.
     assert.ok(said(Object.fromEntries(Object.keys(plain).map((k) => [k, own[k]]))).some((s) => EXPERT.test(s) || GREEK.test(s)), `${name}: the tools' own say no expert's word, so the test proves nothing`);
   }
-  for (const s of said(PLAIN_CARD)) assert.doesNotMatch(s, EXPERT, s);
-  assert.match(plainly(() => CARD_SAID.draw), /added to what is recorded of this place/);
-  assert.match(CARD_SAID.draw, /a new attestation of this place/);
+  // The map's words are plain in themselves, in a workflow or not (test/chora-plain.test.js): only what a search sends is laid over them.
+  assert.deepEqual(Object.keys(PLAIN_ADOPT), ['sends', 'where']);
+  for (const k of Object.keys(PLAIN_ADOPT)) assert.equal(typeof CHORA_ADOPT_PAGE[k], 'function', k);
+  for (const s of said(CARD_SAID)) assert.doesNotMatch(s, EXPERT, s);
+  assert.equal(said(CARD_SAID).length, 4);
+  assert.match(CARD_SAID.draw, /added to what is recorded of this place/);
+  assert.equal(plainly(() => CARD_SAID.draw), CARD_SAID.draw);
 });
 
 test('the review of regions in plain words: what a region is looked up within, without the gazetteer\'s ids; the buttons say what they would send as searches', () => {
@@ -116,10 +120,13 @@ test('the gazetteer search on the map in plain words: no tool\'s name, and what 
   assert.equal(CHORA_ADOPT_PAGE.sends(scope), 'Sent: the name, with the type Place, its language (la), looked for only within Lancashire (WHG gn:2644974), in GB.');
   assert.equal(PLAIN_ADOPT.sends(scope), 'Sent to the gazetteer: the name, and its language (la); looked for only inside Lancashire, in GB.');
   assert.equal(PLAIN_ADOPT.sends({}), 'Sent to the gazetteer: the name; looked for everywhere.');
-  assert.match(CHORA_ADOPT_PAGE.denied, /change that in Krisis/);
-  assert.match(PLAIN_ADOPT.denied, /review the matches again, under “Find in gazetteers”/);
-  assert.equal(PLAIN_ADOPT.adopted(2), 'Taken: the match and the location are waiting to be saved.');
-  assert.equal(CHORA_ADOPT_PAGE.adopted(2), 'Adopted: two attestations (the identity and the location) are waiting to be saved.');
+  assert.equal(ADOPT_SAID.sends(scope), CHORA_ADOPT_PAGE.sends(scope));
+  assert.equal(plainly(() => ADOPT_SAID.sends(scope)), PLAIN_ADOPT.sends(scope));
+  // The rest is the panel's own, the same in a workflow and outside one, and plain.
+  assert.match(CHORA_ADOPT_PAGE.denied, /review the matches again, under “Find in gazetteers”/);
+  assert.equal(plainly(() => ADOPT_SAID.denied), CHORA_ADOPT_PAGE.denied);
+  assert.equal(CHORA_ADOPT_PAGE.adopted(2), 'Taken: the match and the location are waiting to be saved.');
+  assert.equal(CHORA_ADOPT_PAGE.adopted(1), 'Taken: the location is waiting to be saved.');
   assert.equal(plainly(() => ADOPT_SAID.find), CHORA_ADOPT_PAGE.find);
 });
 

@@ -66,7 +66,7 @@ test('a PLATO JSON dataset saved with drawings: every attestation as it was, the
   assert.deepEqual(r.mneme.reasons, []);
   assert.equal(r.mneme.passed, true);
   assert.deepEqual(r.mneme.report.counts, { earlier: 10, later: 13, unchanged: 10, changed: 0, lost: 0, added: 3, retracted: 0, superseded: 0 });
-  assert.match(choraSaveText(r), /^Saved, with 3 new attestations;/);
+  assert.match(choraSaveText(r), /^Saved, with 3 new statements about your places; the version check confirms that everything the dataset said before is there as it was\.$/);
 });
 
 test('spreadsheet tables saved with a drawing: the tables become PLATO JSON, every attestation as read, and Mneme passes', async () => {
@@ -293,7 +293,7 @@ test('a drawing for a place whose attestations are not a list is refused, naming
       const refused = r.report.items.filter((i) => i.kind === 'chora-attestations-not-a-list');
       assert.equal(refused.length, 1, `${what}: ${JSON.stringify(r.report.items)}`);
       assert.equal(refused[0].severity, 'error');
-      assert.match(refused[0].message, /attestations/);
+      assert.match(refused[0].message, /whose statements are not held as a list/);
       assert.deepEqual(refused[0].examples, [`Oddity (${X}p/odd)`], what);
       assert.deepEqual(r.outputs, [], `${what}: no file offered`);
       assert.equal(r.mneme, null, what);

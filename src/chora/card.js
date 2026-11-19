@@ -50,8 +50,11 @@ export function precisionWords(g) {
   const far = points && [...positions(g.geojson.coordinates)].some((c) => circleTooLarge(c, g.precisionKm)) ? ' (too large to draw)' : '';
   return `${said}, ${points ? '' : 'boundary '}to within ${esc(metres(g.precisionKm * 1000))}${far}`;
 }
+/** A location's shape in ordinary words (GeoJSON's own names for them are a programmer's): a shape of another kind is named as given. */
+export const SHAPE_WORDS = { Point: 'Point', MultiPoint: 'Points', LineString: 'Line', MultiLineString: 'Lines', Polygon: 'Area', MultiPolygon: 'Areas', GeometryCollection: 'Several shapes' };
+export const shapeWord = (type) => (Object.hasOwn(SHAPE_WORDS, type) ? SHAPE_WORDS[type] : String(type ?? ''));
 /** One location drawn on the map: its kind, what it marks, how well it is known, and its date. */
-export const geometryItem = (g) => `${esc(g.geojson.type)}${g.role ? `, ${esc(ROLE_WORDS[tailOf(g.role)] || tailOf(g.role))}` : ''}${precisionWords(g)}${dated(g.timespan)}${badge(g.status)}`;
+export const geometryItem = (g) => `${esc(shapeWord(g.geojson.type))}${g.role ? `, ${esc(ROLE_WORDS[tailOf(g.role)] || tailOf(g.role))}` : ''}${precisionWords(g)}${dated(g.timespan)}${badge(g.status)}`;
 
 const anchorLink = (a) => (a.place ? `<a href="#" data-place="${esc(a.id)}">${esc(a.label)}</a>` : esc(a.label));
 const andList = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
@@ -139,7 +142,7 @@ export function timeline(items) {
   const [k0] = hatched;
   const legend = hatched.size ? `<g class="tl-legend"><rect x="${L}" y="${axisY + 6}" width="14" height="6" rx="2" style="${hatch(k0)}"/>
     <text x="${L + 18}" y="${axisY + 12}" class="tl-axis">hatched: when texts mention the place, not when what they say was so</text></g>` : '';
-  return `<svg class="timeline" viewBox="0 0 ${W} ${h}" role="img" aria-label="When each attestation applies or is attested, from ${lo} to ${hi}${hatched.size ? '; hatched bars are when texts mention the place' : ''}">${defs}${bars}
+  return `<svg class="timeline" viewBox="0 0 ${W} ${h}" role="img" aria-label="When each statement about the place applies or was made, from ${lo} to ${hi}${hatched.size ? '; hatched bars are when texts mention the place' : ''}">${defs}${bars}
     <text x="${L}" y="${axisY}" class="tl-axis">${lo}</text><text x="${W - R}" y="${axisY}" class="tl-axis" text-anchor="end">${hi}</text>${legend}</svg>`
     + (undated ? `<p class="muted">Also dated only in words: ${words()}.</p>` : '');
 }

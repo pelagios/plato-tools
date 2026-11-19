@@ -6,7 +6,7 @@ export const PROMISE = 'Your files stay on your computer, and nothing is sent to
 
 /** Each category: its heading, and what a site of that kind learns. */
 export const CATEGORY_WORDS = {
-  basemap: { heading: 'Basemaps', learns: 'A basemap’s provider sees which part of the world you look at, and your address on the internet, as any website does.' },
+  basemap: { heading: 'Background maps', learns: 'A background map’s provider sees which part of the world you look at, and your address on the internet, as any website does.' },
   iiif: { heading: 'Historical maps', learns: 'A historical map’s server sees which map you view, and which parts of it; so does the site its description (its manifest) or its georeference is on. Tracing from a map asks its server for the part you click, in more detail.' },
   allmaps: { heading: 'Georeferences', learns: 'Allmaps learns which map a georeference was looked for. Opening a map in the Allmaps Editor sends Allmaps the map’s address.' },
   gazetteer: { heading: 'Gazetteers', learns: 'A gazetteer sees the names you look up in it, and their language where one is sent with them. Wikidata also sees the coordinates of each place searched before an item is made for it (it is asked for items near that point), and, when your new items are read back, the Wikidata user name you type.' },
@@ -47,7 +47,7 @@ const listOf = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(',
 
 export const PANEL = {
   title: 'Permissions',
-  shared: 'These tools are on plato.pelagios.org, which they share with PLATO’s own pages (its guide and its specification). So what this browser keeps for them (your permissions, your choices, keys such as a pasted basemap’s or the World Historical Gazetteer token if you remember it, and your working data) can be read, on this computer only, by any page of plato.pelagios.org.',
+  shared: 'These tools are on plato.pelagios.org, which they share with PLATO’s own pages (its guide and its specification). So what this browser keeps for them (your permissions, your choices, keys such as a pasted background map’s or the World Historical Gazetteer token if you remember it, and your working data) can be read, on this computer only, by any page of plato.pelagios.org.',
   sitesHeading: 'Sites these tools may ask',
   sitesIntro: 'Each is asked only once you allow it. “Not decided” means a tool will ask you first; “Never” means the tool does without it, and does not ask again.',
   links: 'A link in your data (to a source, say, or to an ORCID) is followed only when you click it: that is a visit you make yourself, outside these permissions, and the site visited is told nothing of this page.',
@@ -92,7 +92,7 @@ export const PANEL = {
   forget: 'Forget',
   workHeading: 'Your working data',
   keepWork: 'Keep my working data between visits',
-  keepWorkNote: 'Chora keeps the dataset you opened, your drawings not yet saved, the historical maps you showed, and the file it last wrote, in this browser, so that you can carry on next time. Turned off, they are cleared when you next open Chora, and the file it wrote is cleared once you have saved it: save your drawings before you leave. Methodos keeps each workflow you follow (its steps, and references to your files by name, size and SHA-256), a copy of the file you began it with and the files its steps made, so that they are chosen again for the next step after a reload, until you leave the workflow or clear them, and, where the browser allows, a link to the file you began with, and, for a workflow saved to WHG or opened from it, which project it is there (its id and version, never a token). Turned off, these last for the tab only, and what was kept is cleared at once. Krisis keeps your progress in a match review as you make it (the review as “Save the review” would write it: its suggestions, your decisions, flags and notes, and the reviewer’s name where the review records it), for the 20 reviews you last worked on, so that it is put back when you open the review again after a reload or another day; “Clear what is kept”, under the review, clears it. Turned off, it lasts for the tab only, and what was kept is cleared at once. The file you last chose in “Choose your data” (or saved in Chora) is kept too, for as long as you want it: offered there when you come back (“Use it” or “Forget it”). It goes when you choose another, forget it (there, or below), clear a workflow’s files, or turn this off. Turned off, it is not kept, and what was kept is cleared at once.',
+  keepWorkNote: 'The map keeps the dataset you opened, your drawings not yet saved, the historical maps you showed, and the file it last wrote, in this browser, so that you can carry on next time. Turned off, they are cleared when you next open the map, and the file it wrote is cleared once you have saved it: save your drawings before you leave. Methodos keeps each workflow you follow (its steps, and references to your files by name, size and SHA-256), a copy of the file you began it with and the files its steps made, so that they are chosen again for the next step after a reload, until you leave the workflow or clear them, and, where the browser allows, a link to the file you began with, and, for a workflow saved to WHG or opened from it, which project it is there (its id and version, never a token). Turned off, these last for the tab only, and what was kept is cleared at once. Krisis keeps your progress in a match review as you make it (the review as “Save the review” would write it: its suggestions, your decisions, flags and notes, and the reviewer’s name where the review records it), for the 20 reviews you last worked on, so that it is put back when you open the review again after a reload or another day; “Clear what is kept”, under the review, clears it. Turned off, it lasts for the tab only, and what was kept is cleared at once. The file you last chose in “Choose your data” (or saved in Chora) is kept too, for as long as you want it: offered there when you come back (“Use it” or “Forget it”). It goes when you choose another, forget it (there, or below), clear a workflow’s files, or turn this off. Turned off, it is not kept, and what was kept is cleared at once.',
   keptFile: (what) => `Kept from your last choice in “Choose your data”: ${what}.`,
   keptNone: 'No file of yours is kept.',
   keptForget: 'Forget it',
@@ -109,15 +109,15 @@ export const PANEL = {
 
 /** The line Chora shows for a pasted basemap remembered as the choice, which is never used until asked for in this load. */
 export const REMEMBERED_BASEMAP = {
-  line: (name) => `${name} is remembered as your choice. A pasted basemap is not loaded until you ask, each time this page opens.`,
+  line: (name) => `${name} is remembered as your choice. A pasted background map is not loaded until you ask, each time this page opens.`,
   use: 'Use it now',
 };
 
 /** What is remembered in this browser, besides permissions: each key's description. */
 export const REMEMBERED = {
   'plato-tools.reviewer': { label: 'Your name and ORCID, as the reviewer of matches (Krisis)' },
-  'chora-contributor': { label: 'Your name and ORCID, as the one drawing (Chora)' },
-  'chora-basemaps': { label: 'The basemaps you pasted (Chora). Their addresses may hold an API key.' },
+  'chora-contributor': { label: 'Your name and ORCID, as the one drawing on the map' },
+  'chora-basemaps': { label: 'The background maps you pasted on the map. Their addresses may hold a key (a password of yours with their provider).' },
 };
 
 /**
@@ -136,7 +136,7 @@ export const RELOAD_LOSES = {
   running: 'The check, conversion or comparison running now, and its result.',
   review: (n) => `${n} decision${n === 1 ? '' : 's'} in your match review not yet saved: save the review first.`,
   drawing: 'The line or area you are drawing, not yet finished.',
-  pasted: 'The address in the box for pasting a basemap, not yet added.',
+  pasted: 'The address in the box for pasting a background map, not yet added.',
   saving: 'The save running now.',
   tracing: 'The trace being proposed now, not yet accepted.',
 };

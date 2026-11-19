@@ -785,28 +785,28 @@ export const LOCATE_TEXT = {
 /** What an adoption tells the person adopting, beside the attestations (adopt.js, notes), by kind. */
 export const CHORA_ADOPT_TEXT = {
   'already-linked': 'This place is already recorded as the same as this record, so only its location is added.',
-  'loosely-linked': 'This place is already linked to this record, but not as the same place: adopting records that it is.',
+  'loosely-linked': 'This place is already linked to this record, but not as the same place: using the record here records that it is.',
   'licence-restricted': (spdx) => `The record's source is licensed ${spdx}; this may bear on how the copied location can be reused.`,
   'licence-unknown': "The gazetteer does not say under what licence the record's source may be reused.",
   'unstable-id': "This is one of the gazetteer's own records, whose id may change if its dataset is uploaded again: its name and dataset are kept in the notes.",
-  'representative-point-only': "The record could not be fetched, so only the gazetteer's representative point is offered, not the record's own geometry.",
+  'representative-point-only': "The record could not be fetched, so only the one point the gazetteer gives for the record is offered, not the record's own shape.",
   // Refusals: nothing is recorded. ('geometry' and 'when' give their own reasons.)
-  'no-address': 'This place has no address (@id) in the dataset, so nothing can be recorded about it here. Give it one first.',
-  denied: 'The dataset already says this place and this record are different places. To change that, use Krisis.',
+  'no-address': 'This place has no web address of its own in the dataset, so nothing can be recorded about it here. Give it one first.',
+  denied: 'The dataset already says this place and this record are different places. To change that, review the matches again, under “Find in gazetteers”.',
   unavailable: "The record's source does not allow the gazetteer to pass it on, so nothing is copied: the record was consulted, not copied. You can draw the location yourself, citing the record as evidence.",
-  'no-geometry': "There is no geometry to adopt: choose one of the record's geometries.",
-  'no-record': 'This candidate has no address in the gazetteer, so it cannot be adopted.',
+  'no-geometry': "There is no location to use: choose one of the record's locations.",
+  'no-record': 'This suggestion has no address in the gazetteer, so it cannot be used.',
   'same-address': "This place's address is the record's own, so it is already that record: only its location is added.",
-  error: (why) => `This could not be adopted: ${why}`,
+  error: (why) => `This could not be used: ${why}`,
   /** A lookup or a record fetch that gave no answer (adopt.js lookupProblem). */
   problem: {
     quota: "The World Historical Gazetteer's allowance of requests for today is spent. Your token is kept: try again tomorrow.",
     auth: 'The World Historical Gazetteer refused the token. Give it again (from your WHG profile), or forget it.',
     permission: 'The World Historical Gazetteer is not allowed in Permissions now, so nothing was sent.',
-    rate: 'The World Historical Gazetteer still refused the query as one too many after waiting. Try again in a minute.',
+    rate: 'The World Historical Gazetteer still refused the search as one too many after waiting. Try again in a minute.',
     network: 'The World Historical Gazetteer could not be reached. Try again when it can.',
     server: 'The World Historical Gazetteer refused or failed the request. Try again later.',
-    unanswered: 'The World Historical Gazetteer did not answer this query; this is not a finding that it has no such place. Try again.',
+    unanswered: 'The World Historical Gazetteer did not answer this search; this is not a finding that it has no such place. Try again.',
   },
 };
 /** Where an adopt search looks, in words (adopt.js adoptScope): "within Lancashire (WHG gn:2644974), in GB", or ''. */
@@ -834,7 +834,7 @@ export const TOKEN_FIELD = {
 export const CHORA_ADOPT_PAGE = {
   find: 'Find in a gazetteer…',
   /** Why the button is disabled, shown beside it. */
-  noAddress: 'This place has no address (@id) in the dataset, so a gazetteer record cannot be adopted for it: give it one first.',
+  noAddress: 'This place has no web address of its own in your data yet, so a gazetteer’s record cannot be used for it: give it one first.',
   heading: 'Find in the World Historical Gazetteer',
   queryLabel: 'The name to look for',
   /**
@@ -850,46 +850,46 @@ export const CHORA_ADOPT_PAGE = {
   widen: 'Search everywhere',
   narrow: (where) => `Search ${where} again`,
   noneWithin: (where) => `The gazetteer found nothing of that name ${where}. Nothing wider is searched unless you ask.`,
-  notApplied: (where) => `The gazetteer could not look ${where} (it holds no outline for the region), so it answered nothing. Nothing wider is searched unless you ask.`,
-  tokenNeeded: 'Give your WHG token first: WHG answers only queries that carry one. It is kept as Permissions says.',
+  notApplied: (where) => `The gazetteer could not look ${where} (it has no outline of the region), so it answered nothing. Nothing wider is searched unless you ask.`,
+  tokenNeeded: 'Give your WHG token first: WHG answers only searches that carry one. It is kept as Permissions says.',
   send: 'Look up',
   sending: 'Asking the World Historical Gazetteer…',
   close: 'Close',
   /** How the candidates are ordered (adopt.js rankCandidates), said once above them. */
-  order: { point: "In order of distance from this place's own location.", box: (from) => `Those inside the area of ${from === 'related' ? 'the places it is related to' : 'its countries'} first, each group in the gazetteer's order.`, none: "No geographic reference: the gazetteer's order." },
-  none: 'The gazetteer found no candidates for that name.',
-  caveat: "Nothing is chosen for you: the gazetteer's score is relative to its best answer, and its confidence measures the name only.",
+  order: { point: "In order of distance from this place's own location.", box: (from) => `Those inside the area of ${from === 'related' ? 'the places it is related to' : 'its countries'} first, each group in the gazetteer's order.`, none: "Nothing to measure distance from: the gazetteer's own order." },
+  none: 'The gazetteer found nothing of that name.',
+  caveat: 'Nothing is chosen for you: the gazetteer’s score only compares each suggestion with its best one, and its confidence is about the name alone.',
   distance: (km) => `${km.toLocaleString('en-GB')} km away`,
   inside: 'inside the area', outside: 'outside the area',
   noCoords: 'no coordinates given, so not on the map',
   sameSpelling: 'same spelling',
   linked: 'Already recorded in your dataset as the same place as this record.',
   loose: 'Already linked to this record in your dataset, but not as the same place.',
-  denied: 'Your dataset says this is a different place (change that in Krisis).',
-  krisisUnsaved: 'Decisions made in Krisis and not yet saved into the dataset open here are not seen.',
+  denied: 'Your data says this is a different place (to change that, review the matches again, under “Find in gazetteers”).',
+  krisisUnsaved: 'Decisions made in the review of matches, and not yet saved into the file open here, are not seen.',
   preview: 'Show the record',
   useLocation: 'Use its location',
   notThis: 'Not this one',
-  different: 'Different places? Record it in Krisis ↗',
-  dismissed: (n) => `${n === 1 ? 'One candidate' : `${n} candidates`} set aside as not this one, for this visit only.`,
+  different: 'Different places? Record it in the review of matches ↗',
+  dismissed: (n) => `${n === 1 ? 'One suggestion' : `${n.toLocaleString('en-GB')} suggestions`} set aside as not this one, for this visit only.`,
   fetching: 'Fetching the record…',
   geometries: "The record's locations: choose one",
   role: 'What it marks',
-  basis: 'Why they are the same place (optional, kept with the identity)',
-  adopt: 'Adopt: this place is that record, located there',
-  adoptLinked: "Adopt the record's location",
+  basis: 'Why they are the same place (optional, kept with your decision)',
+  adopt: 'Use it: this place is that record, and is located there',
+  adoptLinked: 'Use the record’s location',
   consulted: 'This record was consulted, not copied: its source does not allow it to be passed on.',
   drawInstead: 'Draw it yourself, citing the record as consulted',
   drawArmed: (name) => `Draw on the map: the next drawing for this place cites ${name} as consulted.`,
-  adopted: (n) => `Adopted: ${n === 2 ? 'two attestations (the identity and the location) are' : 'one attestation (the location) is'} waiting to be saved.`,
-  pendingItem: (name) => `Adopted from ${name}`,
+  adopted: (n) => `Taken: ${n === 2 ? 'the match and the location are' : 'the location is'} waiting to be saved.`,
+  pendingItem: (name) => `Location taken from ${name}`,
   consultedItem: (name) => `Cites ${name} as consulted (nothing copied from it)`,
   when: (t) => `dated ${t}`,
   noRecordGeometry: 'The record gives no location.',
-  repOnly: "WHG's representative point only",
+  repOnly: 'the one point WHG gives for the record',
   cluster: 'This place is linked to a WHG cluster page; whether it holds this record is not known.',
   cancelDraw: 'Cancel',
-  reloadLoses: 'The gazetteer lookup on screen, and its answers (anything adopted is kept).',
+  reloadLoses: 'The gazetteer search on screen, and its answers (anything taken from it is kept).',
 };
 /** A hand-drawing's notes, after how it was drawn, for a record consulted and not copied (adopt.js consultedParts). */
 export const choraConsultedNote = (r) =>
@@ -937,7 +937,7 @@ export const noRoom = (message) => String(message ?? '') === NO_ROOM || /QuotaEx
  * is not made; Chora's panel says so, and its engine starts all the same, so that the dataset, its places and their
  * cards, the gazetteer and the save still work (src/chora/app.js, src/chora/map.js).
  */
-export const NO_WEBGL = 'The map cannot be shown: it needs WebGL, which this browser or window has turned off. The rest of the tools work: the places can still be found, read and saved here.';
+export const NO_WEBGL = 'The map cannot be shown: it needs the browser’s 3D graphics (WebGL), which this browser or window has turned off. The rest of the tools work: the places can still be found, read and saved here.';
 /** The engine's own files (its script, SQLite's WebAssembly, PLATO's schemas, all from this site) did not arrive: the connection, not the data. Nothing is stuck. */
 export const NOT_DOWNLOADED = 'The tools could not be downloaded: check the connection and press the button again.';
 /**
@@ -955,7 +955,7 @@ export const choraTracingNote = ({ zoom } = {}) =>
  * reason, but for a georeference, whose reason on the main page (input.js GEOREF_REASON) is to drop it
  * with the Recogito export it places; on Chora it is shown under Historical maps.
  */
-export const CHORA_GEOREF_REASON = "This is a IIIF Georeference Annotation (a map's georeference, not a dataset): to show the map, paste it, or its address, under Historical maps, and open a dataset here to draw on.";
+export const CHORA_GEOREF_REASON = 'This file is a georeference, not a dataset: it records where a scanned historical map sits on the modern map (a IIIF Georeference Annotation). To show the map, paste it, or its address, under Historical maps, and open a dataset here to draw on.';
 export const choraLoadFailure = (input) => (input?.format === 'georef' ? CHORA_GEOREF_REASON : input?.reason);
 /**
  * How a drawing traced WITH ASSISTANCE from a historical map was made: a shape proposed from the map's
@@ -1026,16 +1026,16 @@ export const CHORA_TRACE = {
   tracingThis: 'Being traced: see “Trace into a new dataset” below.',
   workflowStep: "This workflow's step: add the map under Historical maps, then trace it into a new dataset (“Trace into a new dataset”). Its save does the step.",
   settingsFor: (title) => `Tracing “${title || 'a historical map'}” into a new dataset. Settled once, for the map; each can be changed for one place as you go.`,
-  baseQuestion: 'Base address: your places will have their web addresses under it',
-  baseHelp: 'Needed: every place you trace is given its address under it as you name it. It is the base address in Options, which this changes too.',
+  baseQuestion: 'Web address for your identifiers: your places will have their web addresses under it',
+  baseHelp: 'Needed: every place you trace is given its address under it as you name it. It is the “Web address for your identifiers” in Options, which this changes too.',
   baseFixed: 'Fixed now: the dataset traced into is made, under it.',
-  baseOfOpen: "The dataset open's own base address (its uriSpace), as its file gives it: every place traced into it is given its address under it, whatever Options say.",
+  baseOfOpen: "The web address the dataset open gives for its own identifiers, as its file gives it: every place traced into it is given its address under it, whatever Options say.",
   beginInto: 'Trace into it',
-  noOpenBase: (title) => `“${title || 'The dataset open'}” does not say under what address its places are published (it has no uriSpace), so a place traced into it could not be given an address of its own. Give the dataset its base address (uriSpace in PLATO JSON, or the about sheet's base_uri) and open it again, or trace the map into a new dataset of its own with no dataset open.`,
+  noOpenBase: (title) => `“${title || 'The dataset open'}” does not say under what web address its places are published, so a place traced into it could not be given an address of its own. Give the dataset that address (in its file: uriSpace in PLATO JSON, or base_uri on a spreadsheet's about sheet) and open it again, or trace the map into a new dataset of its own with no dataset open.`,
   titleFixed: "The dataset's own title, as its file gives it.",
   titleQuestion: "The dataset's title",
   dateQuestion: "The map's date, as you would cite it",
-  dateHelp: "Filled in from the map's own date where its description gives one (its navDate). It is written as the map's date, as you give it, with its years read from it.",
+  dateHelp: "Filled in from the map's own date where its description gives one. It is written as the map's date, as you give it, with its years read from it.",
   dateEach: 'Date each place by the map: what it shows is as of then',
   languageQuestion: 'The language of the names on the map (a code: en, la, fr…)',
   languageHelp: 'Given to every name you trace, and changed for one name in the form where it differs.',
@@ -1048,14 +1048,14 @@ export const CHORA_TRACE = {
   outlineQuestion: "Look the places up within the map's outline: the gazetteer lookup's Scope becomes the area the map covers",
   begin: 'Make the dataset, and trace',
   keepSettings: 'Keep these settings',
-  needBase: 'Give the base address: a web address beginning https://, under which every place traced is given its own.',
+  needBase: 'Give the web address for your identifiers: one beginning https://, under which every place traced is given its own.',
   badLanguage: (v) => `“${v}” is not a language code such as en, la or fr: correct it, or leave it empty.`,
   badRadius: 'The uncertainty radius must be a distance in kilometres, 0 or more, or empty.',
   tracing: (map, dataset, n, unnamed) => `Tracing “${map}” into “${dataset}”: ${n.toLocaleString('en-GB')} place${n === 1 ? '' : 's'} traced${unnamed ? `, ${unnamed.toLocaleString('en-GB')} not named yet` : ''}.`,
   howTo: 'Draw a point, line or area on the map with no place chosen, or press “New place”: name it, and press Enter. Cancel lets the drawing go.',
   newPlace: 'New place',
   resume: (title) => `Go on tracing “${title || 'the map'}”: the dataset made from it, not yet saved`,
-  mapGone: (title) => `“${title || 'The map'}” is not shown now: add it again under Historical maps to trace from it. What is drawn meanwhile is drawn on the basemap, and cites no map.`,
+  mapGone: (title) => `“${title || 'The map'}” is not shown now: add it again under Historical maps to trace from it. What is drawn meanwhile is drawn on the background map, and cites no map.`,
   changeSettings: 'Change the settings',
   stopTracing: 'Stop tracing',
   scopeSet: (n) => `The lookup's Scope is the map's outline, ${n.toLocaleString('en-GB')} corners: the gazetteer is asked only for places within it. It is shown under Scope, and can be changed there.`,
@@ -1064,7 +1064,7 @@ export const CHORA_TRACE = {
   listCount: (n, from, to) => (n ? `${n.toLocaleString('en-GB')} traced${n > to - from + 1 ? `, showing ${from.toLocaleString('en-GB')}–${to.toLocaleString('en-GB')}` : ''}, the latest first.` : 'Nothing traced yet.'),
   notNamed: 'Not named yet',
   nameIt: 'Name it',
-  notTraced: 'drawn on the basemap, not traced from the map',
+  notTraced: 'drawn on the background map, not traced from the map',
   defaulted: "(the map's defaults)",
   radiusMine: (km) => `radius ${km} km, your estimate`,
   partOf: (name) => `Part of “${name}”`,
@@ -1076,7 +1076,7 @@ export const CHORA_TRACE = {
   whatEdit: (name) => `Changing the name of “${name}”.`,
   toponymQuestion: 'The name, as the map writes it',
   labelQuestion: 'Its label in lists',
-  labelHelp: '(a display form, not evidence: the name, unless you change it)',
+  labelHelp: '(how it is shown in lists, not what the map says: the name, unless you change it)',
   labelPlaceholder: 'the name, as written',
   kindQuestion: 'What kind of place it is',
   nameLanguage: 'The language of the name',
@@ -1097,10 +1097,10 @@ export const CHORA_TEXT = {
   'chora-place-exists': 'A place traced as new has the address of a place the dataset has already, so nothing was saved. Name it again, and it is given an address of its own',
   'chora-new-place-invalid': 'A place traced as new could not be added, because PLATO would not accept it as it is, so nothing was saved',
   'chora-not-placed': 'A drawing did not reach its place in the saved file, so the file must not be used.',
-  'chora-attestations-not-a-list': 'A drawing is for a place whose attestations are not a list, as PLATO requires, so the drawing could only replace them, and nothing was saved. Correct that place in the dataset first',
+  'chora-attestations-not-a-list': 'A drawing is for a place whose statements are not held as a list, as PLATO requires, so the drawing could only replace them, and nothing was saved. Correct that place in the dataset first',
   'chora-unreadable': 'The dataset could not be read to the end, so it was not saved',
-  'chora-in-another-tab': 'Chora is already open in another tab of this browser. Close it, or use that one.',
-  'chora-mneme-failed': 'The version check (Mneme) found that the saved file does not keep every attestation of the dataset exactly as it was, or does not add exactly the drawings. Do not use it.',
+  'chora-in-another-tab': 'The map is already open in another tab of this browser. Close it, or use that one.',
+  'chora-mneme-failed': 'The version check found that the saved file does not keep everything the dataset said exactly as it was, or does not add exactly the drawings. Do not use it.',
   'chora-not-kept': 'The saved file could not hold the dataset exactly as it was read, so it was not checked, kept or offered, and nothing was saved. Why:',
 };
 /**
@@ -1128,7 +1128,7 @@ export function choraStorageWarning(when, { need, free, quota }) {
   const left = `this browser has only ${fmtBytes(Math.max(0, Math.round(free)))} left for this site (of the ${fmtBytes(quota)} it allows)`;
   return when === 'save'
     ? `Saving needs about ${fmtBytes(Math.round(need))} of the browser's storage, for the file and the version check's working copy, and ${left}. The save may stop part-way. Free some disk space, then save.`
-    : `Opening this dataset needs about ${fmtBytes(Math.round(need))} of the browser's storage, for Chora's working copy of it, and ${left}. It may stop part-way. Free some disk space, or use an ordinary window: a private one keeps its storage in memory and allows very little.`;
+    : `Opening this dataset needs about ${fmtBytes(Math.round(need))} of the browser's storage, for the map's working copy of it, and ${left}. It may stop part-way. Free some disk space, or use an ordinary window: a private one keeps its storage in memory and allows very little.`;
 }
 /**
  * What a Chora save writes, for a dataset as detect() describes it: JSON Lines as JSON Lines, since PLATO
@@ -1143,7 +1143,7 @@ export function choraSavedFormat(input) {
  */
 export function choraSaveProgress(p) {
   const n = (x) => x.toLocaleString('en-GB');
-  const what = p.attestations !== undefined ? `${n(p.attestations)}${p.total ? ` of ${n(p.total)}` : ''} attestation${p.attestations === 1 && !p.total ? '' : 's'}`
+  const what = p.attestations !== undefined ? `${n(p.attestations)}${p.total ? ` of ${n(p.total)}` : ''} statement${p.attestations === 1 && !p.total ? '' : 's'}`
     : p.triples ? `${p.phase === 'indexing' ? 'indexing' : 'loading'} ${count(p.triples, 'triples')}`
     : p.rows ? `${p.phase === 'checking' ? 'checking the tables' : 'loading the tables'}: ${count(p.rows, 'rows')}`
     : p.phase === 'checking' ? 'checking the tables'
@@ -1151,7 +1151,7 @@ export function choraSaveProgress(p) {
   const time = ` (${fmtTime(p.elapsedMs || 0)})`;
   if (p.save === 'finding') return `Saving: first reading the dataset, to find the places drawn on${what ? `: ${what}` : ''}${time}`;
   if (p.save === 'writing') return `Saving, step 1 of 2, writing the file${what ? `: ${what}` : ''}${time}`;
-  const check = 'Saving, step 2 of 2, the version check (Mneme)';
+  const check = 'Saving, step 2 of 2, the version check';
   if (p.phase === 'comparing') return `${check}, comparing the two${time}`;
   if (p.phase === 'done') return `${check}, finishing${time}`;
   const which = p.version === 'later' ? 'the file written' : 'the dataset as opened';
@@ -1164,7 +1164,7 @@ export function choraSaveText(result) {
   const p = result.report?.counts?.['places added'] || 0;
   const places = p ? ` and ${p.toLocaleString('en-GB')} new place${p === 1 ? '' : 's'}` : '';
   return result.mneme.passed
-    ? `Saved, with ${n.toLocaleString('en-GB')} new attestation${n === 1 ? '' : 's'}${places}; the version check (Mneme) confirms that every attestation of the dataset is there as it was.`
+    ? `Saved, with ${n.toLocaleString('en-GB')} new statement${n === 1 ? '' : 's'} about your places${places}; the version check confirms that everything the dataset said before is there as it was.`
     : CHORA_TEXT['chora-mneme-failed'];
 }
 

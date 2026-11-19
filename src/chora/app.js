@@ -10,7 +10,7 @@ import { sizeRead, loadNeed, saveNeed, storageShort } from '../engine/chora/stor
 import { detect } from '../engine/input.js';
 import { newGeometryAttestation, checkGeoJSON, wrapLongitudes, DrawError, ROLES, PRECISIONS } from '../engine/chora/draw.js';
 import { createMap, placeFeatures, contextFeatures } from './map.js';
-import { esc, badge, nameItem, relationItem, timeline, locations, ROLE_WORDS, STATUS_COLOURS } from './card.js';
+import { esc, badge, nameItem, relationItem, timeline, locations, shapeWord, ROLE_WORDS, STATUS_COLOURS } from './card.js';
 import { vagueFeatures, keyRows, drawMark, drawLineSample, MARK_SIZE } from './vague.js';
 import { bboxOf, unionBbox } from '../engine/chora/geo.js';
 import * as basemaps from './basemaps.js';
@@ -36,7 +36,7 @@ import { DataError } from '../engine/input.js';
 import { createAdopt } from './adopt-ui.js';
 import { draftAttestations, consultedParts, isPlaceIri } from '../engine/chora/adopt.js';
 import { CHORA_HANDOVER, CHORA_TRACE } from '../engine/words.js';
-// In a scholar-facing workflow the gazetteer search and the card's own lines are said in plain words (plain-panels.js); outside one, in the tools' own.
+// The gazetteer search and the card's own lines (plain-panels.js): plain words everywhere; in a scholar-facing workflow what a search sends is said without the gazetteer's ids.
 import { ADOPT_SAID as CHORA_ADOPT_PAGE, CARD_SAID } from '../engine/plain-panels.js';
 // Tracing a historical map into a new dataset: the settings kept for each map, its seed, the forms, the new places a save adds.
 import * as traced from './traced.js';
@@ -56,7 +56,7 @@ const html = () => `<div class="chora-panel" id="chora-panel">
 
     <section id="chora-maps" aria-labelledby="chora-maps-h">
       <h2 id="chora-maps-h">Historical maps</h2>
-      <p class="muted">Lay a georeferenced historical map over the basemap, and trace places from it: what you trace cites the map, and the georeference that places it.</p>
+      <p class="muted">Lay a scanned historical map over the background map, and trace places from it. The map needs a georeference: a record of where it sits on the modern map. What you trace cites the map, and that georeference.</p>
       ${ov.pickerForm('chora')}
       <div id="chora-map-needs"></div>
       <div id="chora-map-status" role="status" aria-live="polite"></div>
@@ -115,13 +115,13 @@ const html = () => `<div class="chora-panel" id="chora-panel">
     <div class="export-preview" id="chora-export-preview" role="region" aria-label="The map made of this view" hidden></div>
     <div class="map-tools" id="chora-draw-tools" role="toolbar" aria-label="Draw" hidden>
       <button type="button" data-mode="point" data-tip="Draw a point">Point</button>
-      <button type="button" data-mode="linestring" data-tip="Draw a line: click each vertex, and click the last one again to finish">Line</button>
+      <button type="button" data-mode="linestring" data-tip="Draw a line: click each point along it, and click the last one again to finish">Line</button>
       <button type="button" data-mode="polygon" data-tip="Draw an area: click each corner, and click the first one again to finish">Area</button>
       <button type="button" data-mode="select" data-tip="Select a drawing to move or reshape it">Edit</button>
       <button type="button" data-mode="static" data-tip="Stop drawing">Stop</button>
       <button type="button" data-trace="area" aria-disabled="true" data-tip="Show a historical map to trace from it">Trace area</button>
       <button type="button" data-trace="line" aria-disabled="true" data-tip="Show a historical map to trace from it">Trace line</button>
-      <label class="snap-ink" id="chora-snap-ink-label" hidden><input type="checkbox" id="chora-snap-ink" data-tip="A vertex placed within 10 screen pixels of the map's ink goes onto it (hold Alt not to)"> Snap to ink</label>
+      <label class="snap-ink" id="chora-snap-ink-label" hidden><input type="checkbox" id="chora-snap-ink" data-tip="A point placed very close to the map's ink (within 10 pixels on the screen) goes onto it (hold Alt not to)"> Snap to ink</label>
     </div>
     <div class="ink-panel" id="chora-ink-panel" role="group" aria-label="Tracing from the map's ink" hidden></div>
     <!-- Naming a place traced into a new dataset (src/chora/traced.js): draw, name, Enter. -->
@@ -132,7 +132,7 @@ const html = () => `<div class="chora-panel" id="chora-panel">
       <ul id="chora-map-key-list"></ul>
     </details>
     <details class="basemaps" id="chora-basemaps">
-      <summary>Basemap: <span id="chora-basemap-name">Natural Earth (this site)</span></summary>
+      <summary>Background map: <span id="chora-basemap-name">Natural Earth (this site)</span></summary>
       <div id="chora-basemap-options"></div>
     </details>
   </div>`;
@@ -204,7 +204,7 @@ async function open(list, { traceKey: carried = null } = {}) {
   } catch (e) { return fail(e.message); }
   if (dataset.failure) { $('phase').innerHTML = `<span class="warn">${esc(dataset.failure)}</span>`; Object.assign(state, { phase: 'unrecognised', reason: dataset.failure }); dataset = null; return; }
   const h = dataset.header || {};
-  const problems = dataset.report?.errors ? ` <span class="warn">${esc(summary(dataset.report, 'check').problems)} <a href="#tool=check">Check it with Elenchos</a> to see them.</span>` : '';
+  const problems = dataset.report?.errors ? ` <span class="warn">${esc(summary(dataset.report, 'check').problems)} <a href="#tool=check">Check the dataset</a> to see them.</span>` : '';
   $('phase').textContent = '';
   $('dataset').innerHTML = `<p class="dataset-title">${esc(h.title || dataset.input?.name || files[0].name)}</p>`
     + `<p>${n(dataset.places)} place${dataset.places === 1 ? '' : 's'}, ${n(dataset.withGeometry)} with a location on record.${problems}</p>`;
@@ -344,7 +344,7 @@ function pendingItem(d) {
   // An adoption (two attestations, or one when the place was already linked): removed whole, never in part.
   if (d.kind === 'adoption') {
     return `<li data-draft="${esc(d.id)}" data-adoption><span class="kind">${esc(CHORA_ADOPT_PAGE.pendingItem(d.candidate.name || d.candidate.id))}</span>
-    <span class="muted">${esc(d.candidate.iri || d.candidate.id)}${d.feature ? `, ${esc(d.feature.geometry.type)}` : ''} · ${d.count === 1 ? 'the location' : 'the identity and the location'}</span>
+    <span class="muted">${esc(d.candidate.iri || d.candidate.id)}${d.feature ? `, ${esc(shapeWord(d.feature.geometry.type))}` : ''} · ${d.count === 1 ? 'the location' : 'the match and the location'}</span>
     <button type="button" data-remove>Remove</button></li>`;
   }
   const opt = (vals, cur, words) => vals.map((x) => `<option value="${x}"${x === cur ? ' selected' : ''}>${esc(words(x))}</option>`).join('');
@@ -352,7 +352,7 @@ function pendingItem(d) {
   const roles = ['Extent', 'FeaturePoint', 'RepresentativePoint', ...(d.trace ? ['LabelAnchor'] : [])].filter((r) => ROLES.includes(r));
   const from = d.traceOptions?.length || d.trace
     ? `<label>Traced from <select data-field="tracedFrom">${[...(d.traceOptions || []).filter((o) => o.key !== d.trace?.key), ...(d.trace ? [{ key: d.trace.key, title: d.trace.title }] : [])]
-      .map((o) => `<option value="${esc(o.key)}"${o.key === d.trace?.key ? ' selected' : ''}>${esc(o.title || 'a historical map')}</option>`).join('')}<option value=""${d.trace ? '' : ' selected'}>the basemap</option></select></label>` : '';
+      .map((o) => `<option value="${esc(o.key)}"${o.key === d.trace?.key ? ' selected' : ''}>${esc(o.title || 'a historical map')}</option>`).join('')}<option value=""${d.trace ? '' : ' selected'}>the background map</option></select></label>` : '';
   return `<li data-draft="${esc(d.id)}"><span class="kind">${esc(KIND[d.geojson.type] || d.geojson.type)}</span>
     ${from}
     <label>What it marks <select data-field="role"><option value="">Not said</option>${opt(roles, d.role, (r) => (r === 'LabelAnchor' ? 'where the map writes its name' : ROLE_WORDS[r] || r))}</select></label>
@@ -470,7 +470,7 @@ async function traceDraft(d, { only = null, reshaped = false } = {}) {
     if (!only) d.traceOptions = pick.candidates.map((k) => ({ key: k, title: maps.find((m) => m.key === k)?.title || null }));
     const skipped = pick.skipped.map((x) => `${maps.find((m) => m.key === x.key)?.title || 'a map'}: ${x.reason}`).join(' ');
     if (!pick.chosen) {
-      if (was) note = `${reshaped ? 'Moved' : 'It lies'} off “${was.title || 'the map'}”, the map it was traced from, so it no longer cites that map${skipped ? ` (${skipped})` : ''}; ${was.assisted ? 'its notes say it was proposed from that map\'s ink, and that the map is not cited.' : 'it is saved as drawn on the basemap.'}`;
+      if (was) note = `${reshaped ? 'Moved' : 'It lies'} off “${was.title || 'the map'}”, the map it was traced from, so it no longer cites that map${skipped ? ` (${skipped})` : ''}; ${was.assisted ? 'its notes say it was proposed from that map\'s ink, and that the map is not cited.' : 'it is saved as drawn on the background map.'}`;
       else if (skipped) note = `Not cited as traced from a historical map: ${skipped}`;
       dropTrace(d, note);
     } else {
@@ -1056,7 +1056,7 @@ async function saveDataset() {
   const notes = (r.report?.items || []).filter((i) => i.severity !== 'error');
   const item = (i) => `<li>${esc(CHORA_TEXT[i.kind] || i.message)}${i.count > 1 ? ` (${n(i.count)})` : ''}${i.examples?.length ? ` <span class="muted">${esc(i.examples.slice(0, 3).join('; '))}</span>` : ''}</li>`;
   $('save-result').innerHTML = `<p class="${passed ? 'good' : 'warn'}">${esc(choraSaveText(r))}</p>`
-    + (passed ? `<p>${converted ? `The dataset is ${esc(formatName(dataset.input))}: the saved file is a conversion of it to ${saving.words} (place-centric), with the drawings added.` : `The saved file is ${saving.words}, as the dataset is, with the drawings added.`}</p>`
+    + (passed ? `<p>${converted ? `The dataset is ${esc(formatName(dataset.input))}: the saved file is a conversion of it to ${saving.words} (written place by place), with the drawings added.` : `The saved file is ${saving.words}, as the dataset is, with the drawings added.`}</p>`
       // Problems the writing found (a place the schema refuses, say) are shown even when the version
       // check passes: Mneme compares the attestations, and says nothing of them.
       + (problems.length ? `<p class="warn">${converted ? 'The conversion' : 'Writing it'} found problems in the dataset, which the saved file has too:</p><ul class="notes problems">${problems.map(item).join('')}</ul>` : '')
@@ -1285,10 +1285,10 @@ function renderBasemaps() {
       <input type="radio" name="basemap" value="${esc(b.id)}"${b.id === (waiting || cur).id ? ' checked' : ''}${b.disabled ? ' disabled' : ''}> ${esc(b.name)}${b.disabled ? ` <small>(${esc(b.disabled)})</small>` : ''}${b.note ? ` <small class="basemap-note">${esc(b.note)}</small>` : ''}
       ${b.group === 'Pasted' ? ` <button type="button" class="link" data-unpaste="${esc(b.id)}">remove</button>` : ''}</label>`).join('')}</fieldset>`).join('')
     + reliefOptions(cur)
-    + `<form id="chora-paste-form"><label for="chora-paste">Paste a style address or a tile template</label>
+    + `<form id="chora-paste-form"><label for="chora-paste">Add another background map: paste the web address of its style, or of its tiles (with {z}/{x}/{y} in it)</label>
       <input id="chora-paste" type="url" placeholder="https://…/style.json or https://…/{z}/{x}/{y}.png" autocomplete="off">
       <button type="submit">Add</button> <span id="chora-paste-error" class="warn"></span></form>`
-    + (state.blocked ? `<p class="muted">Refused ${n(state.blocked)} request${state.blocked === 1 ? '' : 's'} to ${esc(state.blockedOrigins.join(', '))}, not the basemap's site.</p>` : '');
+    + (state.blocked ? `<p class="muted">Refused ${n(state.blocked)} request${state.blocked === 1 ? '' : 's'} to ${esc(state.blockedOrigins.join(', '))}, not the background map's site.</p>` : '');
   if (typed) $('paste').value = typed;
   // One line for each permission the basemap wanted still needs (a pasted style may name several sites).
   state.basemapWaiting = waiting?.id || null;
@@ -1701,7 +1701,7 @@ function styleFailed(why, b = basemaps.byId(state.basemap)) {
 let localSources = new Set();
 function localFailed(why) {
   if (basemapRetry) return;
-  basemapError = state.basemapError = `The basemap, Natural Earth, could not be downloaded from this site (${why}), so the map may be empty: check the connection.`;
+  basemapError = state.basemapError = `The background map, Natural Earth, could not be downloaded from this site (${why}), so the map may be empty: check the connection.`;
   basemapRetry = true;
   $('basemaps').open = true;
   renderBasemaps();

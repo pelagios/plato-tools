@@ -3339,7 +3339,7 @@ def main():
 # page's own state, the page outside a workflow), and each was seen to fail on the page as it was before.
 NO_STORAGE_WORDS = 'This browser window does not let the page keep working files, so the tools cannot run here: use an ordinary window, not a private one.'
 NOT_DOWNLOADED_WORDS = 'The tools could not be downloaded: check the connection and press the button again.'
-NO_WEBGL_WORDS = 'The map cannot be shown: it needs WebGL, which this browser or window has turned off. The rest of the tools work: the places can still be found, read and saved here.'
+NO_WEBGL_WORDS = 'The map cannot be shown: it needs the browser’s 3D graphics (WebGL), which this browser or window has turned off. The rest of the tools work: the places can still be found, read and saved here.'
 NO_ENGINE_WORDS = 'This browser cannot run the tools: it lacks the file storage they keep their working files in. Use a current Chrome, Edge or Firefox.'
 NO_ROOM_WORDS = 'This browser has no room left for the result, so nothing was written: free some of the storage it allows this site, or use the command line for a file of this size.'
 # The engine's storage probe (src/engine/storage-probe.js), answered as a WebKitGTK browser answers it: the call is there, and refuses.
@@ -3625,7 +3625,7 @@ def page_shell_checks(pw, url, tmp):
                 until(p, "() => !window.__chora.basemapError && !!window.__chora_map.getSource('land') && window.__chora_map.isSourceLoaded('land') && window.__chora_map.querySourceFeatures('land').length > 0", 90)
                 back = p.evaluate(BM)
             finally: ctx and ctx.close()
-            told = lambda x: (x['error'] or '').startswith('The basemap, Natural Earth, could not be downloaded from this site (') and 'check the connection' in x['error'] and x['error'] in (x['says'] or '') and x['seen'] and x['retry'] and x['open']
+            told = lambda x: (x['error'] or '').startswith('The background map, Natural Earth, could not be downloaded from this site (') and 'check the connection' in x['error'] and x['error'] in (x['says'] or '') and x['seen'] and x['retry'] and x['open']
             ok = (n_style >= 1 and told(no_style) and no_style['land'] is None and n_data >= 1 and told(no_data) and not no_data['land']
                   and back['error'] is None and back['says'] is None and not back['retry'] and back['land'] > 0)
             return ok, {'style stopped': n_style, 'said': no_style, 'data stopped': n_data, 'said then': no_data, 'the connection back': back}
@@ -9857,7 +9857,7 @@ def chora_checks(pw, url, tmp):
         # recorded" is the retraction honoured, not a location never there.
         lw = next(p for p in json.loads(judgements.read_text())['spatialEntities'] if p['@id'].endswith('/littleworth'))
         had = any(a.get('geometries') for a in lw['attestations'])
-        return had and '1 withdrawn attestation not shown' in text and where == 'None recorded.', {'locations': where, 'text': text[-300:]}
+        return had and '1 withdrawn statement not shown' in text and where == 'None recorded.', {'locations': where, 'text': text[-300:]}
     attempt('Chora: a retracted attestation is left out of the place card, and the card says one was withdrawn', withdrawn)
 
     def fallback():
@@ -9991,7 +9991,7 @@ def chora_checks(pw, url, tmp):
         page.click('#chora-save')
         until(page, '() => window.__chora.lastSave || window.__chora.phase === "error"', 120)
         ls = cstate(page)['lastSave'] or {}; said = page.inner_text('#chora-save-result')
-        return s['pendingCount'] == 2 and ls.get('passed') and ls.get('added') == 2 and [o['name'] for o in ls['outputs']] == ['antonine-draw.chora.json'] and 'Mneme' in said, {'kept': s['pendingCount'], 'save': ls, 'said': said}
+        return s['pendingCount'] == 2 and ls.get('passed') and ls.get('added') == 2 and [o['name'] for o in ls['outputs']] == ['antonine-draw.chora.json'] and 'the version check confirms' in said, {'kept': s['pendingCount'], 'save': ls, 'said': said}
     attempt('Chora: saving passes the version check (Mneme) with exactly the two drawings added', save)
     saved = tmp / 'chora-saved.json'
     def saved_file():
@@ -10151,7 +10151,7 @@ def chora_checks(pw, url, tmp):
     # Chora's working database is in a SQLite pool one tab alone can hold, so a second Chora tab cannot
     # start. It must say so in words, not show the browser's createSyncAccessHandle error; the first tab
     # is the control (it still opens a file), and once it is closed the second starts on a reload.
-    ANOTHER_TAB = 'Chora is already open in another tab of this browser. Close it, or use that one.'
+    ANOTHER_TAB = 'The map is already open in another tab of this browser. Close it, or use that one.'
     def another_tab():
         page.goto('about:blank')                                # no Chora tab but these two
         one, two = ctx.new_page(), ctx.new_page()
@@ -10273,7 +10273,7 @@ def chora_checks(pw, url, tmp):
     def not_a_list():
         f, s, text = draw_and_save('odd-unlisted.json', 'oddity'); ls = s.get('lastSave') or {}
         written = opfs_names(page, 'chora-outputs')
-        return (ls.get('passed') is False and 'attestations are not a list' in text and 'Oddity (https://example.org/p/oddity)' in text
+        return (ls.get('passed') is False and 'statements are not held as a list' in text and 'Oddity (https://example.org/p/oddity)' in text
                 and not page.is_visible('#chora-save-result button.primary') and 'odd-unlisted.chora.json' not in written and s['pendingCount'] == 1), {
                 'save': {k: ls.get(k) for k in ('passed', 'added')}, 'said': text[:300], 'chora-outputs': written, 'pending': s.get('pendingCount')}
     attempt('Chora: a drawing for a place whose attestations are not a list is refused, naming the place, and no file is written or offered', not_a_list)
@@ -10350,9 +10350,9 @@ def chora_checks(pw, url, tmp):
         steps = [x['text'] for x in s.get('saveProgress') or []]
         has = lambda pattern: any(re.search(pattern, t) for t in steps)
         # The odd dataset has two attestations (Oddity's are not a list); the file written, three.
-        return (ls.get('passed') and has(r'^Saving, step 1 of 2, writing the file: 2 of 2 attestations')
-                and has(r'^Saving, step 2 of 2, the version check \(Mneme\), reading the dataset as opened: 2 of 2 attestations')
-                and has(r'^Saving, step 2 of 2, the version check \(Mneme\), reading the file written: 3 of 3 attestations')
+        return (ls.get('passed') and has(r'^Saving, step 1 of 2, writing the file: 2 of 2 statements')
+                and has(r'^Saving, step 2 of 2, the version check, reading the dataset as opened: 2 of 2 statements')
+                and has(r'^Saving, step 2 of 2, the version check, reading the file written: 3 of 3 statements')
                 and has(r'comparing the two') and not page.is_visible('#chora-save-progress')), {'passed': ls.get('passed'), 'steps': steps, 'still shown': page.is_visible('#chora-save-progress')}
     attempt('Chora: a save shows each step on the page: writing the file, then the version check reading each version, n of N attestations, then comparing', save_steps)
     # The browser's storage: navigator.storage.estimate() is answered by the init script from
@@ -10471,7 +10471,7 @@ def chora_checks(pw, url, tmp):
         page.click('#permissions-panel [data-reload-cancel]'); page.keyboard.press('Escape')
         kept = page.input_value('#chora-paste') if page.is_visible('#chora-paste') else ''
         page.evaluate(RESET, [None, None])
-        return 'pasting a basemap, not yet added' in asked and kept == 'https://tiles.example.org/style.json', {'asked': asked, 'kept': kept}
+        return 'pasting a background map, not yet added' in asked and kept == 'https://tiles.example.org/style.json', {'asked': asked, 'kept': kept}
     attempt('Chora: a reload for a permission while an address waits in the paste box says so first, and Cancel keeps it', chora_asks)
     PROBE = 'u => { const m = window.__chora_map; const id = "probe-" + Math.random().toString(36).slice(2); m.addSource(id, { type: "raster", tiles: [u + "/{z}/{x}/{y}.png?" + id], tileSize: 256 }); m.addLayer({ id, type: "raster", source: id }); }'
     def revoke():
@@ -11122,7 +11122,7 @@ def chora_adopt_checks(pw, url, tmp):
         chora_pick(page, 'which')
         off = page.is_enabled('#adopt-find'); why = page.inner_text('#adopt-why') if page.is_visible('#adopt-why') else ''
         described = page.get_attribute('#adopt-find', 'aria-describedby')
-        return on and not off and 'no address (@id)' in why and described == 'adopt-why', {'enabled for Newcastle': on, 'enabled for the place without @id': off, 'why': why}
+        return on and not off and 'no web address of its own' in why and described == 'adopt-why', {'enabled for Newcastle': on, 'enabled for the place without @id': off, 'why': why}
     attempt('Chora adopt: "Find in a gazetteer…" is disabled for a place without an @id, with the reason shown, and enabled for one with', no_address)
 
     # Allowed: the token, one query sent with type Place, the candidates ranked by the place's country, numbered on the map.
@@ -11257,7 +11257,7 @@ def chora_adopt_checks(pw, url, tmp):
         nsw_btn = page.eval_on_selector_all('#adopt-candidates li[data-cand="place:gn:2155472"] button[data-preview]', 'e => e.length')
         other_btn = page.eval_on_selector_all('#adopt-candidates li[data-cand="place:gn:2641673"] button[data-preview]', 'e => e.length')
         different = page.get_attribute('#adopt-candidates li[data-cand="place:gn:2641673"] a[data-different]', 'href')
-        return (tyne.get('linked') == 'exact' and label == 'Use its location' and go == "Adopt the record's location" and one == 1
+        return (tyne.get('linked') == 'exact' and label == 'Use its location' and go == 'Use the record’s location' and one == 1
                 and nsw.get('denied') is True and struck == 1 and nsw_btn == 0 and other_btn == 1 and different == './#tool=match'
                 and cstate(page)['pendingCount'] == 2), {'tyne': tyne, 'label': label, 'go': go, 'count': one, 'nsw': nsw, 'struck': struck, 'buttons': [nsw_btn, other_btn], 'different': different, 'pending': cstate(page)['pendingCount']}
     attempt('Chora adopt: a place already linked by an exactMatch adopts the location only (one attestation); a candidate the dataset denies is struck through with nothing to adopt (another beside it can), and "Different places" goes to Krisis', linked_and_denied)
@@ -12044,7 +12044,7 @@ def iiif_checks(pw, url, tmp):
         checked = page.get_attribute('#chora-map-choice input[name=georef-choice]:checked', 'value') if offered else None
         if offered: page.click('#chora-map-choose')
         got = soon(page, 'id => window.__chora.overlays.some((o) => o.annotationId === id)', 20, newer['id'])
-        return (offered and checked == '1' and '4 control points' in said and '9 control points' in said and '2026-09-30' in said and '2026-09-01' in said
+        return (offered and checked == '1' and 'placed by 4 matched points' in said and 'placed by 9 matched points' in said and '2026-09-30' in said and '2026-09-01' in said
                 and 'index option' not in said and got and not any(o['annotationId'] == older['id'] for o in cstate(page)['overlays'])), {'said': said, 'default': checked, 'shown': got}
     attempt('Chora maps: a georeference holding several maps offers a choice, each with its date and control points, the newest chosen by default; the one chosen is shown', several)
 
@@ -12594,7 +12594,7 @@ def trace_map_checks(pw, url, tmp):
         until(page, 'k => window.__chora.trace?.key === k && window.__chora.phase === "loaded"', 30, key)
         s = ts()
         return (before.get('trace', {}).get('key') is None and before.get('pending') == 0 and offered['settings'] and offered['date'] == '1746'
-                and 'names no licence' in (offered['rights'] or '') and refused['settingsError'] and 'base address' in refused['settingsError'] and refused['trace']['key'] is None
+                and 'names no licence' in (offered['rights'] or '') and refused['settingsError'] and 'Give the web address for your identifiers' in refused['settingsError'] and refused['trace']['key'] is None
                 and s['trace']['seed'] and s['places'] == 0 and s['picker'] == ['traced-a-synthetic-grid-over-cambridge-test-fix.json'] and s['base'] == TRACE_BASE
                 and s['trace']['settings']['date'] == '1746' and s['trace']['settings']['language'] == 'en' and 'Tracing “A synthetic grid over Cambridge (test fixture)”' in (s['status'] or '')), {
             'before': before.get('trace'), 'offered': {k: offered.get(k) for k in ('settings', 'date', 'rights')},
@@ -12846,7 +12846,7 @@ def trace_map_checks(pw, url, tmp):
         page.click('#chora-save-result [data-clear]')
         until(page, '() => window.__chora.phase === "loaded" && window.__chora.places === 2', 60)
         return (options == TRACE_BASE and offered == 'Trace it into the dataset open' and form['base'] == ELSEWHERE and form['readOnly'] is True
-                and (form['help'] or '').startswith("The dataset open's own base address (its uriSpace)") and form['title'] == 'Elsewhere'
+                and (form['help'] or '').startswith('The web address the dataset open gives for its own identifiers, as its file gives it:') and form['title'] == 'Elsewhere'
                 and named['placeId'] == ELSEWHERE + 'place/fen-ditton' and ls.get('added') == 1 and (ls.get('mneme') or {}).get('passed')
                 and ids == [ELSEWHERE + 'place/old-mill', ELSEWHERE + 'place/fen-ditton'] and doc['gazetteer'].get('uriSpace') == ELSEWHERE), {
             'Options base': options, 'offered': offered, 'form': form, 'named': named, 'save': {k: ls.get(k) for k in ('passed', 'added')}, 'ids': ids}
@@ -12865,8 +12865,8 @@ def trace_map_checks(pw, url, tmp):
         tracing = ts()['trace']
         page.click('#chora-tset-cancel')
         until(page, '() => !document.getElementById("chora-trace-refused")', 10)
-        return (offered == 'Trace it into the dataset open' and (said['refused'] or '').startswith('“No base” does not say under what address its places are published (it has no uriSpace)')
-                and 'Give the dataset its base address' in (said['refused'] or '') and not said['form'] and tracing['key'] is None), {'offered': offered, 'said': said, 'trace': tracing}
+        return (offered == 'Trace it into the dataset open' and (said['refused'] or '').startswith('“No base” does not say under what web address its places are published, so a place traced into it')
+                and 'Give the dataset that address' in (said['refused'] or '') and not said['form'] and tracing['key'] is None), {'offered': offered, 'said': said, 'trace': tracing}
     attempt('Chora trace: a dataset open with no base address of its own (no uriSpace) is not traced into: refused in words that say what to do, with no settings form', refused_no_base)
     attempt('Chora trace: across these checks, no page error', lambda: (len(st) >= 2 and not errors, {'errors': errors[:5], 'checks reached': list(st)}))
     ctx.close()
@@ -13578,7 +13578,7 @@ def ink_checks(page, base, tmp, h):
         s = cstate(page); panel = page.inner_text('#chora-ink-panel')
         page.keyboard.press('Enter'); page.wait_for_timeout(500)
         rows = census(since)
-        return (s['ink']['phase'] == 'error' and '403' in (s['ink']['lastError'] or '') and 'IIIF Auth' in s['ink']['lastError'] and '403' in panel
+        return (s['ink']['phase'] == 'error' and '403' in (s['ink']['lastError'] or '') and 'Maps that need a login cannot be traced here' in s['ink']['lastError'] and '403' in panel
                 and cstate(page)['pendingCount'] == before and any(r['status'] == 403 for r in at_origin(rows, A)) and at_origin(rows, B) == []), {
             'ink': s['ink'].get('lastError'), 'panel': panel[:200], 'statuses': sorted({r['status'] for r in at_origin(rows, A)})}
     attempt('Chora ink: a server that refuses the map\'s pixels (403) is said so in words (IIIF Auth is not supported), and nothing is drawn', refused_403)

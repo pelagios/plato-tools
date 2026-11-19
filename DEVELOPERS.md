@@ -2130,6 +2130,20 @@ below), and its engine `src/engine/chora/` (`store.js`, `view.js`, `draw.js`, `s
   that, or, when the page chose nothing, the files kept, chosen in step 1 again. The page's own reload
   hook says the chosen files would be lost unless Chora is shown with them open (`holds()`): not while
   it is starting, or its engine is in another tab.
+- **Words.** What Chora shows is in plain words, in a scholar-facing workflow or not (November 2026): a
+  statement about a place (not an attestation), a web address (not an IRI or `@id`), a suggestion and a
+  match (not a candidate and an identity), the background map (not the basemap), the version check (not
+  Mneme), "the map" (not Chora), a line and an area (`shapeWord` in `card.js`, not GeoJSON's names). The
+  words are where they were: `CHORA_ADOPT_PAGE`, `CHORA_ADOPT_TEXT`, `CHORA_TRACE`, `CHORA_TEXT` and the
+  `chora…` functions in `src/engine/words.js`, `CARD_SAID` in `src/engine/plain-panels.js` (one table now,
+  no longer laid over another), the permission's in `src/lib/permission-words.js`, and the rest in the
+  modules' own templates. Of the plain layer only what a search sends is still laid over Chora's own
+  (`PLAIN_ADOPT`: in a workflow, without the type and the gazetteer's ids). The notes Chora writes into
+  a dataset (`choraDrawingNote` and the others) are part of the record and are not reworded: they still
+  say "basemap" and "(Chora)". A term a user must type into a file stays, with what it is (`uriSpace`,
+  `base_uri`, once, in `CHORA_TRACE.noOpenBase`); "georeference" stays, and is explained where it is first
+  met (the Historical maps panel, and the box for one). `test/chora-plain.test.js` holds every table to it,
+  with the written notes as its control.
 - **Tests.** Chora's browser checks open it in the main page (`chora_boot` in `e2e/app_test.py` goes to
   `#chora` from another page, so that the page loads afresh, and chooses the files in step 1); the
   checks of Chora in the page are `chora_layout_checks` (no map code before it is opened; the tools rail
@@ -2760,7 +2774,7 @@ wired in `app.js`.
   too (the seed's is the settings' base), so settings kept from before cannot send a place elsewhere.
 - **A feature** is a draft of its own kind (`kind: 'feature'`): a drawing made with no place chosen, or a
   shape from the map's ink accepted with none, while a map is traced. It opens the name form over the map
-  (`#chora-name-panel`): the name as the map writes it, the place's label (a display form, not evidence: the
+  (`#chora-name-panel`): the name as the map writes it, the place's label (how it is shown in lists, not what the map says: the
   name until changed), its kind, the name's language (the map's), its script and a romanised form where the
   language implies another script; Enter adds the place (its address minted by the worker's `chora-mint`,
   `seed.js` `mintPlaceId`: `<base>place/<the label as letters, digits and hyphens>`, a number after it when

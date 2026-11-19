@@ -58,7 +58,7 @@ test('a JSON Lines dataset with identity relations among its places is saved as 
     assert.deepEqual(r.mneme.reasons, []);
     assert.equal(r.mneme.passed, true);
     assert.deepEqual(r.mneme.report.counts, { earlier: 7, later: 9, unchanged: 7, changed: 0, lost: 0, added: 2, retracted: 0, superseded: 0 });
-    assert.match(choraSaveText(r), /^Saved, with 2 new attestations;/);
+    assert.match(choraSaveText(r), /^Saved, with 2 new statements about your places;/);
   }
 });
 
@@ -306,12 +306,12 @@ test('a save reports its steps: writing, then the version check reading each ver
   assert.ok(writing.every((p) => p.total === 7));
   assert.ok(earlier.every((p) => p.total === 7) && later.every((p) => p.total === 8), JSON.stringify([...earlier, ...later].map((p) => p.total)));
   // In words, for the page.
-  assert.equal(choraSaveProgress({ save: 'writing', attestations: 700000, total: 1414328, elapsedMs: 65000 }), 'Saving, step 1 of 2, writing the file: 700,000 of 1,414,328 attestations (1 min 5 s)');
-  assert.equal(choraSaveProgress({ save: 'checking', version: 'earlier', phase: 'reading', attestations: 5, total: 7, elapsedMs: 0 }), 'Saving, step 2 of 2, the version check (Mneme), reading the dataset as opened: 5 of 7 attestations (0 s)');
-  assert.equal(choraSaveProgress({ save: 'checking', version: 'later', phase: 'reading', attestations: 8, total: 8, elapsedMs: 0 }), 'Saving, step 2 of 2, the version check (Mneme), reading the file written: 8 of 8 attestations (0 s)');
-  assert.equal(choraSaveProgress({ save: 'checking', phase: 'comparing', elapsedMs: 2000 }), 'Saving, step 2 of 2, the version check (Mneme), comparing the two (2 s)');
+  assert.equal(choraSaveProgress({ save: 'writing', attestations: 700000, total: 1414328, elapsedMs: 65000 }), 'Saving, step 1 of 2, writing the file: 700,000 of 1,414,328 statements (1 min 5 s)');
+  assert.equal(choraSaveProgress({ save: 'checking', version: 'earlier', phase: 'reading', attestations: 5, total: 7, elapsedMs: 0 }), 'Saving, step 2 of 2, the version check, reading the dataset as opened: 5 of 7 statements (0 s)');
+  assert.equal(choraSaveProgress({ save: 'checking', version: 'later', phase: 'reading', attestations: 8, total: 8, elapsedMs: 0 }), 'Saving, step 2 of 2, the version check, reading the file written: 8 of 8 statements (0 s)');
+  assert.equal(choraSaveProgress({ save: 'checking', phase: 'comparing', elapsedMs: 2000 }), 'Saving, step 2 of 2, the version check, comparing the two (2 s)');
   assert.equal(choraSaveProgress({ save: 'writing', phase: 'loading', triples: 50000, elapsedMs: 0 }), 'Saving, step 1 of 2, writing the file: loading 50,000 triples (0 s)');
-  assert.equal(choraSaveProgress({ save: 'writing', attestations: 3, elapsedMs: 0 }), 'Saving, step 1 of 2, writing the file: 3 attestations (0 s)');
+  assert.equal(choraSaveProgress({ save: 'writing', attestations: 3, elapsedMs: 0 }), 'Saving, step 1 of 2, writing the file: 3 statements (0 s)');
   // Spreadsheet tables are loaded into a working database, then checked, row by row, before a place is written.
   assert.equal(choraSaveProgress({ save: 'writing', phase: 'loading', rows: 50000, elapsedMs: 0 }), 'Saving, step 1 of 2, writing the file: loading the tables: 50,000 rows (0 s)');
   assert.equal(choraSaveProgress({ save: 'writing', phase: 'checking', rows: 100000, elapsedMs: 0 }), 'Saving, step 1 of 2, writing the file: checking the tables: 100,000 rows (0 s)');
