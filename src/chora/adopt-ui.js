@@ -22,7 +22,9 @@ import { permittedFetch, gazetteerPermission, placeQuery, failedClosed, typesOf 
 import { bundledAatLabel } from '../engine/krisis/kinds.js';
 import * as A from '../engine/chora/adopt.js';
 import { ROLES } from '../engine/chora/draw.js';
-import { CHORA_ADOPT_PAGE as W, CHORA_ADOPT_TEXT, lookupPage as LW } from '../engine/words.js';
+import { CHORA_ADOPT_TEXT, lookupPage as LW } from '../engine/words.js';
+// The panel's words: the tools' own (words.js CHORA_ADOPT_PAGE), or the plain ones in a scholar-facing workflow (plain-panels.js).
+import { ADOPT_SAID as W } from '../engine/plain-panels.js';
 import * as permissions from '../lib/permissions.js';
 import { tokenFieldHtml, giveToken, rememberToken, forgetToken, noteInput } from '../lib/token-field.js';
 

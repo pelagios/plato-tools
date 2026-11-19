@@ -35,7 +35,9 @@ import { DataError } from '../engine/input.js';
 // Adopting a location from a gazetteer match (src/chora/adopt-ui.js; the engine is src/engine/chora/adopt.js).
 import { createAdopt } from './adopt-ui.js';
 import { draftAttestations, consultedParts, isPlaceIri } from '../engine/chora/adopt.js';
-import { CHORA_ADOPT_PAGE, CHORA_HANDOVER, CHORA_TRACE } from '../engine/words.js';
+import { CHORA_HANDOVER, CHORA_TRACE } from '../engine/words.js';
+// In a scholar-facing workflow the gazetteer search and the card's own lines are said in plain words (plain-panels.js); outside one, in the tools' own.
+import { ADOPT_SAID as CHORA_ADOPT_PAGE, CARD_SAID } from '../engine/plain-panels.js';
 // Tracing a historical map into a new dataset: the settings kept for each map, its seed, the forms, the new places a save adds.
 import * as traced from './traced.js';
 import { scriptOf, kindType } from '../engine/chora/seed.js';
@@ -91,7 +93,7 @@ const html = () => `<div class="chora-panel" id="chora-panel">
       <h2 id="chora-saving-h"><span class="step">3</span> Save</h2>
       <p id="chora-pending-total"></p>
       <form id="chora-contributor-form" hidden>
-        <p>Your drawings will be saved as attestations made by you. Who are you?</p>
+        <p id="chora-c-who">${esc(CARD_SAID.who)}</p>
         <label for="chora-c-name">Your name</label>
         <input id="chora-c-name" required autocomplete="name">
         <label for="chora-c-orcid">ORCID iD <small>(optional)</small></label>
@@ -330,11 +332,11 @@ function renderCard() {
     <h3>Related places</h3>${list(v.relations, relationItem)}
     <h3>Over time</h3>${timeline(v.timeline)}
     <h3>Sources</h3>${list(v.sources, (s) => (s.id && /^https?:/.test(s.id) ? `<a href="${esc(s.id)}" rel="noopener noreferrer">${esc(s.title || s.id)}</a>` : esc(s.title || s.id)))}
-    ${v.withdrawn ? `<p class="muted">${n(v.withdrawn)} withdrawn attestation${v.withdrawn === 1 ? '' : 's'} not shown.</p>` : ''}
+    ${v.withdrawn ? `<p class="muted">${esc(CARD_SAID.withdrawn(v.withdrawn))}</p>` : ''}
     <h3>Gazetteer</h3>
     <p><button type="button" id="adopt-find"${isPlaceIri(v.id) ? '' : ' disabled aria-describedby="adopt-why"'}>${esc(CHORA_ADOPT_PAGE.find)}</button>${isPlaceIri(v.id) ? '' : ` <span class="muted" id="adopt-why">${esc(CHORA_ADOPT_PAGE.noAddress)}</span>`}</p>
     <h3>Your drawings</h3>
-    <p class="muted">Draw with the tools on the map. Each drawing is added as a new attestation of this place; nothing already there is changed.</p>
+    <p class="muted">${esc(CARD_SAID.draw)}</p>
     ${drawError ? `<p class="warn" id="chora-draw-error">${esc(drawError)}</p>` : ''}
     <ul class="pending">${mine.map(pendingItem).join('') || '<li class="muted">None yet.</li>'}</ul>`;
 }
@@ -971,6 +973,7 @@ function askContributor() {
   const c = contributors.load() || {};
   $('c-name').value = c.name || ''; $('c-orcid').value = c.orcid ? c.orcid.replace('https://orcid.org/', '') : '';
   $('c-error').hidden = true;
+  $('c-who').textContent = CARD_SAID.who;   // in the words of the page as it now is
   $('contributor-form').hidden = false; $('contributor-line').hidden = true;
   $('c-name').focus();
 }

@@ -166,8 +166,9 @@ test('the publishing steps in plain words: the list beside Prepare is named entr
 
 test('the end of the review in plain words: every part marked on the page has its words, none an expert\'s, and the page keeps the tools\' own for use outside the workflow', () => {
   const marked = [...HTML.matchAll(/data-plain-words="([a-z-]+)"[^>]*>([^<]+)</g)].map((m) => [m[1], m[2]]);
-  assert.deepEqual(marked.map((m) => m[0]), ['legend', 'dataset', 'attestations', 'draft-legend', 'withdraw', 'replace', 'draft-note', 'button']);
-  assert.deepEqual(Object.keys(PLAIN_FINISH), marked.map((m) => m[0]));
+  // The list of suggestions (the tools' "candidate set") comes first on the page, and has its plain words in plain-panels.js (test/plain-panels.test.js).
+  assert.deepEqual(marked.map((m) => m[0]), ['export', 'earlier', 'export-note', 'legend', 'dataset', 'attestations', 'draft-legend', 'withdraw', 'replace', 'draft-note', 'button']);
+  assert.deepEqual(Object.keys(PLAIN_FINISH), marked.map((m) => m[0]).slice(3));
   for (const [k, v] of Object.entries(PLAIN_FINISH)) { assert.doesNotMatch(v, GREEK, k); assert.doesNotMatch(v, /attestation|candidate|version check|Finish/i, k); }
   // The control: the page's own words, which the plain ones stand in for, do say them.
   const own = Object.fromEntries(marked);

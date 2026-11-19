@@ -585,12 +585,14 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
         const want = s.options?.intoDataset === false ? 'attestations' : 'dataset';
         if (run.output && run.output !== want) {
           if (plainWf() && want === 'dataset') say(onlyDecisions(s.title), true);
-          else say(`This run is not counted as the step “${s.title}”: this workflow ${want === 'dataset' ? 'adds the decisions to your dataset' : 'keeps the decisions in a file of their own'}, so choose “${want === 'dataset' ? 'Your dataset with the new attestations added' : 'A PLATO file of only the new attestations'}” under Finish, and finish again.`, true); render(false); return;
+          else if (plainWf()) say(`This is not counted as the step “${s.title}”: this workflow keeps your decisions in a file of their own, so choose “Only my decisions, as a file of their own” under “Save your decisions”, and save again.`, true);
+          else say(`This run is not counted as the step “${s.title}”: this workflow ${want === 'dataset' ? 'adds the decisions to your dataset' : 'keeps the decisions in a file of their own'}, so choose “${want === 'dataset' ? 'Your dataset with the new attestations added' : 'A PLATO file of only the new attestations'}” under Finish, and finish again.`, true);
+          render(false); return;
         }
         if (s.options?.exportCandidates === true) {
           const r = page.review();
           let why;
-          try { why = r ? unexported(JSON.parse(r.text)) : 'There is no review open.'; } catch { why = 'The review open cannot be read.'; }
+          try { why = r ? unexported(JSON.parse(r.text), { plain: plainWf() }) : 'There is no review open.'; } catch { why = 'The review open cannot be read.'; }
           if (why) { say(`This run is not counted as the step “${s.title}”: ${why}`, true); render(false); return; }
         }
       }
@@ -598,7 +600,7 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       if (s.op === 'relate.containment') {
         const r = page.review();
         let why;
-        try { why = r ? relateProblem(JSON.parse(r.text)) : 'There is no review open.'; } catch { why = 'The review open cannot be read.'; }
+        try { why = r ? relateProblem(JSON.parse(r.text), { plain: plainWf() }) : 'There is no review open.'; } catch { why = 'The review open cannot be read.'; }
         if (why) { say(`This run is not counted as the step “${s.title}”: ${why}`, true); render(false); return; }
       }
       w = w.status === 'waiting' && w.current === s.id ? runner.resume(w, s.id) : runner.next(w);

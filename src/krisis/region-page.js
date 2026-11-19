@@ -9,7 +9,8 @@ import {
 } from '../engine/krisis/regions.js';
 import { CERTAINTIES } from '../engine/krisis/work.js';
 import { planQueries } from '../engine/krisis/lookup.js';
-import { REGION_PAGE as RP } from '../engine/words.js';
+// The page's words: the tools' own (words.js REGION_PAGE), or the plain ones in a scholar-facing workflow (plain-panels.js).
+import { REGION_SAID as RP } from '../engine/plain-panels.js';
 
 const isRegion = (work, key) => Object.hasOwn(work.regions || {}, key);
 /**

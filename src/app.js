@@ -38,7 +38,9 @@ import { candidateSource } from './engine/krisis/identity.js';
 // Krisis: region review (Methodos #28, stages 3 and 4), run on this thread as the lookup is, through the same shared WHG lookup.
 import { runLevel, runPlaces, countryCheck } from './engine/krisis/lookup.js';
 import { seedRegions, decideRegion, settleRegion, undo as undoRegion, selectLevel, matchesOf, lastQueryOf } from './engine/krisis/regions.js';
-import { REGION_PAGE as RP, REGION_WORDS } from './engine/words.js';
+import { REGION_WORDS } from './engine/words.js';
+// The panels' words in a scholar-facing workflow (plain-panels.js): the tools' own outside one.
+import { REGION_SAID as RP, PAGE_REPORT, PLAIN_SUGGESTIONS, PLAIN_SUGGESTIONS_REPORT, plainExported } from './engine/plain-panels.js';
 import { levelNames, levelLabel, navigator as levelNavigator, firstOpen, chainOf, placeChain, constraintLine, notesOf, relaxOptions, costOf, levelRegions, unsettledOf, placesToLook, lockedPlaces, wouldClear, priorOf, restorePrior, nameOf, regionDomId, certaintyChoices, CERTAINTY_DEFAULT, regionMatchOptions } from './krisis/region-page.js';
 import { mountMethodos } from './methodos/page.js';
 import { version as TOOLS_VERSION } from '../package.json';
@@ -399,7 +401,8 @@ function reportHtml(report, action) {
     const items = report.items.filter((i) => i.severity === sev);
     if (!items.length) continue;
     // In a scholar-facing workflow an item with a plain sentence (plain.js PLAIN_REPORT) says that first; the engine's own words, in full, open with it.
-    const said = (i) => (isPlain() && PLAIN_REPORT[i.kind]) || null;
+    // An item whose own words name the command line (a flag the page has not) is said for the page, in a workflow or not (plain-panels.js PAGE_REPORT).
+    const said = (i) => (isPlain() && (PLAIN_REPORT[i.kind] || PLAIN_SUGGESTIONS_REPORT[i.kind])) || PAGE_REPORT[i.kind] || null;
     out.push(`<div class="report-group ${sev}"><h3>${title}</h3><p>${intro}</p>` + items.map((i) =>
       `<details class="item" data-kind="${escapeHtml(String(i.kind ?? ''))}"><summary>${escapeHtml(said(i) || i.message)}<span class="count">× ${i.count.toLocaleString('en-GB')}</span></summary>${said(i) ? `<p class="in-full">${escapeHtml(i.message)}</p>` : ''}${i.examples.length ? `<ul>${i.examples.map((e) => `<li>${escapeHtml(String(e))}${explained(i, e)}</li>`).join('')}</ul>` : ''}</details>`).join('') + '</div>');
   }
@@ -1161,11 +1164,11 @@ function plainWords(plain) {
     if (!plain) box.open = false;
     box.querySelector('summary').textContent = EXPERT_SUMMARY; box.querySelector('.expert-note').textContent = f.note;
   }
-  for (const [e, own] of OWN_WORDS) e.textContent = plain ? PLAIN_FINISH[e.dataset.plainWords] : own;
+  for (const [e, own] of OWN_WORDS) e.textContent = plain ? (PLAIN_FINISH[e.dataset.plainWords] ?? PLAIN_SUGGESTIONS[e.dataset.plainWords]) : own;
   for (const [o, own] of OWN_PARTS) o.textContent = plain ? PLAIN_PARTS[o.value] : own;
   // The preview puts the queries exactly as sent where they belong (the fold, or under its own words), and a review open says what saving cites in the
   // words of the page as it now is: both drawn again when that changes (once the page's own script has run to its end: this is first called before it has).
-  if (plain !== plainShown) { plainShown = plain; queueMicrotask(() => { refreshPreview(); if (work) $('finish-cites').textContent = (plain ? plainCites : LW.cites)(citedSources()); }); }
+  if (plain !== plainShown) { plainShown = plain; queueMicrotask(() => { refreshPreview(); if (work) $('finish-cites').textContent = (plain ? plainCites : LW.cites)(citedSources()); regionIdentityWords(); if (!$('regions').hidden) drawRegions(); wikidata.refresh(); }); }
 }
 /**
  * In a scholar-facing workflow, step 2 shows the step's own action and nothing else: Check or Convert at a step that
@@ -2122,7 +2125,7 @@ $('export-candidates').onclick = () => {
   catch (err) { if (forBase) { delete work.subjects.uri; delete work.subjects.uriFrom; } if (err?.name !== 'DataError') throw err; candidatesStatus(err.message, true); return; }
   work = x.work; exportedSet = x.set;
   const { problems, counted } = summary(x.report, 'candidates');
-  candidatesStatus(`${problems} ${counted} ${KRISIS_CANDIDATES.saveReviewToo}`);
+  candidatesStatus(isPlain() ? plainExported(x.report.counts) : `${problems} ${counted} ${KRISIS_CANDIDATES.saveReviewToo}`);
   const name = workName.replace(/\.krisis\.json$/i, '').replace(/\.json$/i, '') + '.candidates.json';
   if (x.set) saveBlob(new Blob([serialiseCandidateSet(x.set)], { type: 'application/json' }), name);
   Object.assign(state, { candidates: { setIri: x.setIri, leftOut: x.leftOut, set: x.set, name: x.set ? name : null } });
@@ -3047,7 +3050,9 @@ $('regions').addEventListener('click', (e) => {
   if (d.ract === 'reopen') return changeRegion(key, (w) => settleRegion(w, key, null));
 });
 $('regions').addEventListener('keydown', (e) => { if (e.key === 'Escape' && regionChange) { const k = regionChange.key; regionChange = null; drawRegions(); focusRegion(k); } });
-{ const sel = $('region-identity'); sel.innerHTML = ['closeMatch', 'exactMatch'].map((t) => `<option value="${t}">${escapeHtml(RP.identity[t])}</option>`).join(''); }
+/** The list beside "This one means", in the words of the page as it now is (the tools' own, or plain ones), what is chosen kept. */
+function regionIdentityWords() { const sel = $('region-identity'), was = sel.value; sel.innerHTML = ['closeMatch', 'exactMatch'].map((t) => `<option value="${t}">${escapeHtml(RP.identity[t])}</option>`).join(''); if (was) sel.value = was; }
+regionIdentityWords();
 { const sel = $('region-certainty'); sel.innerHTML = certaintyChoices().map((c) => `<option value="${c.value}"${c.value === CERTAINTY_DEFAULT ? ' selected' : ''}>${escapeHtml(c.text)}</option>`).join(''); }
 startWorker();
 storageProbe();

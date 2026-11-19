@@ -5,6 +5,7 @@ import { DataError } from '../input.js';
 import { isIri } from '../krisis/work.js';
 import { regionProgress } from '../krisis/regions.js';
 import { CONTAINED_IN } from '../hermes/within.js';
+import { plainUnexported, plainBareRegions, PLAIN_NO_REGIONS } from '../plain-panels.js';
 
 /** Whether every region of a review is settled: its progress, or a DataError in words (none at all, or which levels are open). */
 export function regionsSettled(work) {
@@ -24,19 +25,21 @@ export const notReviewed = (work, refs) => refs.filter((r) => !(work.subjects?.f
  * the candidate it answers (the review's candidates not exported), so that its identity could carry no
  * promotedFrom. The page asks this before its Finish run counts as the step; the adapter exports first.
  */
-export function relateProblem(work, { exported = true } = {}) {
+export function relateProblem(work, { exported = true, plain = false } = {}) {
   const keys = Object.keys(work.regions || {});
-  if (!keys.length) return 'The review has no regions, so there is no region to record a place in: identify the regions first (the step before).';
+  if (!keys.length) return plain ? PLAIN_NO_REGIONS : 'The review has no regions, so there is no region to record a place in: identify the regions first (the step before).';
   const bare = keys.filter((k) => !isIri(k));
-  if (bare.length) return `${bare.length} of the ${keys.length} regions have no web address of their own (the table was converted without a base address), so nothing can be recorded about them: convert the table again with a base address in Options, and identify its regions.`;
-  return exported ? unexported(work) : null;
+  if (bare.length) return plain ? plainBareRegions(bare.length, keys.length) : `${bare.length} of the ${keys.length} regions have no web address of their own (the table was converted without a base address), so nothing can be recorded about them: convert the table again with a base address in Options, and identify its regions.`;
+  return exported ? unexported(work, { plain }) : null;
 }
 /**
  * Words for a review whose decisions do not all name the candidate they answer yet (its suggestions not
- * exported as a candidate set), or null: what a workflow that publishes asks before its Finish counts.
+ * exported as a candidate set), or null: what a workflow that publishes asks before its Finish counts. With
+ * `plain`, in the words of a scholar-facing workflow (plain-panels.js), which name the page's button as it is named there.
  */
-export function unexported(work) {
+export function unexported(work, { plain = false } = {}) {
   const unnamed = work.candidates.filter((c) => c.decision && c.decision.kind !== 'not-this' && !c.iri).length;
+  if (plain) return plainUnexported(unnamed);
   return unnamed ? `${unnamed} ${unnamed === 1 ? 'decision does' : 'decisions do'} not name the candidate ${unnamed === 1 ? 'it answers' : 'they answer'} yet: export the suggestions first ("Export the suggestions as a candidate set", under the review), so that each identity records it (promotedFrom).` : null;
 }
 /**

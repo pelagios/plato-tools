@@ -462,10 +462,10 @@
       <!-- Krisis: the review's progress kept in this browser as it is made (src/lib/review-progress.js; the words are words.js REVIEW_KEPT). -->
       <p id="review-kept" class="review-kept" hidden><span id="review-kept-text" role="status"></span> <button id="review-kept-use" type="button" hidden></button> <button id="review-kept-clear" type="button" class="link" hidden></button></p>
       <div class="candidate-export">
-        <button id="export-candidates" type="button">Export the suggestions as a candidate set</button>
-        <button id="earlier-candidates" type="button">Earlier candidate sets…</button>
+        <button id="export-candidates" type="button" data-plain-words="export">Export the suggestions as a candidate set</button>
+        <button id="earlier-candidates" type="button" data-plain-words="earlier">Earlier candidate sets…</button>
         <input type="file" id="earlier-candidates-file" accept=".json,application/json" multiple hidden>
-        <small>A candidate set publishes what the software suggested, so that each attestation can point at the suggestion it answers. If earlier sets were published, give them first: their candidates are left out.</small>
+        <small data-plain-words="export-note">A candidate set publishes what the software suggested, so that each attestation can point at the suggestion it answers. If earlier sets were published, give them first: their candidates are left out.</small>
         <p id="candidates-status" aria-live="polite" hidden></p>
       </div>
       <fieldset class="finish">

@@ -12,7 +12,8 @@
 // and places (gather()'s, through the worker), the collector run in the worker, the reviewer, the fetch
 // every request goes through (lookup.js permittedFetch over permissions.fetch), and the page's own words
 // for a permission's line. It runs on the page's thread, as the lookup does, never in the worker.
-import { WIKIDATA_WORDS as T } from '../engine/words.js';
+// The panel's words: the tools' own (words.js WIKIDATA_WORDS), or the plain ones in a scholar-facing workflow (plain-panels.js).
+import { WIKIDATA_SAID as T, plainOn } from '../engine/plain-panels.js';
 import {
   qualifying, planItems, quickStatementsV1, consentRecord, consentFits, mintOf, recordBatch, readPastedQids, pairPasted, verifyItem, matchItems, recordMinted, unrecordMinted, batchRows as batchRowsOf,
   batchName, CLASSES, STATEMENTS, MAX_ITEMS, WIKIDATA_SERVICE, QUICKSTATEMENTS, BOT_REQUESTS, WIKIPROJECT, EDIT_GROUPS, wdLang,
@@ -36,17 +37,24 @@ export function mountWikidata(host) {
   let searching = null, plan = null, planKey = null, collected = null, checked = [], note = { search: '', ids: '', batch: '' }, batchFor = null;
   const state = (more) => { host.state.wikidata = { ...(host.state.wikidata || {}), ...more }; };
 
-  // ---- the static words, once ----
+  // ---- the static words: once, and again when the page goes into or out of plain words (a scholar-facing workflow) ----
+  let saidPlain = null;
+  function statics() {
+  saidPlain = plainOn();
   q('intro').textContent = T.intro;
   q('search-h').textContent = T.searchHeading; q('gate-h').textContent = T.gateHeading; q('items-h').textContent = T.itemsHeading; q('batch-h').textContent = T.batchHeading; q('ids-h').textContent = T.idsHeading;
   q('consent-text').textContent = T.consentLabel;
-  q('statements').innerHTML = `<legend>${escapeHtml('Statements to write')}</legend>` + STATEMENTS.map((k) => `<label><input type="checkbox" data-statement="${k}" checked> ${escapeHtml(T.statements[k])}</label>`).join('');
+  // The boxes are made once (what is ticked stays); their words are said again.
+  if (!q('statements').children.length) q('statements').innerHTML = `<legend>${escapeHtml('Statements to write')}</legend>` + STATEMENTS.map((k) => `<label><input type="checkbox" data-statement="${k}" checked> <span></span></label>`).join('');
+  for (const k of STATEMENTS) q('statements').querySelector(`[data-statement="${k}"]`).nextElementSibling.textContent = T.statements[k];
   q('lang-label').textContent = T.langLabel;
   q('download').textContent = T.download;
   q('howto').innerHTML = T.howTo.map((h) => `<li>${escapeHtml(h)}</li>`).join('');
   q('links').innerHTML = [[QUICKSTATEMENTS, 'QuickStatements'], [EDIT_GROUPS, 'Edit groups'], [BOT_REQUESTS, 'Bot approval'], [WIKIPROJECT, 'WikiProject Historical Place']].map(([u, t]) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${t} ↗</a>`).join(' · ');
   q('paste-label').textContent = T.pasteLabel; q('check').textContent = T.check; q('user-label').textContent = T.userLabel; q('read').textContent = T.readMine; q('batch-label').textContent = T.batchChoose;
   q('record').textContent = T.record(0);
+  }
+  statics();
 
   // ---- what the work file holds ----
   const work = () => host.work();
@@ -78,6 +86,7 @@ export function mountWikidata(host) {
   async function draw() {
     const n = ++drawing;
     const w = work();
+    if (saidPlain !== plainOn()) statics();
     el.hidden = !w;
     // Closed, the panel asks nothing: reading the places (the worker's gather) makes the page busy, and the review's
     // keys do nothing while it is (the match review's e2e found a key lost that way, 15 October 2026).
