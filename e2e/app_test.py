@@ -4746,14 +4746,14 @@ def map_your_data_checks(pw, url, tmp):
         page.check('input[name="review-output"][value="dataset"]')
         n = len(consoled)
         s = run('#finish')
-        soon(page, "() => /export the suggestions first/.test(document.getElementById('methodos-message').textContent)", 10)
+        soon(page, "() => /do not yet say which suggestion they answer: press “Save the list of suggestions”/.test(document.getElementById('methodos-message').textContent)", 10)
         unexported = track()
         page.click('#export-candidates')
         until(page, "() => !!window.__plato.candidates && !!window.__plato.candidates.setIri", 15)
         s = run('#finish'); step_is('relate', 'done', 30)
         r['related'] = saved(s, '.krisis-dataset.json')
         e = mydata_ends(json.loads(r['related'].read_text())); r['related identities'] = e['identities']
-        return (unexported['steps'].get('relate') == 'current' and 'export the suggestions first' in unexported['message']
+        return (unexported['steps'].get('relate') == 'current' and 'do not yet say which suggestion they answer: press “Save the list of suggestions”, under the review, first' in unexported['message']
                 and e['contained'] == 10 and e['region identities'] == 6 and e['regions promoted'] and e['geometries from the stub'] == [] and track()['steps'].get('locate') == 'current'), \
             {'before export': unexported['message'][:220], 'ends': e, 'steps': track()['steps']}
     attempt('Map your data: Finish before the candidates are exported is not counted as recording the regions (said why); after, the dataset has each place ContainedIn its parish and each region\'s identity promotedFrom its candidate, no place yet located, and the workflow waits at the matched places\' locations', relate)
@@ -8246,6 +8246,59 @@ def myd_door_checks(pw, url, tmp):
               and inside['offerTop'] >= 0 and inside['offerBottom'] <= inside['height'])
         return ok, {'outside a workflow': {k: outside[k] for k in ('offer', 'primary')}, 'at the regions step': {k: inside[k] for k in ('offer', 'primary', 'offerTop', 'offerBottom', 'height', 'current')}}
     attempt('Map your data, the regions: at the regions step, the dataset chosen, the offer of the region review is in view and "Review the regions level by level" is the primary button; outside a workflow it is offered, not as the primary one', regions_offered)
+
+    # ---- The World Historical Gazetteer, asked for as the workflow is begun (src/methodos/whg-ask.js) ----
+    # The page's policy is written as it loads, so a site allowed later needs a reload: asked at the start, the reload comes
+    # before any work. window.__platoCsp.origins is the policy of this load, as its first script wrote it.
+    WHG_ASKED = '''() => { const $ = (id) => document.getElementById(id), v = (e) => !!e && !e.hidden && !e.closest('[hidden]') && !!e.getClientRects().length, a = $('whg-ask'), t = $('methodos-tracker');
+      let grant = null; try { grant = ((JSON.parse(localStorage.getItem('plato-tools.permissions') || '{}').grants || {})['gazetteer:whg'] || {}).state || null; } catch (e) { grant = 'unreadable'; }
+      return { shown: v(a), kind: (a && a.dataset.kind) || null, heading: v(a) ? $('whg-ask-h').textContent : null, why: v(a) ? $('whg-ask-why').textContent : null, what: v(a) ? $('whg-ask-what').textContent : null,
+        buttons: v(a) ? [...a.querySelectorAll('button')].filter(v).map((b) => b.textContent) : [], said: v($('whg-ask-said')) ? $('whg-ask-said').textContent : null,
+        status: (t && !t.hidden && t.dataset.status) || null, recipe: (t && !t.hidden && t.dataset.recipe) || null, origins: (window.__platoCsp || {}).origins || null, grant }; }'''
+    WHG_SITES = ['https://whgazetteer.org', 'https://www.whgazetteer.org']
+    def begun(page):
+        page.click('#methodos-quick', timeout=T(15) * 1000)
+        until(page, "document.getElementById('methodos-tracker').dataset.status === 'pending' && !document.getElementById('whg-ask').hidden", 15)
+        return page.evaluate(WHG_ASKED)
+    def loaded_again(page):
+        s = wait_state(page, lambda s: s.get('phase') == 'ready' and s.get('canary') in ('enforced', 'not-enforced'), T(30), 'ready again')
+        if s.get('phase') != 'ready': raise RuntimeError(f'the page is not ready: {s.get("phase")}')
+        until(page, "document.getElementById('methodos-tracker').dataset.status === 'pending'", 15)   # the workflow, taken up where it was left
+        page.wait_for_timeout(400)
+        return page.evaluate(WHG_ASKED)
+
+    def whg_asked_at_the_start():
+        page = fresh()
+        asks = []
+        page.on('request', lambda q: asks.append(q.url) if 'whgazetteer.org' in q.url else None)
+        before = page.evaluate(WHG_ASKED)                            # no workflow: nothing is asked, and the policy holds no other site
+        asked = begun(page)                                          # Map your data begun, before any file: the card
+        with page.expect_navigation(timeout=T(30) * 1000): page.click('#whg-ask-yes')
+        after = loaded_again(page)
+        page.click('#whg-ask-yes', timeout=T(10) * 1000)             # "Carry on"
+        gone = page.evaluate(WHG_ASKED)
+        ok = (not before['shown'] and before['origins'] == [] and before['grant'] is None and before['status'] is None
+              and asked['shown'] and asked['kind'] == 'allow' and asked['heading'] == 'Allow the World Historical Gazetteer now?'
+              and 'Step 4 of this workflow, “Find your places in WHG”' in (asked['why'] or '') and (asked['what'] or '').startswith('Nothing is sent by allowing it.')
+              and asked['buttons'] == ['Allow, and load the page again', 'Decide later'] and asked['origins'] == [] and asked['grant'] is None and asked['recipe'] == 'map-your-data'
+              and after['shown'] and after['kind'] == 'allowed' and after['heading'] == 'The World Historical Gazetteer is allowed' and after['buttons'] == ['Carry on']
+              and sorted(after['origins'] or []) == WHG_SITES and after['grant'] == 'allowed' and after['status'] == 'pending' and after['recipe'] == 'map-your-data'
+              and not gone['shown'] and gone['status'] == 'pending' and asks == [])
+        return ok, {'before any workflow': before, 'the workflow begun': asked, 'allowed, and loaded again': after, 'after "Carry on"': gone, 'requests to WHG': asks}
+    attempt('Map your data, the gazetteer asked for up front: begun, a card asks whether to allow the World Historical Gazetteer, naming the step that will use it; "Allow, and load the page again" records the permission and loads the page once, the workflow still there and the policy of that load holding the gazetteer\'s two sites, where before it held none; nothing is sent to it', whg_asked_at_the_start)
+
+    def whg_decided_later():
+        page = fresh()
+        asked = begun(page)
+        page.click('#whg-ask-later', timeout=T(10) * 1000)
+        later = page.evaluate(WHG_ASKED)
+        page.reload()
+        again = loaded_again(page)                                   # the same workflow, taken up in the same tab: not asked again
+        ok = (asked['shown'] and asked['kind'] == 'allow'
+              and not later['shown'] and (later['said'] or '').startswith('You will be asked at the step that looks your places up.') and later['grant'] is None and later['status'] == 'pending'
+              and not again['shown'] and again['grant'] is None and again['origins'] == [] and again['status'] == 'pending' and again['recipe'] == 'map-your-data')
+        return ok, {'asked': asked, 'after "Decide later"': later, 'after a reload': again}
+    attempt('Map your data, the gazetteer asked for up front: "Decide later" allows nothing and takes the card away, with a line that says the question comes at the lookup; the page reloaded, the workflow is there, nothing is allowed, the policy holds no other site, and the card does not come back', whg_decided_later)
 
     for ctx in made:
         try: ctx.close()

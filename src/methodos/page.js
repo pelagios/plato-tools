@@ -17,6 +17,7 @@ import { outputStore } from './outputs.js';
 import { stepAt, currentInput, startFiles, keptBy, keptFor, keptWords, distinct, projectWords, notKept } from './seams.js';
 import { regionsSettled, notReviewed, relateProblem, unexported, reviewDiffers, writesItself, columnsProblem } from '../engine/methodos/containment.js';
 import { stepMark, whereWords, lower } from './layout.js';
+import { whgAsk as whgUpFront, WHG_ASK, WHG_OPS } from './whg-ask.js';
 import { lossyWords, toolTip, PLAIN_WAITS, PLAIN_MAP, PLAIN_PUBLISH, plainPart, publishNext, PRESS_SAVE, onlyDecisions } from '../engine/plain.js';
 import { whyWords, shareLink, ENROL, WorkbenchError, WORDS, capWords } from '../engine/workbench.js';
 import { stateOf, fromSnapshot } from './whg.js';
@@ -102,7 +103,7 @@ const TOOL_LINKS = {
 };
 // The steps that ask the World Historical Gazetteer, which answers only queries that carry an account's token; its site; and
 // the example files the page offers in step 1 (index.html, #try-files: the browser checks read the two addresses together).
-const WHG_STEPS = new Set(['lookup', 'lookup.levels']);
+const WHG_STEPS = WHG_OPS;   // the steps that ask the World Historical Gazetteer (whg-ask.js)
 const WHG_SITE = 'https://whgazetteer.org/';
 const EXAMPLES = './try/plato-tools-try-files.zip';
 /**
@@ -1232,13 +1233,58 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     failed: (s) => `Failed: ${s.error}${/[.!?]$/.test(s.error) ? '' : '.'} Nothing is lost: run this step again.${s.partial ? ' What it had done is kept, to begin from.' : ''}`,
     cancelled: (s) => `Stopped by you: run this step again when you are ready.${s.partial ? ' What it had done is kept, to begin from.' : ''}`,
   };
+  // ---- The World Historical Gazetteer, asked for as the workflow is begun (whg-ask.js; index.html, #whg-ask) ----
+  // The page's policy is written as it loads, so a site allowed later needs a reload: asked here, before any work, the
+  // reload costs nothing, and the policy of that load holds the gazetteer. "Decide later" (of this workflow) and "the page
+  // was loaded again for this" are the tab's own (sessionStorage): they are not the workflow's record.
+  const askEl = document.getElementById('whg-ask'), askSaid = document.getElementById('whg-ask-said');
+  const ASK_LATER = 'plato-tools.methodos.whg-ask-later', ASK_ALLOWED = 'plato-tools.methodos.whg-ask-allowed';
+  const tabGet = (k) => { try { return sessionStorage.getItem(k); } catch { return null; } };
+  const tabSet = (k, v) => { try { if (v === null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, v); } catch { /* refused: asked again */ } };
+  let asked = null, askFor = null, laterHere = null, askOf = [null, null];
+  // Drawn again as it was last asked (a permission decided, a button of the card pressed): the card alone, not the tracker.
+  const redrawWhgAsk = () => drawWhgAsk(...askOf);
+  function drawWhgAsk(steps, id = null) {
+    if (!askEl) return;
+    askOf = [steps, id];
+    const later = id !== null && (laterHere === id || tabGet(ASK_LATER) === id), just = tabGet(ASK_ALLOWED) === '1';
+    asked = steps && page.whg ? whgUpFront({ steps, ...page.whg(), later, justAllowed: just }) : null;
+    askFor = id;
+    // The confirmation is shown once, for the workflow it was allowed in: with nothing to say of it any more, it is forgotten.
+    if (just && asked?.kind !== 'allowed' && steps && page.whg?.().inPolicy) tabSet(ASK_ALLOWED, null);
+    askEl.hidden = !asked;
+    if (askSaid && (asked || !steps)) { askSaid.hidden = true; askSaid.textContent = ''; }
+    if (!asked) { delete askEl.dataset.kind; return; }
+    const w = WHG_ASK[asked.kind];
+    askEl.dataset.kind = asked.kind;
+    askEl.querySelector('#whg-ask-h').textContent = w.heading;
+    askEl.querySelector('#whg-ask-why').textContent = w.why(asked);
+    askEl.querySelector('#whg-ask-what').textContent = w.what;
+    askEl.querySelector('#whg-ask-yes').textContent = w.yes;
+    const lb = askEl.querySelector('#whg-ask-later'); lb.hidden = !w.later; lb.textContent = w.later || '';
+  }
+  askEl?.querySelector('#whg-ask-yes').addEventListener('click', async () => {
+    if (!asked) return;
+    if (asked.kind === 'allowed') { tabSet(ASK_ALLOWED, null); redrawWhgAsk(); return; }
+    // Allowed by this click and no other; then the page loads again (permissions.reload keeps what is open, and asks first
+    // if anything would be lost: then the card stays, as "Load the page again now?").
+    tabSet(ASK_ALLOWED, '1');
+    const went = await (asked.kind === 'allow' ? page.allowWhg() : page.reloadPage());
+    if (!went) redrawWhgAsk();
+  });
+  askEl?.querySelector('#whg-ask-later').addEventListener('click', () => {
+    if (!asked) return;
+    laterHere = askFor; tabSet(ASK_LATER, askFor); tabSet(ASK_ALLOWED, null);
+    redrawWhgAsk();
+    if (askSaid) { askSaid.textContent = WHG_ASK.laterSaid; askSaid.hidden = false; }
+  });
   function render(focus) {
     bannerNow();
     onScope?.();   // the Scope shown in the rail is the workflow's, or none (src/scope-page.js)
     // A workflow shared from WHG (viewShared) is shown in place of this browser's own, read-only, until closed or copied.
     const shown = viewing ? viewing.read.record : wf || changed?.record;
     const own = viewing ? null : changed;   // what the version rule said of this browser's own workflow, if it is shown
-    if (!pending && !shown) { tracker.hidden = true; delete tracker.dataset.status; delete tracker.dataset.plain; closeStrip(); stripAt = null; onStep(null); sharedEl.hidden = true; stepButtons(); return; }
+    if (!pending && !shown) { tracker.hidden = true; delete tracker.dataset.status; delete tracker.dataset.plain; closeStrip(); stripAt = null; onStep(null); sharedEl.hidden = true; stepButtons(); drawWhgAsk(null); return; }
     tracker.hidden = false;
     let steps, at, rows;
     if (!shown) {
@@ -1258,6 +1304,8 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
       });
       tracker.dataset.status = viewing ? 'shared' : own ? 'changed' : shown.status;
     }
+    // The World Historical Gazetteer, asked for now if a step to come will ask it (whg-ask.js): this browser's own workflow only.
+    drawWhgAsk(viewing || own ? null : steps.map((x) => ({ op: x.op, title: x.title, st: x.state === 'done' ? 'done' : at && x.id === at.id ? 'current' : 'todo' })), (shown || pending).id);
     // In plain words (a recipe's `plain`, Map your data): no tool's name in the headline, the act first in each row.
     const plain = !!(shown ? recipeOf(shown) : RECIPES[pending.key])?.plain;
     if (plain) tracker.dataset.plain = ''; else delete tracker.dataset.plain;
@@ -2059,6 +2107,6 @@ export function mountMethodos({ banner, interview, tracker, store, onStep, onSco
     return { step: s.id, value: typeof s.options?.target === 'string' ? s.options.target : null, choices: asks(s) ? recipeOf(wf).asks?.target?.choices || [] : [] };
   };
   const stepNow = () => { const s = wf && !changed && !viewing ? atStep() : null; return s ? { id: s.id, op: s.op, answers: { ...wf.answers } } : null; };
-  return { open, chosen, placed, mapped, began, ended, dropped, keepChanged, detected, baseChanged, targetAt, id: () => wf?.id || null, step: stepNow, following: () => !!(wf || pending || changed), takenUp: () => takenUp,
+  return { open, chosen, placed, mapped, began, ended, dropped, keepChanged, permissionsChanged: () => redrawWhgAsk(), detected, baseChanged, targetAt, id: () => wf?.id || null, step: stepNow, following: () => !!(wf || pending || changed), takenUp: () => takenUp,
     scope: scopeNow, setScope, scoped: () => !!(wf || pending || changed), viewShared, openFromWhg, shareTokens: () => [...shareTokens], tokenGiven };
 }

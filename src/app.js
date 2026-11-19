@@ -1473,6 +1473,11 @@ methodos = mountMethodos({
     // The matching a workflow's step kept, shown again for the table chosen, as "Use a saved matching…" shows one: not while the file is still being looked at.
     applyMapping: (m, name) => { if (!isTable(input) || state.phase === 'detecting') return false; requestColumns(m, name); return true; },
     review: () => (work ? { text: serialiseWork(work), name: workName } : null),
+    // The World Historical Gazetteer, asked for as a workflow is begun (src/methodos/whg-ask.js): how its permission stands; allowed by
+    // the card's click and the page loaded again (permissions.reload keeps what is open, and asks first if anything would be lost).
+    whg: () => ({ state: permissions.state('gazetteer', 'whg'), inPolicy: permissions.allowed('gazetteer', 'whg'), enforced: permissions.canaryState()?.enforced !== false }),
+    allowWhg: () => { permissions.set('gazetteer', 'whg', 'allowed'); return permissions.reload(); },
+    reloadPage: () => permissions.reload(),
     // The matched places' locations (the step "Use the locations of the places you matched"): counted, then taken, by the engine;
     // and who takes them, the reviewer's name the page already holds (asked once, for the review), or null with why.
     locate: (list, workText, options) => locateRun(list, workText, options),
@@ -1707,6 +1712,8 @@ permissions.onChange(() => { if (sharedHeld) openShared(); });
 // "Keep working data" turned off in the Permissions panel: Methodos's records go at once, not at its next save.
 let keptBefore = permissions.keepWorkingData();
 permissions.onChange(() => { const now = permissions.keepWorkingData(); if (now !== keptBefore) { keptBefore = now; methodos.keepChanged(now); progressKeepChanged(); if (!now) { kept.forget(); keptOffer(null); } } });
+// A permission decided, here or in the panel: the workflow's question about the World Historical Gazetteer follows it.
+permissions.onChange(() => methodos?.permissionsChanged());
 // The kept file, offered (keptAtStart, above).
 keptAtStart();
 
